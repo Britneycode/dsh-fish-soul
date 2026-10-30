@@ -29,7 +29,7 @@
 | 6 | 读自动、写显式（工具 + 空闲整理） | 纯工具召回会漏；纯每轮提取丢时序且费钱 |
 | 7 | 单角色，但数据带 `characterId` | 一个字段的代价，避免将来迁移 |
 | 8 | 时间线进 MVP：每日日程 + 真实时间计时 | 这是唯一无法被现成插件替代的部分 |
-| 9 | 主动消息：事件驱动优先、每天 ≤2 条、醒着时段、只发自己与自建群 | 小号主动私信真人是封号与社交双重风险 |
+| 9 | 主动消息：事件驱动优先、自发每天 ≤10 条（可调 0–50，用户约的提醒不占额度）、醒着时段、只发自己与自建群 | 小号主动私信真人是封号与社交双重风险 |
 | 10 | 检索 = BM25 + 语义向量 + RRF；向量**只用远程 OpenAI 兼容接口** | DeepSeek 无 embedding 端点；不做本地 ONNX |
 | 11 | MVP 在本机 Windows 验收 | 抖音插件 Windows-only；SnowLuma 已在本地跑通 |
 | 12 | 实现由 AI 写、用户验收 | — |
@@ -39,7 +39,7 @@
 | 插件 | 状态 | 职责 |
 |---|---|---|
 | **dsh-fish-soul**（新建） | 要写 | 人格卡、按人记忆、日程与时间线、事件驱动主动 |
-| `dsh-qq-bridge` | 保留 | 收发 QQ 消息 |
+| `dsh-qq-bridge` | **v0.3 起停用** | 收发 QQ 改由本插件直连 SnowLuma（OneBot v11 WebSocket），两者同时启用会重复回复 |
 | `dsh-feiyu-mood` | 保留不动 | 七维心情与衰减（内核 MVP 不重复实现情绪） |
 | `dsh-fish-memory` | 保留，只读对照 | 验证期比较召回效果，确认内核不差后卸载 |
 | `dsh-speak-up` | **停用** | 与内核的主动推进冲突，会重复发消息 |
@@ -47,7 +47,7 @@
 ## 4. 架构
 
 ```
-QQ ──> dsh-qq-bridge ──> DSH session ──> dsh-fish-soul
+QQ ──> SnowLuma(OneBot v11 WS) ──> dsh-fish-soul/channels ──> gateway ──> DSH session（每个私聊/群一条）
                                           ├── persona   静态人格（V3）
                                           ├── memory    按人记忆（SQLite）
                                           └── life      日程 / 待办 / 主动
@@ -293,11 +293,11 @@ CREATE TABLE vec (
 1. **每日日程**：每天首次 tick 时一次 LLM 调用，产出当天作息与忙闲时段（含 `dailyMoodTone` 基调文本），写入 `day`。
 2. **15 分钟 tick**：计算当前"在忙 / 空闲 / 睡了"，仅更新内存态，不打扰对话。tick 带 `isTickRunning` 互斥锁：上一轮 tick 的 LLM 调用未返回则直接跳过本轮（加速模式下防重入，审查 #03）。
 3. **主动开口**：
-   - 事件驱动优先：`pending` 到期 → 生成一句话 → 按 `channel_id` 经 `qq-bridge` 投递
+   - 事件驱动优先：`pending` 到期 → 生成一句话 → 按 `channel_id` 经 gateway 向对应会话注入一条 `fish-soul/proactive` 跟进，由模型生成后经 SnowLuma 发出
    - 时间驱动兜底：处在空闲时段且距上次互动 > N 小时
    - 情绪只影响语气，不作为触发条件
    - 投递目标白名单来自配置（见 §10.6），禁止凭 `owner_id` 盲发（审查 #01）
-4. **硬约束**：每天 ≤2 条（以 `day.proactive_count` 持久化计数，重启不丢，审查 #02）；仅 08:00–24:00；仅发用户本人与自建群；白名单真人只在先开口时回复。
+4. **硬约束**：自发（空闲兜底 + Dream 补写的待办）每天 ≤`dailyMaxCount`（默认 10，可调 0–50，以 `day.proactive_count` 持久化计数，重启不丢，审查 #02），两次自发至少间隔 60 虚拟分钟；用户自己约的提醒（`pending.origin='user'`）不占额度；仅 08:00–24:00；仅发用户本人与自建群；白名单真人只在先开口时回复。
 5. **时间加速**：`FISH_TIME_SCALE=1000` 时 10 分钟模拟 3 天，用于验收第四条。时钟隔离规范见 §10.5。
 6. **Dream 整理的并发隔离（审查 #08）**：维护 `Map<owner_id, AbortController>`；某 `owner_id` 的 Dream 整理进行中（LLM 归纳未返回）时收到该用户实时消息，立即 `abort()` 中断并回滚未提交结果，更新 `last_seen_at` 后优先响应实时对话；Dream 全局带 `isDreamRunning` 锁，加速模式下两次 Dream 至少间隔真实物理 30 秒。
 
@@ -312,7 +312,7 @@ CREATE TABLE vec (
 | `memory`/`person`/`day`/`pending` 全部时间戳 | 虚拟钟 `virtualClock.now()` | SQL 禁用 `CURRENT_TIMESTAMP`/`strftime('%s','now')`，一律 JS 绑定参数传入 |
 | 艾宾浩斯衰减 Δt、Dream 空闲判定、`pending.due_at` 比对 | 虚拟钟 | `importance<3` 按虚拟流逝天数衰减 |
 | 15 分钟 tick、每日日程生成 | 虚拟间隔 → `toRealIntervalMs(virtualMs, minRealMs=1000)` 换算真实定时器延迟 | `isTickRunning` 互斥锁，LLM 未返回跳过本轮 |
-| 主动消息风控冷却 | **真实物理钟** | 两次调 `qq-bridge` 的真实间隔 ≥15 秒，即使虚拟已跨天 |
+| 主动消息风控冷却 | **真实物理钟** | 两次主动投递的真实间隔 ≥15 秒，即使虚拟已跨天 |
 | embedding `timeoutMs: 800`、重建 32 条/分钟限速 | **真实物理钟** | 外部 HTTP 超时与 API 速率永远用真实毫秒 |
 
 ### 10.6 主动投递白名单配置（审查 #01）
@@ -323,7 +323,7 @@ CREATE TABLE vec (
 {
   "proactive": {
     "enabled": true,
-    "dailyMaxCount": 2,
+    "dailyMaxCount": 10,
     "activeHours": [8, 24],
     "idleTriggerHours": 6,
     "targets": {
@@ -339,9 +339,15 @@ CREATE TABLE vec (
 
 ### QQ
 
-`qq-bridge` 投递消息 → 内核在 `agent/pre-step` 取发送者 QQ 号 → 查 `person` 得 `canonical_id` → 按人取记忆；群聊额外注入群内近期摘要。
+**v0.3 起直连 SnowLuma**（`lib/channels/snowluma.js` + `lib/gateway.js`），不再依赖 `dsh-qq-bridge`：
 
-> **待验证**：`qq-bridge` 把发送者标识放在消息对象的哪个字段。实现第一步就要确认，否则"按人"落不了地。
+- **连接**：全局 WebSocket 连 SnowLuma 的 OneBot v11 服务（`qq.wsUrl` + `?access_token=`），断线 1s→30s 退避重连；`get_login_info` 取机器人 QQ 号。
+- **会话映射**：每个私聊 / 群一条 DSH 会话（`chat_session` 表），首次消息时 `agents.create`，之后 `resume`；会话只挂默认预设，工具收窄为 `remember`/`recall`/`forget`（`tools.guard` 兜底拒绝其他工具，含 `run_code`——故 PTC 执行器下 QQ 会话用不了记忆工具）。工作区默认独立的 `$DSH_HOME/fish-soul/workspace`，可在设置页改选。
+- **入站过滤**：私聊只收好友；群只收白名单群里 @ 机器人 / 引用机器人的消息，以及点名后 `followUpSeconds` 内同一人的 `followUpCount` 条跟进；其余消息与超过 `replyWindowMinutes` 的旧消息只写入记忆、不触发回复。同一会话 `batchMs` 内的连发合并为一轮。
+- **按人**：发送者 QQ 号由消息事件直接给出，随 followup 的 `source`（`fish-soul/qq`，含 `userId`/`speakers`）进入会话，`noteInteraction` 查 `person` 得 `canonical_id`；群聊瞬态块按发言人分摊召回预算。
+- **出站**：只对由本插件注入的轮次在 `turn/end` 时回发；模型输出 `[不回]` 则静默；空行分段（≤5 段）逐条发，群里引用点名那条；Markdown 图片仅限工作区与插件目录内的文件。
+- **迁移**：设置页「QQ 接入」→ 停用 `dsh-qq-bridge` → 填 SnowLuma 地址与 token、主人 QQ、群白名单 → 启用；「迁移旧会话」把旧会话登记进 `chat_session`。
+- `lib/channels/vendor/qq-bridge.js` 原样保留了 `dsh-qq-bridge` 1.4.2（MIT）中点名识别、正文提取、分段、图片提取等纯函数，附原许可证。
 
 ### 抖音
 
@@ -371,7 +377,7 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
 
 | 风险 | 影响 | 应对 |
 |---|---|---|
-| `qq-bridge` 不暴露发送者 ID | 按人记忆落不了地 | 先验证；不行则退化为按会话分，同时提 issue |
+| SnowLuma 协议变化 / 断线 | QQ 收发中断 | 只用 OneBot v11 标准动作；断线退避重连，设置页显示连接状态 |
 | meow 的代码结构与"按人"改动冲突 | fork 成本超预期 | 退路：自写 1,500–2,000 行，只抄 BM25 与衰减公式 |
 | 远程 embedding 不稳定 | 召回质量波动 | 全链路降级 BM25，不影响对话 |
 | 前缀缓存被打碎 | 成本上升 | 动态内容注入在最新用户消息前的瞬态块（§7），不走 section |
@@ -398,7 +404,8 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
   - **#07** 动态上下文改为注入在最新用户消息前的瞬态块（M1 先验证 DSH `systemPrompt.context` 落点），召回过滤补 `owner_id IN ('self', ?)`；
   - **#08** 向量写入收敛为单队列双优先级串行 Worker + `generation_id` 世代锁；Dream 绑定按 `owner_id` 的 `AbortController`；
   - **#09** 中文分词定为内置 `Intl.Segmenter` + 停用词表（零依赖，禁 `nodejieba`），艾宾浩斯衰减明确为 BM25 初筛后 JS 层计算、半衰期 7 虚拟日；
-  - **#10** 删除 `day.mood_seed` 独立列，当日基调并入 `plan_json.dailyMoodTone` 由本插件自消费，不动 `dsh-feiyu-mood`。- 2026-10-30（v0.2.0 代码修正，"零回退迁移"审计）——
+  - **#10** 删除 `day.mood_seed` 独立列，当日基调并入 `plan_json.dailyMoodTone` 由本插件自消费，不动 `dsh-feiyu-mood`。
+- 2026-10-30（v0.2.0 代码修正，"零回退迁移"审计）——
   - 会话按 sessionId 隔离，瞬态块在 `text()` 内同步组装（BM25 当场算 + 预取向量），消除"上一轮 / 别人的记忆"串注入；
   - 未识别发送者归入 `user:unknown`，不再回退为主人；工具调用只读查人，不再刷高 `interaction_count`；`forget` 加归属校验；
   - 配置改为"宿主默认值为底、设置文件覆盖"的深合并；工具参数改为标准 JSON Schema；
@@ -406,3 +413,8 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
   - 人格：支持 PNG（ccv3/chara）卡、`{{char}}`/`{{user}}` 宏、`system_prompt`/`first_mes`/`post_history_instructions`、世界书（constant 进静态段，关键词条目进瞬态块）；
   - 新增 `POST /import/memories` 记忆导入（去重、按 QQ 号归属）；
   - 自走层：非白名单待办不再阻塞队列，到期后在对方下次开口时自然提起；投递失败顺延重试 3 次；Dream 加水位与去重，可真正中断 LLM；重启后恢复互动表与虚拟钟。
+- v0.3.0（直连 SnowLuma）——
+  - 新增 `lib/channels/`（OneBot v11 归一化 + SnowLuma WebSocket 客户端）与 `lib/gateway.js`（私聊/群 ↔ DSH 会话映射、入站过滤与合并、出站分段回发、主动开口注入），停用 `dsh-qq-bridge`；
+  - `soul.db` 新增 `chat_session` 表、`pending.origin` 列；配置新增 `qq`、`sessions` 段，删除 `qqBridge`；
+  - 主动配额：自发默认 10 条/天（0–50 可调），用户约的提醒不占额度，自发间隔 ≥60 虚拟分钟；风控 15 秒真实冷却与白名单对所有主动消息生效；
+  - 设置页新增「QQ 接入」页签（连接状态、地址/token、主人 QQ、群白名单、跟进窗口、工作区、迁移、会话列表）；新路由 `GET /channels/state`、`POST /channels/qq-config`、`POST /sessions/workspace`、`POST /sessions/migrate`。

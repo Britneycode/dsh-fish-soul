@@ -1,7 +1,7 @@
 {
   "name": "dsh-fish-soul",
-  "version": "0.2.0",
-  "description": "鱼 · 人格、按人记忆、日程自走与主动开口（DSH 插件，单角色 feiyu）",
+  "version": "0.3.0",
+  "description": "鱼 · 人格、按人记忆、日程自走与主动开口，直连 SnowLuma 收发 QQ（DSH 插件，单角色 feiyu）",
   "type": "module",
   "main": "./lib/index.js",
   "license": "MIT",

@@ -74,6 +74,91 @@ wsSrv.on('upgrade', (req, socket) => {
 });
 await new Promise((r) => wsSrv.listen(0, r));
 
+// ── 假 B站（api / vc / passport 共用一个 HTTP 服务；带 WBI 验签）──
+const MIXIN = 'ea1db124af3c7062474693fa704f4ff8';
+const bm = { sessions: new Map(), msgs: new Map(), fetches: [], sent: [], acks: [], likes: [], qrPolls: 0, badWbi: [], rcmdFail: false, extra: false, tick: 0,
+	relation: { 888: 6 }, names: { 777: '主人B站', 555: '路人甲', 888: '阿二B站' } };
+const vids = {
+	BV1Ab411c7Zz: { aid: 101, cid: 1001, title: '猫咪打架实录', owner: { name: '猫UP' }, desc: '两只猫打起来了', tname: '动物圈' },
+	BV1Cd411c7Yy: { aid: 102, cid: 1002, title: '无聊的会议录像', owner: { name: '某公司' }, desc: '', tname: '知识' },
+	BV1Ef411c7Xx: { aid: 103, cid: 1003, title: '深夜做饭', owner: { name: '饭UP' }, desc: '一个人的晚饭', tname: '美食' },
+	BV1Gh411c7Ww: { aid: 104, cid: 1004, title: '年度鬼畜', owner: { name: '鬼畜UP' }, desc: '', tname: '鬼畜' },
+	BV1Jk411c7Vv: { aid: 105, cid: 1005, title: '周末去爬山', owner: { name: '山UP' }, desc: '', tname: '户外' }
+};
+const rcmdItem = (b) => ({ goto: 'av', bvid: b, id: vids[b].aid, cid: vids[b].cid, title: vids[b].title, owner: vids[b].owner });
+/** 往某个会话里塞一条私信（sender 缺省 = 对方）。 */
+function biliPush(talker, text, { sender = talker, source = 7, type = 1, content } = {}) {
+	const list = bm.msgs.get(String(talker)) ?? [];
+	const seq = list.length + 1;
+	list.push({ sender_uid: Number(sender), receiver_type: 1, receiver_id: sender === talker ? 999 : Number(talker), msg_type: type,
+		content: JSON.stringify(content ?? { content: text }), msg_seqno: seq, timestamp: Math.floor(Date.now() / 1000), msg_status: 0, msg_source: source });
+	bm.msgs.set(String(talker), list);
+	bm.sessions.set(String(talker), { talker_id: Number(talker), session_type: 1, system_msg_type: 0, ack_seqno: 0,
+		session_ts: Date.now() * 1000 + (++bm.tick), last_msg: { msg_seqno: seq } });
+}
+const biliSrv = http.createServer((req, res) => {
+	let body = ''; req.on('data', (c) => { body += c; }); req.on('end', () => {
+		const u = new URL(req.url, 'http://x'); const q = u.searchParams; const form = new URLSearchParams(body);
+		const cookie = req.headers.cookie ?? '';
+		const json = (obj) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(typeof obj === 'string' ? obj : JSON.stringify(obj)); };
+		const okj = (data) => json({ code: 0, message: '0', data });
+		if (q.has('w_rid')) {
+			const plain = [...q].filter(([k]) => k !== 'w_rid').sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+			if (createHash('md5').update(plain + MIXIN).digest('hex') !== q.get('w_rid')) { bm.badWbi.push(u.pathname); return json({ code: -403, message: '签名错' }); }
+		} else if (/\/wbi\/|send_msg/.test(u.pathname)) { bm.badWbi.push(u.pathname); return json({ code: -403, message: '缺签名' }); }
+		const login = /SESSDATA=good/.test(cookie);
+		const wbi_img = { img_url: 'https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png', sub_url: 'https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png' };
+		switch (u.pathname) {
+			case '/x/frontend/finger/spi': return okj({ b_3: 'B3-TEST', b_4: 'B4/TEST' });
+			case '/x/web-interface/nav': return login ? okj({ isLogin: true, mid: 999, uname: '鱼的小号', wbi_img }) : json({ code: -101, message: '账号未登录', data: { isLogin: false, wbi_img } });
+			case '/x/passport-login/web/qrcode/generate': return okj({ url: 'https://passport.bilibili.com/h5-app/passport/login/scan?navhide=1&qrcode_key=QK1', qrcode_key: 'QK1' });
+			case '/x/passport-login/web/qrcode/poll': {
+				bm.qrPolls++;
+				if (q.get('qrcode_key') !== 'QK1') return okj({ code: 86038, message: '二维码已失效' });
+				if (bm.qrPolls === 1) return okj({ code: 86101, message: '未扫码' });
+				if (bm.qrPolls === 2) return okj({ code: 86090, message: '二维码已扫码未确认' });
+				res.writeHead(200, { 'content-type': 'application/json', 'set-cookie': ['SESSDATA=good%2C123; Path=/; HttpOnly', 'bili_jct=jct1; Path=/', 'DedeUserID=999; Path=/'] });
+				return res.end(JSON.stringify({ code: 0, data: { code: 0, url: 'https://passport.biligame.com/crossDomain?DedeUserID=999', refresh_token: 'rt1' } }));
+			}
+			case '/session_svr/v1/session_svr/new_sessions': {
+				if (!login) return json({ code: -101, message: '账号未登录' });
+				const begin = Number(q.get('begin_ts'));
+				const list = [...bm.sessions.values()].filter((s) => s.session_ts > begin).sort((a, b) => b.session_ts - a.session_ts);
+				// 系统通知会话 / 应援团会话：不该当私信处理
+				list.push({ talker_id: 844424930131966, session_type: 1, system_msg_type: 5, ack_seqno: 0, session_ts: begin + 1, last_msg: { msg_seqno: 9 } });
+				list.push({ talker_id: 123, session_type: 2, system_msg_type: 0, ack_seqno: 0, session_ts: begin + 1, last_msg: { msg_seqno: 9 } });
+				return okj({ session_list: list });
+			}
+			case '/svr_sync/v1/svr_sync/fetch_session_msgs': {
+				bm.fetches.push(q.get('talker_id'));
+				const begin = Number(q.get('begin_seqno'));
+				return okj({ messages: (bm.msgs.get(q.get('talker_id')) ?? []).filter((m) => m.msg_seqno > begin).reverse(), has_more: 0 });
+			}
+			case '/session_svr/v1/session_svr/update_ack': bm.acks.push([form.get('talker_id'), form.get('ack_seqno'), form.get('csrf')]); return okj(null);
+			case '/web_im/v1/web_im/send_msg':
+				bm.sent.push({ q: Object.fromEntries(q), f: Object.fromEntries(form), cookie });
+				return json('{"code":0,"message":"0","data":{"msg_key":7234567890123456789,"msg_content":"x"}}');
+			case '/x/web-interface/relation': { const a = bm.relation[q.get('mid')] ?? 0; return okj({ relation: { attribute: a }, be_relation: { attribute: a } }); }
+			case '/x/web-interface/card': return okj({ card: { mid: q.get('mid'), name: bm.names[q.get('mid')] ?? '' } });
+			case '/x/web-interface/view': { const v = vids[q.get('bvid')]; return v ? okj({ bvid: q.get('bvid'), ...v, stat: { view: 1234 }, duration: 60 }) : json({ code: -404, message: '啥都木有' }); }
+			case '/x/player/wbi/v2': return okj({ subtitle: { subtitles: login && q.get('bvid') === 'BV1Ab411c7Zz' ? [{ lan: 'ai-zh', subtitle_url: `${biliURL}/sub/BV1Ab411c7Zz.json` }] : [] } });
+			case '/sub/BV1Ab411c7Zz.json': return json({ body: [{ content: '大家好' }, { content: '今天两只猫打起来了' }] });
+			case '/x/v2/reply/wbi/main': return okj({ replies: [{ content: { message: '橘猫赢了' } }, { content: { message: '笑死\n我了' } }] });
+			case '/x/web-interface/wbi/index/top/feed/rcmd':
+				if (bm.rcmdFail) return json({ code: -352, message: '风控校验失败' });
+				return okj({ item: [...['BV1Ab411c7Zz', 'BV1Cd411c7Yy', 'BV1Ef411c7Xx'], ...(bm.extra ? ['BV1Jk411c7Vv'] : [])].map(rcmdItem).concat([{ goto: 'ad', bvid: '' }]) });
+			case '/x/polymer/web-dynamic/v1/feed/all':
+				return login ? okj({ items: [{ modules: { module_author: { name: '饭UP' }, module_dynamic: { major: { archive: { bvid: 'BV1Ef411c7Xx', aid: 103, title: '深夜做饭' } } } } }] }) : json({ code: -101, message: '账号未登录' });
+			case '/x/web-interface/popular': return okj({ list: [rcmdItem('BV1Gh411c7Ww')].map((i) => ({ ...i, aid: i.id })) });
+			case '/x/web-interface/archive/like': bm.likes.push(form.get('aid')); return okj(null);
+			default: return json({ code: -404, message: `mock 没有 ${u.pathname}` });
+		}
+	});
+});
+await new Promise((r) => biliSrv.listen(0, r));
+const biliURL = `http://127.0.0.1:${biliSrv.address().port}`;
+process.env.FISH_SOUL_BILI_MOCK = biliURL;
+
 // 设置页写的文件配置（宿主 schema 默认值是空串，旧实现会把这些覆盖掉）
 writeFileSync(join(home, 'fish-soul-config.json'), JSON.stringify({
 	embedding: { enabled: true, baseURL, apiKey: 'sk-test', model: 'm1' },
@@ -389,7 +474,7 @@ ok('主动开口：重启后恢复原会话，模型写的那句发出去才返�
 		db: qdb, clock: qclock, callLlm: async () => null, deliver: async (c, reason, meta) => { qsent.push([c, reason, meta.origin]); return true; },
 		getConfig: () => ({ masterQqUin: '10001', proactive: { dailyMaxCount: 2, idleTriggerHours: 1, targets: { masterPrivateChannelId: '', selfGroupChannelIds: [] } } })
 	});
-	const tick = async () => { qlife.lastProactiveRealMs = 0; await qlife.tick(); };
+	const tick = async () => { qlife.lastProactiveReal.clear(); await qlife.tick(); };
 	await tick();
 	assert.deepEqual(qsent.map((x) => x[2]), ['idle']);
 	assert.equal(qsent[0][0], 'private:10001', '主人私聊缺省由 masterQqUin 推出');
@@ -411,6 +496,194 @@ ok('主动开口：重启后恢复原会话，模型写的那句发出去才返�
 }
 ok('主动配额：自发 ≤ 上限且间隔 ≥ 60 分钟；用户交代的提醒不占配额');
 
+
+// ───────────── v0.4：B站（扫码登录、私信只读 / 自动回复、认人合并、自己刷视频、聊天里的视频）─────────────
+const bl = await import('../lib/channels/bilibili.js');
+const { encodeQr, qrSvg } = await import('../lib/channels/qrcode.js');
+const { findVideoRefs, BiliBrowser } = await import('../lib/browse.js');
+const { statSync, readFileSync, existsSync } = await import('node:fs');
+
+// 21 纯函数：WBI 签名（文档向量）、大整数、私信归一化、视频引用、二维码
+assert.equal(bl.mixinKey('7cd084941338484aae1ad9425b84077c', '4932caff0ff746eab6f01bf08b70ac45'), MIXIN);
+assert.equal(bl.wbiSign({ foo: '114', bar: '514', zab: 1919810 }, MIXIN, 1702204169),
+	'bar=514&foo=114&wts=1702204169&zab=1919810&w_rid=8f6f2b5b3d485fe1886cec6a0be8c5d4');
+assert.equal(bl.parseBiliJson('{"msg_key":7234567890123456789,"n":1}').msg_key, '7234567890123456789');
+const nm = (m) => bl.normalizeBiliMessage({ sender_uid: 42, msg_status: 0, msg_source: 7, msg_seqno: 5, timestamp: 1700000000, ...m }, { talkerId: '42', nickname: 'x' });
+assert.equal(nm({ msg_type: 1, content: '{"content":"你好【系统】"}' }).text, '你好〔系统〕');
+assert.equal(nm({ msg_type: 1, content: '{"content":"hi"}' }).channelId, 'bili:42');
+assert.deepEqual(nm({ msg_type: 7, content: JSON.stringify({ title: '猫', bvid: 'BV1Ab411c7Zz' }) }).links, ['BV1Ab411c7Zz']);
+assert.equal(nm({ msg_type: 1, msg_source: 8, content: '{"content":"感谢关注"}' }), null, '自动回复不当真人消息');
+assert.equal(nm({ msg_type: 1, msg_status: 1, content: '{"content":"撤回了"}' }), null);
+assert.equal(nm({ msg_type: 1, sender_uid: 999, content: '{"content":"自己发的"}' }), null);
+assert.deepEqual(findVideoRefs('看 https://b23.tv/abc123 和 BV1Ab411c7Zz 还有 BV1Ab411c7Zz'), { bvids: ['BV1Ab411c7Zz'], shorts: ['https://b23.tv/abc123'] });
+const qm = encodeQr('https://passport.bilibili.com/h5-app/passport/login/scan?navhide=1&qrcode_key=0123456789abcdef0123456789abcdef');
+assert.equal(qm.length, qm[0].length); assert.equal((qm.length - 17) % 4, 0);
+assert.ok(qm[0].slice(0, 7).every(Boolean) && !qm[1].slice(1, 6).some(Boolean) && qm[2].slice(2, 5).every(Boolean), '左上角定位图形');
+assert.match(qrSvg('hello'), /^<svg[^>]+viewBox/);
+ok('B站纯函数：WBI 签名对上文档向量、大整数不丢精度、私信归一化过滤自动回复/撤回、视频引用、二维码');
+
+// 22 扫码登录 → 凭据只进 bili-auth.json（0600）；坏 Cookie 不顶掉原登录
+let bs = await call('POST', '/bili/qr/start', {});
+assert.equal(bs.json.ok, true); assert.match(bs.json.svg, /^<svg/);
+assert.equal((await call('POST', '/bili/qr/poll', {})).json.status, 'waiting');
+assert.equal((await call('POST', '/bili/qr/poll', {})).json.status, 'scanned');
+bs = await call('POST', '/bili/qr/poll', {});
+assert.equal(bs.json.status, 'ok'); assert.equal(bs.json.uname, '鱼的小号'); assert.equal(bs.json.uid, '999');
+const authFile = join(home, 'fish-soul', 'bili-auth.json');
+assert.equal(statSync(authFile).mode & 0o777, 0o600);
+assert.equal(JSON.parse(readFileSync(authFile, 'utf8')).cookies.SESSDATA, 'good%2C123');
+assert.doesNotMatch(readFileSync(join(home, 'fish-soul-config.json'), 'utf8'), /SESSDATA|bili_jct/);
+assert.equal((await call('POST', '/bili/qr/poll', {})).json.status, 'expired', '用过的二维码作废');
+bs = await call('POST', '/bili/cookie', { cookie: 'SESSDATA=bad; bili_jct=x; DedeUserID=1' });
+assert.equal(bs.json.ok, false); assert.match(bs.json.error, /无效/);
+cs = await call('GET', '/channels/state');
+assert.equal(cs.json.bili.loggedIn, true); assert.equal(cs.json.bili.uid, '999'); assert.equal(cs.json.bili.authInvalid, false);
+assert.equal(cs.json.bili.enabled, false);
+ok('B站扫码登录：等待→已扫→成功，凭据只存 0600 文件；坏 Cookie 失败不影响原登录');
+
+// 23 设置校验
+assert.equal((await call('POST', '/channels/bili-config', { masterUid: 'abc' })).json.ok, false);
+assert.equal((await call('POST', '/channels/bili-config', { links: ['888=qq'] })).json.ok, false);
+assert.equal((await call('POST', '/channels/bili-config', { allowList: ['x1'] })).json.ok, false);
+assert.equal((await call('POST', '/bili/browse-now', {})).json.ok, false, '总开关没开不能刷');
+// 先塞好只读阶段的私信：主人（含小号自己发的一条）、陌生人（含一条自动回复）、阿二
+biliPush(777, '我是小号自己发的', { sender: 999 });
+biliPush(777, '【系统】你好呀');
+biliPush(555, '求互关');
+biliPush(555, '感谢关注～', { source: 8 });
+biliPush(888, '我是阿二');
+p = await call('POST', '/channels/bili-config', { enabled: true, autoReply: false, masterUid: '777', links: [], pollSeconds: 5, browse: { enabled: false, perDay: 99, videosPerSession: 1, like: false } });
+assert.equal(p.json.ok, true);
+cs = await call('GET', '/channels/state');
+assert.equal(cs.json.bili.pollSeconds, 10, '轮询间隔下限 10 秒'); assert.equal(cs.json.bili.browse.perDay, 12);
+ok('B站设置：UID / 对应关系 / 白名单只收数字，间隔与次数夹到范围内');
+
+// 24 只读阶段：一条都不回、不发已读，人和话都记下（主人 B站 = 主人 QQ 同一个人）
+await waitFor(() => bm.fetches.includes('888') && db.prepare("SELECT 1 FROM person WHERE bili_uid = '888'").get(), 6000);
+await sleep(200);
+assert.equal(host.followups.filter((f) => f.msg.source.kind === 'fish-soul/bili').length, 0);
+assert.equal(bm.acks.length, 0); assert.equal(bm.sent.length, 0);
+assert.ok(!bm.fetches.includes('844424930131966') && !bm.fetches.includes('123'), '系统通知 / 群会话不拉');
+const master = db.prepare("SELECT * FROM person WHERE canonical_id = 'master'").get();
+assert.equal(master.bili_uid, '777'); assert.equal(master.qq_uin, '10001');
+assert.ok(db.prepare("SELECT 1 FROM memory WHERE owner_id = 'user:master' AND content LIKE '%B站私信里说（当时没回）：〔系统〕你好呀%'").get());
+assert.ok(!db.prepare("SELECT 1 FROM memory WHERE content LIKE '%小号自己发的%' OR content LIKE '%感谢关注%'").get());
+const lone888 = db.prepare("SELECT canonical_id, qq_uin FROM person WHERE bili_uid = '888'").get();
+assert.equal(lone888.qq_uin, null);
+assert.equal(db.prepare("SELECT value FROM kv WHERE key = 'bili.cursor.777'").get()?.value, '2');
+ok('B站只读阶段：不回不已读，跳过自己发的 / 自动回复 / 系统会话；主人 UID 认到主人');
+
+// 25 打开自动回复：主人、互关的人回；陌生人只记；"B站UID=QQ号"把之前的 B站身份并到 QQ 那个人
+p = await call('POST', '/channels/bili-config', { autoReply: true, links: ['888=20002'] });
+assert.equal(p.json.ok, true);
+biliPush(777, '看这个 BV1Ab411c7Zz 笑死');
+biliPush(555, '在吗');
+biliPush(888, '还是我');
+await call('POST', '/channels/bili-config', { enabled: false });
+assert.equal((await call('GET', '/channels/state')).json.bili.running, false);
+await call('POST', '/channels/bili-config', { enabled: true });
+const fb = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'bili:777'), 9000);
+assert.ok(fb, '主人的 B站私信应转进会话');
+assert.equal(fb.msg.source.kind, 'fish-soul/bili');
+assert.match(fb.msg.content[0].text, /^看这个 BV1Ab411c7Zz 笑死\n【视频 BV1Ab411c7Zz：《猫咪打架实录》UP主 猫UP；简介：两只猫打起来了；字幕节选：大家好，今天两只猫打起来了；热评：橘猫赢了】$/);
+assert.ok(host.titles.some(([sid, t]) => sid === fb.id && t === 'B站·主人B站（主人）'));
+const biliBlock = context.text(at(fb.id));
+assert.match(biliBlock, /B站私信回复规则/); assert.match(biliBlock, /冰美式/, '主人在 QQ 说过的事在 B站也记得');
+const f888 = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'bili:888'), 6000);
+assert.ok(f888, '互关的人可以回');
+const p20002 = db.prepare("SELECT * FROM person WHERE qq_uin = '20002'").get();
+assert.equal(p20002.bili_uid, '888');
+assert.equal(db.prepare("SELECT COUNT(*) n FROM person WHERE bili_uid = '888'").get().n, 1);
+assert.equal(db.prepare("SELECT 1 FROM person WHERE canonical_id = ?").get(lone888.canonical_id), undefined, '旧的单独 B站身份已并掉');
+assert.equal(db.prepare("SELECT owner_id FROM memory WHERE content LIKE '%我是阿二%'").get().owner_id, `user:${p20002.canonical_id}`);
+await sleep(300);
+assert.equal(host.followups.some((f) => f.msg.source.channelId === 'bili:555'), false, '陌生人不回');
+assert.ok(db.prepare("SELECT 1 FROM memory WHERE content LIKE '%B站私信里说（当时没回）：在吗%'").get());
+assert.ok(bm.acks.some(([t, s, c]) => t === '777' && s === '3' && c === 'jct1'), '回复的会话发已读');
+turn(fb.id, '哈哈哈橘猫赢麻了\n\n这个UP主好会 ![ok](_stickers/ok.png)', fb.msg);
+await waitFor(() => bm.sent.length >= 2, 6000);
+assert.equal(bm.sent.length, 2);
+assert.deepEqual(bm.sent.map((x) => JSON.parse(x.f['msg[content]']).content), ['哈哈哈橘猫赢麻了', '这个UP主好会']);
+assert.equal(bm.sent[0].f['msg[receiver_id]'], '777'); assert.equal(bm.sent[0].q.w_sender_uid, '999'); assert.equal(bm.sent[0].f.csrf, 'jct1');
+assert.equal(bm.sent[0].q.w_dev_id, bm.sent[0].f['msg[dev_id]']);
+assert.deepEqual(bm.badWbi, [], 'WBI 签名全部验过');
+cs = await call('GET', '/channels/state');
+assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId.startsWith('bili:')).map((c) => c.channelId).sort(), ['bili:777', 'bili:888']);
+ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先"看"一眼；按段发回（丢图、带签名和 csrf）；UID=QQ 合并到同一个人');
+
+// 26 自己刷视频：关注优先 → 推荐；[划走] 不记、[点赞] 才点；看过的不再看；推荐被风控就看热门
+{
+	const prompts = [];
+	const llm = async (prompt) => { prompts.push(prompt); return /无聊/.test(prompt) ? '[划走]' : /猫咪/.test(prompt) ? '两只猫打架，橘猫赢了，笑死 [点赞]' : '看饿了，想吃夜宵'; };
+	const b = new BiliBrowser({ db, clock: { now: () => Date.now() }, client: new bl.BiliClient(), getConfig: () => ({ enabled: true, browse: { videosPerSession: 3, like: true } }),
+		callLlm: llm, persona: () => ({ name: '小鱼', brief: '嘴硬' }), watchDelayMs: [0, 0] });
+	let rr = await b.run({});
+	assert.deepEqual(rr.watched.map((w) => w.bvid), ['BV1Ef411c7Xx', 'BV1Ab411c7Zz', 'BV1Cd411c7Yy']);
+	assert.match(prompts[0], /^你是「小鱼」。嘴硬/);
+	assert.match(prompts[1], /字幕节选：大家好，今天两只猫打起来了/);
+	assert.deepEqual(bm.likes, ['101']);
+	const mine = db.prepare("SELECT content, channel_id FROM memory WHERE owner_id = 'self' AND channel = 'bili' ORDER BY id").all();
+	assert.deepEqual(mine.map((m) => m.content), ['我在B站刷到饭UP 的视频《深夜做饭》：看饿了，想吃夜宵', '我在B站刷到猫UP 的视频《猫咪打架实录》：两只猫打架，橘猫赢了，笑死']);
+	assert.equal(mine[1].channel_id, 'bili:video:BV1Ab411c7Zz');
+	assert.equal(db.prepare('SELECT COUNT(*) n FROM bili_seen WHERE skipped = 1').get().n, 1);
+	bm.rcmdFail = true;
+	rr = await b.run({});
+	assert.deepEqual(rr.watched.map((w) => w.bvid), ['BV1Gh411c7Ww'], '推荐失败改看热门，看过的不再看');
+	rr = await b.run({});
+	assert.equal(rr.watched.length, 0);
+	bm.rcmdFail = false;
+	assert.match(context.text(at(sid1)), /你最近在 B站刷到的[^\n]*\n- 《年度鬼畜》（鬼畜UP）：看饿了，想吃夜宵\n- 《猫咪打架实录》/);
+}
+// 设置页"现在刷一下"走同一套（宿主没模型时只记标题）
+bm.extra = true;
+assert.equal((await call('POST', '/bili/browse-now', {})).json.started, true);
+await waitFor(() => db.prepare("SELECT 1 FROM bili_seen WHERE bvid = 'BV1Jk411c7Vv'").get(), 6000);
+assert.ok(db.prepare("SELECT 1 FROM memory WHERE owner_id = 'self' AND content = '我在B站刷到山UP 的视频《周末去爬山》（户外）'").get());
+assert.equal((await call('GET', '/channels/state')).json.bili.recent[0].bvid, 'BV1Jk411c7Vv');
+ok('B站刷视频：关注优先、划走不记、点赞要模型说了才点、看过不重看、推荐被风控转热门；感受进 QQ 会话上下文');
+
+// 27 QQ 里分享的 B站小程序卡片 → 网关先"看"再递给会话
+const nQq = host.followups.length;
+conn.push({ post_type: 'message', message_type: 'private', sub_type: 'friend', user_id: 10001, message_id: 801, sender: { nickname: '主人' }, message: [{ type: 'json', data: { data: JSON.stringify({ meta: { detail_1: { title: '哔哩哔哩', desc: '猫咪打架实录', qqdocurl: 'https://www.bilibili.com/video/BV1Ab411c7Zz?share_source=qq' } } }) } }] });
+const fq = await waitFor(() => host.followups[nQq], 6000);
+assert.equal(fq.msg.source.kind, 'fish-soul/qq');
+assert.match(fq.msg.content[0].text, /^【分享卡片：猫咪打架实录】\n【视频 BV1Ab411c7Zz：《猫咪打架实录》/);
+ok('QQ 分享的 B站卡片：抠出 BV 号，附上视频简介 / 字幕 / 热评');
+
+// 28 自走层：空闲时段才刷，每天 ≤ perDay，两轮间隔 ≥ 90 虚拟分钟
+{
+	const home3 = mkdtempSync(join(tmpdir(), 'dsh-b-'));
+	const prevHome = process.env.DSH_HOME; process.env.DSH_HOME = home3;
+	const { openDatabase } = await import('../lib/db.js');
+	const bdb = openDatabase(); process.env.DSH_HOME = prevHome;
+	let t = Date.parse('2030-01-01T06:30:00Z'); // 14:30 UTC+8 idle
+	const bclock = Object.assign(Object.create(VirtualClock.prototype), { scale: 1, now: () => t });
+	let runs = 0; let biliOn = true;
+	const blife = new LifeEngine({
+		db: bdb, clock: bclock, callLlm: async () => null, deliver: async () => true, browseRealGapMs: 0,
+		browse: async () => { runs++; },
+		getConfig: () => ({ proactive: { dailyMaxCount: 0, targets: { masterPrivateChannelId: '', selfGroupChannelIds: [] } }, bili: { enabled: biliOn, browse: { perDay: 2 } } })
+	});
+	const tick = async () => { await blife.tick(); await sleep(5); };
+	await tick(); assert.equal(runs, 1);
+	t += 30 * 60_000; await tick(); assert.equal(runs, 1, '90 虚拟分钟内不再刷');
+	t += 61 * 60_000; await tick(); assert.equal(runs, 2);
+	t = Date.parse('2030-01-01T12:00:00Z'); await tick(); assert.equal(runs, 2, '每天上限 2');
+	t = Date.parse('2030-01-02T01:00:00Z'); await tick(); assert.equal(runs, 2, '09:00 不是空闲时段');
+	t = Date.parse('2030-01-02T06:30:00Z'); biliOn = false; await tick(); assert.equal(runs, 2, 'B站没开不刷');
+	biliOn = true; await tick(); assert.equal(runs, 3, '新的一天重新计数');
+	bdb.close();
+}
+ok('自走层刷 B站：只在空闲时段、每天 ≤ 上限、两轮间隔 ≥ 90 虚拟分钟');
+
+// 29 退出登录：凭据文件删掉，轮询停
+assert.equal((await call('POST', '/bili/logout', {})).json.ok, true);
+assert.equal(existsSync(authFile), false);
+cs = await call('GET', '/channels/state');
+assert.equal(cs.json.bili.loggedIn, false);
+await call('POST', '/channels/bili-config', { enabled: false });
+ok('B站退出登录：删凭据、停轮询');
+
 console.log('\n全部通过');
-srv.close(); wsSrv.close(); process.exit(0);
+srv.close(); wsSrv.close(); biliSrv.close(); process.exit(0);
 

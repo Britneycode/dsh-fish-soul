@@ -398,4 +398,11 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
   - **#07** 动态上下文改为注入在最新用户消息前的瞬态块（M1 先验证 DSH `systemPrompt.context` 落点），召回过滤补 `owner_id IN ('self', ?)`；
   - **#08** 向量写入收敛为单队列双优先级串行 Worker + `generation_id` 世代锁；Dream 绑定按 `owner_id` 的 `AbortController`；
   - **#09** 中文分词定为内置 `Intl.Segmenter` + 停用词表（零依赖，禁 `nodejieba`），艾宾浩斯衰减明确为 BM25 初筛后 JS 层计算、半衰期 7 虚拟日；
-  - **#10** 删除 `day.mood_seed` 独立列，当日基调并入 `plan_json.dailyMoodTone` 由本插件自消费，不动 `dsh-feiyu-mood`。
+  - **#10** 删除 `day.mood_seed` 独立列，当日基调并入 `plan_json.dailyMoodTone` 由本插件自消费，不动 `dsh-feiyu-mood`。- 2026-10-30（v0.2.0 代码修正，"零回退迁移"审计）——
+  - 会话按 sessionId 隔离，瞬态块在 `text()` 内同步组装（BM25 当场算 + 预取向量），消除"上一轮 / 别人的记忆"串注入；
+  - 未识别发送者归入 `user:unknown`，不再回退为主人；工具调用只读查人，不再刷高 `interaction_count`；`forget` 加归属校验；
+  - 配置改为"宿主默认值为底、设置文件覆盖"的深合并；工具参数改为标准 JSON Schema；
+  - 向量：首个成功响应自举 `vec_meta`；实时队列退避重试；重建按条限速、失败不推进游标、游标持久化可续传；测试连接不再覆盖已有索引的 `model_id`，同维度换模型也会标 stale；查询 800ms / 写入 10s 分离超时；
+  - 人格：支持 PNG（ccv3/chara）卡、`{{char}}`/`{{user}}` 宏、`system_prompt`/`first_mes`/`post_history_instructions`、世界书（constant 进静态段，关键词条目进瞬态块）；
+  - 新增 `POST /import/memories` 记忆导入（去重、按 QQ 号归属）；
+  - 自走层：非白名单待办不再阻塞队列，到期后在对方下次开口时自然提起；投递失败顺延重试 3 次；Dream 加水位与去重，可真正中断 LLM；重启后恢复互动表与虚拟钟。

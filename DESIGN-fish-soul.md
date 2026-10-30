@@ -1,6 +1,6 @@
 # dsh-fish-soul 设计方案
 
-> 状态：待实现，尚未写任何代码（v1.1 已合并架构审查 10 项修正）
+> 状态：已实现到 v0.5.0（QQ 直连 SnowLuma、B站小号、抖音小号）；v1.1 已合并架构审查 10 项修正
 > 日期：2026-10-30
 
 ## 1. 要解决什么
@@ -47,12 +47,11 @@
 ## 4. 架构
 
 ```
-QQ ──> SnowLuma(OneBot v11 WS) ──> dsh-fish-soul/channels ──> gateway ──> DSH session（每个私聊/群一条）
-                                          ├── persona   静态人格（V3）
-                                          ├── memory    按人记忆（SQLite）
-                                          └── life      日程 / 待办 / 主动
-                                                    │
-抖音（MVP 不接）────────────────────────────────────┘
+QQ   ──> SnowLuma（OneBot v11 WS）────┐
+B站  ──> 网页接口（私信轮询 / 刷视频）─┼──> dsh-fish-soul/channels ──> gateway ──> DSH session（每人 / 每群一条）
+抖音 ──> 专用浏览器（CDP，私信 / 刷视频）┘          ├── persona   静态人格（V3）
+                                                    ├── memory    按人记忆（SQLite）
+                                                    └── life      日程 / 待办 / 主动 / 空闲时刷视频
 ```
 
 三个模块共用一个进程、一个数据目录、一套配置。
@@ -109,7 +108,7 @@ CREATE INDEX idx_memory_channel_recent           -- 群摘要按群隔离查询�
 CREATE TABLE person (
   canonical_id      TEXT PRIMARY KEY,                   -- 如 'p_8f9a2b1c'，主人固定为 'master'
   qq_uin            TEXT UNIQUE,                        -- 唯一约束，支撑 ON CONFLICT Upsert（审查 #05）
-  douyin_uid        TEXT UNIQUE,
+  douyin_uid        TEXT UNIQUE,                        -- v0.5：存抖音会话里显示的名字（网页版拿不到抖音号）
   bili_uid          TEXT,                               -- v0.4 迁移加列 + UNIQUE 索引 idx_person_bili
   display_name      TEXT NOT NULL DEFAULT '未知用户',
   aliases           TEXT NOT NULL DEFAULT '[]',         -- JSON 字符串数组
@@ -120,7 +119,7 @@ CREATE TABLE person (
 );
 ```
 
-同一真人在 QQ / B站 / 抖音各有一个外部 ID，`canonical_id` 是内核自己的主键。B站认人规则：设置里的主人 UID → `master`；设置页「B站UID=QQ号」对应上的 → 那个 QQ 的人（之前单独建过的 B站身份，其记忆与待办并过去、旧身份删除）；其余新建只有 `bili_uid` 的人。
+同一真人在 QQ / B站 / 抖音各有一个外部 ID，`canonical_id` 是内核自己的主键。B站认人规则：设置里的主人 UID → `master`；设置页「B站UID=QQ号」对应上的 → 那个 QQ 的人（之前单独建过的 B站身份，其记忆与待办并过去、旧身份删除）；其余新建只有 `bili_uid` 的人。抖音同理（v0.5）：「主人的名字」→ `master`，「抖音名字=QQ号」并到那个 QQ 的人，其余新建只有 `douyin_uid` 的人；因为只能按名字认，对方改名会被当成新的人。
 
 **自动注册（审查 #05）**：`agent/pre-step` 中对每个发送者执行原子 Upsert（`INSERT ... ON CONFLICT(qq_uin) DO UPDATE` 更新昵称、`interaction_count+1`、`last_seen_at` 并 `RETURNING *`）；查不到即新建，主人 QQ 固定映射 `canonical_id='master'`、`relation_stage='close'`。
 
@@ -354,20 +353,40 @@ CREATE TABLE vec (
 
 **用一个专门的小号**，B站网页接口直连（`lib/channels/bilibili.js`、`lib/browse.js`），不依赖浏览器、不走外部插件；默认关闭。
 
-- **登录**：设置页扫码（`passport` 二维码，密钥只留服务端，170 秒过期）或粘贴 Cookie。凭据只存 `$DSH_HOME/fish-soul/bili-auth.json`（0600），不进设置文件、不回传前端；新凭据校验失败时原登录原样保留。请求前先领 `buvid3`（没有会被风控 412）；需要签名的接口走 WBI（`nav` 的 `wbi_img` 混淆出密钥，缓存 30 分钟）。Cookie 过期（`-101`）只标"已失效"、停轮询，不做自动续期，设置页提示重新扫码。
+- **登录**：设置页扫码（`passport` 二维码，密钥只留服务端，170 秒过期）或粘贴 Cookie。凭据只存 `$DSH_HOME/fish-soul/bili-auth.json`（0600），不进设置文件、不回传前端；新凭据校验失败时原登录原样保留。请求前先领 `buvid3`（没有会被风控 412）；需要签名的接口走 WBI（`nav` 的 `wbi_img` 混淆出密钥，缓存 30 分钟）。**自动续期（v0.5）**：扫码登录拿到的 refresh_token（粘贴 Cookie 时可一并填 `ac_time_value`）让小号不用隔几周就重扫——每天查一次 `cookie/info`，B站说要刷才刷：`correspondPath`（RSA-OAEP/SHA-256 公钥加密 `refresh_<时间戳>`）→ 从 `www.bilibili.com/correspond/1/…` 取 `refresh_csrf` → `cookie/refresh` 换新 Cookie 与新 token（只写回 0600 文件）→ 用新 csrf + 旧 token 调 `confirm/refresh` 让旧 token 作废；失败 3 小时后再试，并在 QQ 上提醒主人一次（同一件事好了之前不重复提醒）。Cookie 过期（`-101`）且有 token 时半小时抢救一次；没有 token 的只标"已失效"、停轮询，提醒重新扫码。
 - **私信**：B站私信没有推送，按网页端节奏轮询 `new_sessions`（默认 20 秒，10–300 可调），按每个会话的 `msg_seqno` 游标（`kv: bili.cursor.<UID>`）取新消息；跳过自己发的、自动回复 / 推送 / 系统来源（`msg_source` 非真人）、撤回、系统通知会话与应援团会话。入站消息与 QQ 同形（`channel_id = bili:<UID>`），复用同一套会话网关：每人一条 DSH 会话（标题 `B站·昵称`），工具同样只放记忆三件套。
   - **只读期**：`bili.autoReply` 默认关——所有私信只记成低重要度记忆（"在B站私信里说（当时没回）"）、不发已读，建议先跑一周看看都是谁在发。
   - **自动回复打开后**：只回主人 UID、白名单 UID、互相关注的人（`replyMutual`，关系缓存 10 分钟）；超过 `replyWindowMinutes` 的旧消息、陌生人一律只记。回复的会话才发已读。
-  - **出站**：只发文字（图片丢弃），空行分段 ≤5 条、每条 ≤500 字，两条之间至少隔 1.2 秒；`send_msg` 带 WBI 签名、`csrf`、固定的设备 ID。
+  - **出站**：空行分段 ≤5 条、每条 ≤500 字，两条之间至少隔 1.2 秒；`send_msg` 带 WBI 签名、`csrf`、固定的设备 ID。v0.5 起表情包 / 生成的图（≤2 张，webp 先转 png）先传 B站图床（`upload_bfs`）再按图片消息（`msg_type=2`）发；收到的自定义表情（`msg_type=6`）当【表情】+ 图片给模型看。
   - **主动开口**：`bili.proactive` 默认关；打开后只允许发给主人 UID，与 QQ 共用每日配额，冷却按平台分别计。
 - **自己刷视频**：空闲时段（日程 `idle` + 活跃时段内）每天最多 `browse.perDay` 轮（默认 3，0–12），两轮间隔 ≥90 虚拟分钟且 ≥20 真实分钟；每轮 `videosPerSession` 条（默认 3，1–6），优先 1 条关注动态，其余来自首页推荐，推荐被风控就看热门；看过的（`bili_seen` 表）不再看。每条取详情 + 字幕节选（要登录）+ 3 条热评，让模型以第一人称写一两句感受：`[划走]` 不记，其余写成 `owner='self'` 的事件记忆（`channel_id = bili:video:<BV>`，重要度 1）；`[点赞]` 只有在 `browse.like` 打开时才真的点。最近一个虚拟日里有感受的 2 条进 QQ / B站会话的瞬态块（"想聊再提，别硬塞"）。不投币、不评论、不关注。
 - **聊天里的视频**：QQ / B站消息里的 BV 号、b23.tv 短链、QQ 小程序分享卡片（`json` 段的 `qqdocurl`）→ 网关先取一段简介 / 字幕 / 热评拼在消息后面（8 秒超时，1 小时缓存），让她"看过"再回。
 - **设置页「B站」页签**：账号（扫码 / Cookie / 退出）、总开关、自动回复、主人 UID、白名单、互关、「B站UID=QQ号」对应表、主动开口、刷视频开关与次数、点赞、「现在刷一下」与最近看过列表。路由：`POST /channels/bili-config`、`/bili/qr/start`、`/bili/qr/poll`、`/bili/cookie`、`/bili/logout`、`/bili/browse-now`；`GET /channels/state` 增加 `bili` 段。
 - 不做：群聊 / 应援团、动态与评论区互动、投币收藏、视频下载与画面理解（只看文字信息）。
 
-### 抖音
+### 抖音（v0.5）
 
-暂不接。抖音没有可用的网页私信接口，只能真浏览器自动化，需要一台常开的 Windows 电脑跑浏览器；等确认运行环境后再做，结构上复用 B站这套（渠道 → 网关 → 每人一条会话，刷视频写自己的记忆）。
+**同样用一个专门的小号。** 抖音没有可用的网页私信接口，只能走真浏览器：插件自己开一个**专用的 Edge / Chrome**（CDP 控制；`lib/channels/douyin.js`、`lib/douyin-browse.js`、`lib/browsers.js`，页面驱动拆自 dsh-douyin-bridge（MIT），放在 `lib/channels/vendor/douyin-bridge/`，改动见其 README）。需要一台常开的 Windows 电脑、DSH 一直运行；默认关闭。
+
+- **专用浏览器**：自动找本机的 Edge / Chrome / Brave / Vivaldi / Chromium（注册表 + 常见安装路径），设置页可选，也可手动填 .exe 路径；用插件自己的 profile（`$DSH_HOME/fish-soul/douyin-browser/<浏览器>`），和平时用的浏览器互不影响，调试端口 47890，静音。登录态只留在这个 profile 里。
+  - 你把窗口 / 标签页关了 = **暂停**（自动流程不会再把它弹出来），设置页点「启动」恢复；设置页「关闭浏览器」= 真关 + 暂停；
+  - 浏览器崩了（不是正常退出）30 秒后自动重连，10 分钟内超过 3 次就停下，并在 QQ 上提醒主人；
+  - 插件热重载只断开 CDP、不关浏览器，新实例直接连上；
+  - 所有会动页面的操作（读 / 发私信、刷视频、截图、转图）排队互斥，单件超时放行防死锁。
+- **登录**：设置页「看截图」显示专用浏览器的实时截图（3 秒刷新），在截图上点一下会转发成页面里的一次点击，用抖音 App 扫码即可；也可以直接在弹出的窗口里登。
+- **私信**：没有推送，每 30–60 秒（随机）看一眼会话列表；有未读或预览变了的会话（每轮最多 5 个）进去读最近 20 条，和上次读到的指纹窗口（`kv: douyin.conv.<名字哈希>`，留 30 条；指纹 = 谁发的 + 正文 + 媒体，图片地址去掉会变的签名参数）按末尾 1–3 条对齐，只把新消息交给网关；对不上时最多补 3 条，宁少勿重。第一次启用先记基线（`kv: douyin.bootstrapped`），之前的历史不处理；启用前就有的未读补最后几条，超过 `replyWindowMinutes` 的只记不回。
+  - **认人靠名字**：网页版拿不到抖音号，`channel_id = douyin:<会话里显示的名字>`（标题 `抖音·名字`），存进 `person.douyin_uid`；见 §5.2。
+  - **进会话读消息会把消息标成已读**（网页版没有"只看不已读"的办法）。
+  - 只读期与 B站相同：`douyin.autoReply` 默认关，只记成"在抖音私信里说（当时没回）"。打开后回主人和白名单；网页版看不出是不是互关，所以没有"互关也回"，改成「回所有能私信她的人」（`replyAll`，默认关；建议在抖音「设置 → 隐私 → 谁可以私信我」选「互关好友」，效果就等于只回互关）。
+  - **出站**：空行分段 ≤5 条，每段之前模拟打字（1.5–3 秒 + 每字 80 毫秒，≤8 秒）；单独一段只写 `[比心]` 这类抖音自带表情名会发成表情（表情面板里没有就当文字发）；表情包 / 生成的图（≤2 张）跟在最后。
+  - **只回复、不主动**：抖音不参与主动开口。
+  - **页面自检（canary）**：启动时、每 6 小时、连续失败 3 次后检查私信页面的关键元素；认不出（多半是抖音改版）就先停自动回复（只记不回），设置页标红并给出可复制的自检报告，QQ 上提醒主人一次；下次自检通过自动恢复。掉登录也提醒一次。
+- **自己刷抖音**：`douyin.browse.enabled` 默认关；打开后与 B站轮流（今天刷得少的先），共用空闲时段与 90 虚拟分钟间隔，抖音没登录就让给 B站；每天 `perDay` 轮（默认 3，0–12）。每轮在推荐页像人一样看 `videosPerSession` 条（默认 3，1–6；每条停 5–20 秒；跳过直播、广告、看过的——`douyin_seen` 表；划不动先点"下一个"箭头，再按 ↓，再滚轮），再逐条打开详情读文案、话题和热评写感受：`[划走]` 不记，其余写成 `owner='self'` 的事件记忆（`channel_id = douyin:video:<id>`）；`[点赞]` 要 `browse.like` 打开才点。最近有感受的 2 条进 QQ / B站 / 抖音会话的瞬态块。不评论、不关注、不转发。
+- **聊天里的抖音视频**：QQ / B站 / 抖音消息里的 `douyin.com/video/<id>`、`?modal_id=`、`v.douyin.com` 短链 → 在专用浏览器里打开详情读文案和热评（最多等 30 秒，1 小时缓存），拼在消息后面再交给会话。
+- **表情包格式**：B站图床和抖音网页端都只收 png / jpg / gif，`_stickers/` 里的 webp 先转（`lib/imageconv.js`）：优先用宿主自带的 sharp（DSH 桌面版的 dsh-attachment-local 带了一份，也可用 `FISH_SOUL_SHARP` 指定），没有就在抖音专用浏览器里用 canvas 转 png（动图只留第一帧）；都没有就不把 webp 表情包列给模型。转好的放 `img-cache/`（按内容哈希），原文件不动，转出来超过 5 MB 的不发。
+- **设置页「抖音」页签**：按需加载的分块 `lib/client.douyin.js`（主面板用 `require.async("./client.douyin.js")`），样式整体移到 `lib/panel.css`（`GET /ui/panel.css`），让 client.js 留在宿主的大小限制内。内容：专用浏览器（选择 / 重新查找 / 手动路径）、状态与「启动 / 看截图 / 关闭浏览器」、登录截图、提醒条（没登录 / 页面变了 / 浏览器崩了）、总开关、自动回复、主人的名字、白名单、回所有人、「抖音名字=QQ号」、刷视频设置、最近看过、页面自检 + 复制报告。路由：`POST /channels/douyin-config`、`/douyin/browser/start`、`/douyin/browser/close`、`/douyin/browser/rescan`、`/douyin/screenshot`、`/douyin/click`、`/douyin/self-check`、`/douyin/browse-now`；`GET /channels/state` 增加 `douyin` 段。
+- **测试**：`test/smoke.mjs` 用假浏览器 + 假页面驱动跑私信全链路（`testHooks.douyin`，正式运行时为空）；`test/douyin-browser.mjs` 用真的无头 Chromium + 本地假 `www.douyin.com`（自签证书 + `--host-resolver-rules`）跑浏览器生命周期与刷视频，找不到浏览器 / openssl 时跳过。真实抖音页面无法在测试里覆盖，第一次上线由主人实测。
+- 不做：抖音群聊、评论区互动、主动私信、视频画面理解、多个小号。
 
 ## 12. 隐私与安全
 
@@ -399,7 +418,11 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
 | 前缀缓存被打碎 | 成本上升 | 动态内容注入在最新用户消息前的瞬态块（§7），不走 section |
 | 小号行为触发风控 | 封号 | 主动配额 + 仅自己人 + 两周止损条件 |
 | B站风控（412 / -352）或判定为自动化 | 小号被限流 / 封禁 | 专用小号；只用网页端同款接口与节奏（20 秒轮询、发送间隔 ≥1.2 秒、每天刷 ≤12 轮）；默认只读、不点赞不评论；风控时退到热门、失败只记日志 |
-| B站 Cookie 过期 | 私信停收、刷视频变匿名 | 识别 `-101` 标记失效并停轮询，设置页提示重新扫码（暂不做 refresh_token 自动续期） |
+| B站 Cookie 过期 | 私信停收、刷视频变匿名 | v0.5 起用 refresh_token 每天检查、按需自动续期；续不上 / 没有 token 时标记失效、停轮询，QQ 提醒主人重新扫码 |
+| 抖音网页改版 | 私信认不出、收发失效 | 选择器集中在 `vendor/douyin-bridge/selectors.mjs`；页面自检不过就停自动回复（只记不回），设置页给自检报告，QQ 提醒一次 |
+| 抖音风控 / 判定为自动化 | 小号被限流 / 封禁 | 专用小号 + 真浏览器 + 独立 profile；30–60 秒随机轮询、模拟打字、每天刷 ≤12 轮、默认只读不点赞 |
+| 抖音只能按名字认人 | 改名 = 新的人，同名会混 | 设置页写明；主人 / 白名单 / 对应表都按名字，对方改名后在设置页更新 |
+| 专用浏览器被关 / 崩溃 / 电脑休眠 | 抖音私信停收 | 关 = 暂停不自启；崩溃 30 秒重连、10 分钟 >3 次停下并提醒；需要常开的电脑 |
 | B站接口改版 | 收发失效 | 接口集中在 `BiliClient` 一个类里；测试用 `FISH_SOUL_BILI_MOCK` 假服务覆盖签名与收发全链路 |
 
 ## 15. 明确不做
@@ -407,7 +430,7 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
 - 向量数据库、ANN 索引、重排序模型
 - 本地 ONNX 模型（已决定只走远程）
 - 多角色、角色市场、人格编辑器以外的创作工具
-- 抖音接入（需要常开的 Windows + 真浏览器，确认环境后另行评估）
+- 抖音群聊、评论区互动、主动私信（抖音只回复）
 - B站群聊、评论区 / 动态互动、投币
 - 记忆加密、云同步
 
@@ -443,3 +466,10 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
   - 会话网关支持 `bili:<UID>`：只读期只记不回，自动回复只回主人 / 白名单 / 互关；`person` 加 `bili_uid`，「B站UID=QQ号」把两个身份并成一个人；
   - 自走层在空闲时段刷 B站（每日上限、虚拟 / 真实双间隔），主动开口冷却按平台分别计，B站主动开口只对主人且默认关；
   - QQ 小程序分享卡片解析出 B站链接；`soul.db` 新增 `bili_seen` 表；配置新增 `bili` 段（默认全关）；设置页新增「B站」页签与 6 条路由。
+- v0.5.0（抖音 + B站补全）——
+  - 新增 `lib/channels/douyin.js`（专用浏览器生命周期：暂停 / 崩溃重连 / 热重载接管；私信轮询与指纹窗口对齐、页面自检、模拟打字发送）、`lib/douyin-browse.js`（自己刷抖音、聊天里的抖音视频）、`lib/browsers.js`（找本机 Chromium 系浏览器）、`lib/imageconv.js`（webp → png / gif）、`lib/routes-douyin.js`，页面驱动放在 `lib/channels/vendor/douyin-bridge/`；
+  - 会话网关支持 `douyin:<名字>`：只读期只记不回，自动回复回主人 / 白名单 /（可选）所有人，页面自检不过时只记不回；抖音只回复不主动；`person.douyin_uid` 存名字，「抖音名字=QQ号」并成一个人；`soul.db` 新增 `douyin_seen` 表；配置新增 `douyin` 段（默认全关）；
+  - 自走层：B站 / 抖音轮流刷，共用空闲时段与间隔；
+  - B站：refresh_token 自动续期（扫码登录自带，粘贴 Cookie 时可填 `ac_time_value`）、表情包 / 图片经图床发图、收到的表情当图片看；
+  - 给主人的 QQ 提醒（`notifyMaster`，同一件事只提醒一次）：B站续期失败 / 登录失效、抖音掉登录 / 页面改版 / 浏览器老崩；
+  - 设置页新增「抖音」页签（按需加载分块），样式移到 `lib/panel.css`；B站页签增加 `ac_time_value` 与续期状态。

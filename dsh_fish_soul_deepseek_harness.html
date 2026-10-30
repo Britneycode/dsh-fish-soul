@@ -1,0 +1,1898 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dsh-fish-soul · DeepSeek Harness</title>
+  <style>
+    :root,
+    [data-theme="dark"] {
+      --bg-backdrop: #07080a;
+      --bg-window: #0f1116;
+      --bg-sidebar: #0b0d11;
+      --bg-surface: #14171f;
+      --bg-control: #0b0d12;
+      --bg-elevated: #1c202b;
+      --bg-hover: rgba(255, 255, 255, 0.04);
+      --bg-active: rgba(255, 255, 255, 0.07);
+
+      --border-window: rgba(255, 255, 255, 0.075);
+      --border-hairline: rgba(255, 255, 255, 0.055);
+      --border-subtle: rgba(255, 255, 255, 0.095);
+      --border-focus: #4d6bfe;
+
+      --text-primary: #eef0f4;
+      --text-secondary: #8b93a4;
+      --text-muted: #565e6d;
+
+      --accent: #4d6bfe;
+      --accent-hover: #607bff;
+      --accent-soft: rgba(77, 107, 254, 0.13);
+      --accent-border: rgba(77, 107, 254, 0.32);
+
+      --ready: #34d399;
+      --stale: #fbbf24;
+      --building: #60a5fa;
+      --error: #f87171;
+
+      --shadow-window: 0 28px 70px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--border-window);
+      --shadow-seg: 0 1px 2px rgba(0, 0, 0, 0.4);
+
+      --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --font-mono: "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+    }
+
+    [data-theme="light"] {
+      --bg-backdrop: #e6e9ef;
+      --bg-window: #ffffff;
+      --bg-sidebar: #f5f6f8;
+      --bg-surface: #fbfcfe;
+      --bg-control: #f1f3f6;
+      --bg-elevated: #ffffff;
+      --bg-hover: rgba(15, 23, 42, 0.035);
+      --bg-active: rgba(15, 23, 42, 0.06);
+
+      --border-window: rgba(15, 23, 42, 0.09);
+      --border-hairline: rgba(15, 23, 42, 0.06);
+      --border-subtle: rgba(15, 23, 42, 0.11);
+      --border-focus: #4d6bfe;
+
+      --text-primary: #111827;
+      --text-secondary: #4b5563;
+      --text-muted: #9ca3af;
+
+      --accent: #4d6bfe;
+      --accent-hover: #3b5bdb;
+      --accent-soft: rgba(77, 107, 254, 0.09);
+      --accent-border: rgba(77, 107, 254, 0.28);
+
+      --ready: #059669;
+      --stale: #d97706;
+      --building: #2563eb;
+      --error: #dc2626;
+
+      --shadow-window: 0 20px 50px rgba(15, 23, 42, 0.09), 0 0 0 1px var(--border-window);
+      --shadow-seg: 0 1px 2px rgba(15, 23, 42, 0.07);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg-backdrop);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      padding: 20px 16px 64px;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .mono {
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* =========================================================================
+       DeepSeek Harness 桌面端主窗口 (Pure Minimalist Shell)
+       ========================================================================= */
+    .dsh-shell {
+      width: 100%;
+      max-width: 880px;
+      background: var(--bg-window);
+      border-radius: 12px;
+      box-shadow: var(--shadow-window);
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 184px 1fr;
+      min-height: 540px;
+    }
+
+    @media (max-width: 680px) {
+      .dsh-shell {
+        grid-template-columns: 1fr;
+      }
+      .dsh-sidebar {
+        display: none;
+      }
+    }
+
+    /* 左侧边栏 */
+    .dsh-sidebar {
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border-hairline);
+      padding: 16px 10px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      user-select: none;
+    }
+
+    .window-dots {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px 16px;
+    }
+
+    .window-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .window-dot:nth-child(1) { background: #ff5f56; opacity: 0.75; }
+    .window-dot:nth-child(2) { background: #ffbd2e; opacity: 0.75; }
+    .window-dot:nth-child(3) { background: #27c93f; opacity: 0.75; }
+
+    .nav-group {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 8px 10px 4px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      margin-bottom: 1px;
+    }
+
+    .nav-item.active {
+      background: var(--bg-active);
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .nav-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .sidebar-foot {
+      padding: 8px 10px 0;
+      border-top: 1px solid var(--border-hairline);
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* 右侧主视口 */
+    .dsh-main {
+      padding: 22px 28px 26px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      max-width: 680px;
+      width: 100%;
+    }
+
+    @media (max-width: 540px) {
+      .dsh-main {
+        padding: 16px;
+      }
+    }
+
+    /* 顶部栏：左侧标题 + 右侧分段 Tab，零冗余副标题 */
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+
+    .brand-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .brand-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      border: 1px solid var(--accent-border);
+      color: var(--accent);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    [data-theme="dark"] .brand-icon {
+      color: #8da2ff;
+    }
+
+    /* 胶囊式分段器 (Segmented Control & Tabs) */
+    .segmented {
+      display: inline-flex;
+      background: var(--bg-control);
+      border: 1px solid var(--border-hairline);
+      border-radius: 7px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .seg-btn,
+    .seg-item {
+      position: relative;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 4px 11px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      transition: all 0.14s ease;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .seg-item input[type="radio"] {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .seg-btn:hover,
+    .seg-item:hover {
+      color: var(--text-primary);
+    }
+
+    .seg-btn.active,
+    .seg-item:has(input:checked) {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      font-weight: 600;
+      box-shadow: var(--shadow-seg);
+    }
+
+    .tab-pane {
+      display: none;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .tab-pane.active {
+      display: flex;
+    }
+
+    /* =========================================================================
+       纯净表单表面 (Clean Surface & Aligned Rows)
+       ========================================================================= */
+    .surface {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-hairline);
+      border-radius: 9px;
+      overflow: hidden;
+      transition: opacity 0.18s ease;
+    }
+
+    .surface.is-disabled {
+      opacity: 0.38;
+      pointer-events: none;
+    }
+
+    .row {
+      padding: 10px 16px;
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+
+    .row:last-child {
+      border-bottom: none;
+    }
+
+    .row-between {
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+
+    .row-between:last-child {
+      border-bottom: none;
+    }
+
+    .label {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      user-select: none;
+    }
+
+    .control-inline {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 520px) {
+      .row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+    }
+
+    /* 输入框 */
+    .text-input {
+      background: var(--bg-control);
+      color: var(--text-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 12.5px;
+      outline: none;
+      width: 100%;
+      flex: 1;
+      transition: border-color 0.14s ease;
+    }
+
+    .text-input:focus {
+      border-color: var(--border-focus);
+    }
+
+    .text-input[readonly] {
+      background: var(--bg-control);
+      color: var(--text-secondary);
+      border-color: var(--border-hairline);
+      width: 82px;
+      flex: 0 0 auto;
+      text-align: center;
+      cursor: default;
+    }
+
+    .num-input {
+      width: 68px;
+      flex: 0 0 auto;
+      text-align: right;
+    }
+
+    .pwd-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      flex: 1;
+    }
+
+    .pwd-wrap .text-input {
+      padding-right: 30px;
+    }
+
+    .icon-btn {
+      position: absolute;
+      right: 6px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 3px;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .icon-btn:hover {
+      color: var(--text-primary);
+    }
+
+    /* Switch */
+    .switch-wrap {
+      display: inline-flex;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .switch-wrap input[type="checkbox"] {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 32px;
+      height: 18px;
+      background: var(--bg-control);
+      border: 1px solid var(--border-subtle);
+      border-radius: 99px;
+      position: relative;
+      cursor: pointer;
+      transition: all 0.16s ease;
+    }
+
+    .switch-wrap input[type="checkbox"]::after {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: transform 0.16s ease, background-color 0.16s ease;
+    }
+
+    .switch-wrap input[type="checkbox"]:checked {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .switch-wrap input[type="checkbox"]:checked::after {
+      transform: translateX(14px);
+      background: #ffffff;
+    }
+
+    /* 按钮 */
+    .btn {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 5px 11px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      white-space: nowrap;
+      transition: all 0.12s ease;
+    }
+
+    .btn:hover:not(:disabled) {
+      background: var(--bg-active);
+    }
+
+    .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #ffffff;
+      border-color: var(--accent);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+
+    .btn-warning {
+      color: var(--stale);
+      border-color: rgba(251, 191, 36, 0.35);
+      background: rgba(251, 191, 36, 0.08);
+    }
+
+    .btn-ghost-del {
+      background: transparent;
+      color: var(--text-muted);
+      border: none;
+      padding: 2px 6px;
+      font-size: 11.5px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .btn-ghost-del:hover {
+      color: var(--error);
+      background: rgba(248, 113, 113, 0.1);
+    }
+
+    /* 状态圆点指示器 (Status Dot + Text) */
+    .status-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-line.ready { color: var(--ready); }
+    .status-line.ready .dot { background: var(--ready); box-shadow: 0 0 8px var(--ready); }
+
+    .status-line.stale { color: var(--stale); }
+    .status-line.stale .dot { background: var(--stale); }
+
+    .status-line.building { color: var(--building); }
+    .status-line.building .dot { background: var(--building); }
+
+    .status-line.error { color: var(--error); }
+    .status-line.error .dot { background: var(--error); }
+
+    /* 进度条 */
+    .progress-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .progress-track {
+      flex: 1;
+      height: 5px;
+      background: var(--bg-control);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 99px;
+      transition: width 0.25s ease, background-color 0.2s ease;
+    }
+
+    .progress-fill.stale {
+      background: var(--stale);
+    }
+
+    .progress-fill.building {
+      background: linear-gradient(90deg, var(--accent) 0%, #60a5fa 50%, var(--accent) 100%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite linear;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* Tab 2：她此刻状态 (Pure Layout Widget) */
+    .persona-bar {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      border-bottom: 1px solid var(--border-hairline);
+    }
+
+    .persona-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .persona-activity {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .quiet-pill {
+      font-size: 11px;
+      padding: 1.5px 7px;
+      border-radius: 99px;
+      background: var(--bg-control);
+      border: 1px solid var(--border-hairline);
+      color: var(--text-secondary);
+    }
+
+    .quiet-pill.accel {
+      color: var(--stale);
+      border-color: rgba(251, 191, 36, 0.3);
+      background: rgba(251, 191, 36, 0.08);
+    }
+
+    .schedule-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-bottom: 1px solid var(--border-hairline);
+    }
+
+    @media (max-width: 560px) {
+      .schedule-bar {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .slot-cell {
+      padding: 10px 14px;
+      border-right: 1px solid var(--border-hairline);
+      font-size: 11.5px;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      transition: background-color 0.15s ease;
+    }
+
+    .slot-cell:last-child {
+      border-right: none;
+    }
+
+    .slot-cell.current {
+      background: var(--accent-soft);
+      color: var(--text-primary);
+    }
+
+    .slot-cell.current .slot-time {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    [data-theme="dark"] .slot-cell.current .slot-time {
+      color: #8da2ff;
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .channel-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--bg-control);
+      border: 1px solid var(--border-subtle);
+      border-radius: 5px;
+      padding: 2px 8px;
+      font-size: 11.5px;
+      color: var(--text-secondary);
+    }
+
+    .chip-remove {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .chip-remove:hover {
+      color: var(--error);
+    }
+
+    /* Tab 3：极简记忆列表 */
+    .filter-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .owner-bar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .owner-pill {
+      background: transparent;
+      border: 1px solid var(--border-hairline);
+      border-radius: 99px;
+      padding: 3.5px 10px;
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.12s ease;
+    }
+
+    .owner-pill:hover {
+      color: var(--text-primary);
+      border-color: var(--border-subtle);
+    }
+
+    .owner-pill.active {
+      background: var(--accent-soft);
+      border-color: var(--accent-border);
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .mem-row {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-hairline);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .mem-row:last-child {
+      border-bottom: none;
+    }
+
+    .mem-left {
+      display: flex;
+      align-items: baseline;
+      gap: 9px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .mem-kind {
+      font-size: 10.5px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--accent);
+      flex-shrink: 0;
+      width: 42px;
+    }
+
+    [data-theme="dark"] .mem-kind {
+      color: #8da2ff;
+    }
+
+    .mem-text {
+      font-size: 12.5px;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .mem-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* 底部悬浮胶囊演示切换器 (Floating Minimal Dock) */
+    .floating-dock {
+      position: fixed;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 99px;
+      padding: 3px 5px;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      box-shadow: var(--shadow-window);
+      z-index: 90;
+    }
+
+    .dock-btn {
+      background: transparent;
+      border: none;
+      border-radius: 99px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.12s ease;
+    }
+
+    .dock-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .dock-btn.active {
+      background: var(--accent);
+      color: #ffffff;
+    }
+
+    .dock-divider {
+      width: 1px;
+      height: 14px;
+      background: var(--border-subtle);
+      margin: 0 3px;
+    }
+
+    .toast-box {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      box-shadow: var(--shadow-window);
+      opacity: 0;
+      transform: translateY(-6px);
+      pointer-events: none;
+      transition: all 0.15s ease;
+      z-index: 100;
+    }
+
+    .toast-box.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <!-- DeepSeek Harness 一体化桌面窗口 -->
+  <div class="dsh-shell">
+    <!-- 左侧 DSH 设置菜单 -->
+    <aside class="dsh-sidebar">
+      <div>
+        <div class="window-dots" aria-hidden="true">
+          <span class="window-dot"></span>
+          <span class="window-dot"></span>
+          <span class="window-dot"></span>
+        </div>
+
+        <div class="nav-group">Settings</div>
+        <div class="nav-item"><span>通用</span></div>
+        <div class="nav-item"><span>模型</span></div>
+        <div class="nav-item"><span>权限</span></div>
+        <div class="nav-item"><span>搜索</span></div>
+
+        <div class="nav-group" style="margin-top: 12px;">Plugins</div>
+        <div class="nav-item active">
+          <span>鱼 · 记忆检索</span>
+          <span class="nav-dot"></span>
+        </div>
+        <div class="nav-item"><span>QQ 桥接</span></div>
+        <div class="nav-item"><span>飞鱼心情</span></div>
+      </div>
+
+      <div class="sidebar-foot mono">
+        <span>feiyu</span>
+        <span id="headerGenBadge">gen #3</span>
+      </div>
+    </aside>
+
+    <!-- 右侧主面板 -->
+    <main class="dsh-main">
+      <!-- 顶栏：左侧插件名 + 右侧分段 Tab -->
+      <header class="top-bar">
+        <div class="brand-title">
+          <span class="brand-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 16s3-6 10-6 10 6 10 6-3 6-10 6-10-6-10-6Z"/>
+              <circle cx="12" cy="16" r="2.5"/>
+            </svg>
+          </span>
+          <span>鱼 · dsh-fish-soul</span>
+        </div>
+
+        <nav class="segmented" role="tablist">
+          <button type="button" class="seg-btn active" id="tabBtnRetrieval" onclick="switchTab('retrieval')">
+            记忆检索
+          </button>
+          <button type="button" class="seg-btn" id="tabBtnLife" onclick="switchTab('life')">
+            自走与主动
+          </button>
+          <button type="button" class="seg-btn" id="tabBtnInspector" onclick="switchTab('inspector')">
+            记忆检视
+          </button>
+        </nav>
+      </header>
+
+      <!-- ================= TAB 1：记忆检索（严格对齐 §9.4 线框结构，零冗余文字） ================= -->
+      <section class="tab-pane active" id="paneRetrieval" role="tabpanel">
+        <!-- 检索方式 -->
+        <div class="surface">
+          <div class="row">
+            <span class="label">检索方式</span>
+            <div>
+              <div class="segmented">
+                <label class="seg-item">
+                  <input type="radio" name="retrievalMode" id="modeBm25Only" value="bm25" onchange="onRetrievalModeChange('bm25')" />
+                  <span>仅关键词 BM25</span>
+                </label>
+                <label class="seg-item">
+                  <input type="radio" name="retrievalMode" id="modeHybrid" value="hybrid" checked onchange="onRetrievalModeChange('hybrid')" />
+                  <span>混合（关键词 + 语义向量）</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 向量接口 -->
+        <div class="surface" id="remoteVecSection">
+          <div class="row">
+            <label class="label" for="inputBaseUrl">BaseURL</label>
+            <input
+              type="text"
+              id="inputBaseUrl"
+              class="text-input mono"
+              value="https://api.siliconflow.cn/v1"
+              oninput="onEndpointOrModelInput()"
+            />
+          </div>
+
+          <div class="row">
+            <label class="label" for="inputApiKey">Key</label>
+            <div class="control-inline" style="width: 100%;">
+              <div class="pwd-wrap">
+                <input
+                  type="password"
+                  id="inputApiKey"
+                  class="text-input mono"
+                  value="sk-fish-soul-9f8e7d6c5b4a"
+                  placeholder="sk-..."
+                />
+                <button
+                  type="button"
+                  class="icon-btn"
+                  id="toggleKeyBtn"
+                  title="显隐密钥"
+                  onclick="togglePasswordVisibility()"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                </button>
+              </div>
+              <button type="button" class="btn btn-primary" id="btnTestConn" onclick="handleProbeConnection()">
+                测试连接
+              </button>
+            </div>
+          </div>
+
+          <div class="row">
+            <label class="label" for="inputModel">模型</label>
+            <div class="control-inline" style="width: 100%;">
+              <input
+                type="text"
+                id="inputModel"
+                class="text-input mono"
+                value="BAAI/bge-m3"
+                oninput="onEndpointOrModelInput()"
+              />
+              <input
+                type="text"
+                id="inputDim"
+                class="text-input mono"
+                value="1024 dim"
+                readonly
+                title="向量维度（测试连接后自动填入）"
+              />
+            </div>
+          </div>
+
+          <div class="row">
+            <span class="label">状态</span>
+            <div class="status-line ready" id="connStatusBanner">
+              <span class="dot"></span>
+              <span class="mono" id="connStatusText">可用 · 延迟 210ms</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 融合与召回 -->
+        <div class="surface">
+          <div class="row">
+            <span class="label">融合</span>
+            <div>
+              <div class="segmented">
+                <label class="seg-item">
+                  <input type="radio" name="fusionMethod" id="fusionRrf" value="rrf" checked onchange="onFusionChange('rrf')" />
+                  <span>RRF（推荐）</span>
+                </label>
+                <label class="seg-item">
+                  <input type="radio" name="fusionMethod" id="fusionWeighted" value="weighted" onchange="onFusionChange('weighted')" />
+                  <span>加权平均</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <span class="label">召回</span>
+            <div class="control-inline">
+              <span style="font-size: 12px; color: var(--text-secondary);">条数</span>
+              <input type="number" id="inputTopK" class="text-input num-input mono" value="5" min="1" max="20" onchange="saveRetrievalConfig()" />
+              <span style="font-size: 12px; color: var(--text-secondary); margin-left: 8px;">token 预算</span>
+              <input type="number" id="inputTokenBudget" class="text-input num-input mono" value="1200" step="100" min="300" max="4000" onchange="saveRetrievalConfig()" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 索引覆盖 -->
+        <div class="surface">
+          <div class="row">
+            <span class="label">索引覆盖</span>
+            <div class="progress-wrap">
+              <div class="progress-track">
+                <div class="progress-fill" id="coverageBarFill" style="width: 81.0%;"></div>
+              </div>
+              <span class="mono" style="font-size: 12px; color: var(--text-secondary);" id="coverageCountText">
+                812 / 1,003 条
+              </span>
+            </div>
+          </div>
+
+          <div class="row">
+            <span class="label"></span>
+            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <button type="button" class="btn" id="btnRebuildIndex" onclick="handleRebuildToggle()">
+                  重建索引
+                </button>
+                <span class="mono" style="font-size: 11.5px; color: var(--text-muted);" id="lastBuiltTimeText">
+                  上次重建：2 分钟前
+                </span>
+              </div>
+              <span class="mono" style="font-size: 11.5px; color: var(--stale); display: none;" id="staleWarningBanner">
+                ● 模型已变更，需重建 (#3 → #4)
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= TAB 2：自走与主动 ================= -->
+      <section class="tab-pane" id="paneLife" role="tabpanel">
+        <!-- 她此刻状态 -->
+        <div class="surface">
+          <div class="persona-bar">
+            <div class="persona-left">
+              <span class="status-line ready">
+                <span class="dot"></span>
+              </span>
+              <span class="persona-activity" id="currentActivityText">窝在沙发看番回消息</span>
+              <span class="quiet-pill" id="moodToneDisplay">慵懒</span>
+            </div>
+
+            <div class="control-inline mono">
+              <span class="quiet-pill" id="lifeScalePill">1×</span>
+              <span style="font-size: 12.5px; color: var(--text-secondary);" id="virtualClockDisplay">14:30:00</span>
+              <span class="quiet-pill" id="proactiveQuotaDisplay">主动 1 / 2</span>
+              <button type="button" class="btn" style="padding: 3px 8px; font-size: 11px;" id="btnSimTick" onclick="triggerManualTick()">
+                +15m
+              </button>
+              <button type="button" class="btn" style="padding: 3px 8px; font-size: 11px;" id="btnSimProactive" onclick="simulateProactiveSpeak()">
+                触发主动
+              </button>
+            </div>
+          </div>
+
+          <div class="schedule-bar" id="scheduleStripContainer">
+            <div class="slot-cell" data-slot="0">
+              <span class="slot-time mono">08:30 - 12:00</span>
+              <span>专业课与整理笔记</span>
+            </div>
+            <div class="slot-cell current" data-slot="1">
+              <span class="slot-time mono">14:00 - 17:00</span>
+              <span>窝在沙发看番回消息</span>
+            </div>
+            <div class="slot-cell" data-slot="2">
+              <span class="slot-time mono">19:30 - 23:30</span>
+              <span>打游戏 / 水群吹水</span>
+            </div>
+            <div class="slot-cell" data-slot="3">
+              <span class="slot-time mono">23:30 - 08:30</span>
+              <span>睡眠勿扰</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 主动投递白名单 -->
+        <div class="surface" id="whitelistBody">
+          <div class="row">
+            <span class="label">主动开口</span>
+            <div class="control-inline" style="justify-content: space-between; width: 100%;">
+              <label class="switch-wrap">
+                <input type="checkbox" id="chkProactiveEnabled" checked onchange="saveProactiveConfig()" />
+              </label>
+              <div class="control-inline">
+                <span style="font-size: 12px; color: var(--text-secondary);">每日上限</span>
+                <input type="number" id="inputDailyMax" class="text-input num-input mono" value="2" min="1" max="2" onchange="saveProactiveConfig()" />
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <span class="label">触发时段</span>
+            <div class="control-inline">
+              <input type="number" id="inputActiveStart" class="text-input num-input mono" value="8" min="0" max="23" onchange="saveProactiveConfig()" />
+              <span style="color: var(--text-muted);">-</span>
+              <input type="number" id="inputActiveEnd" class="text-input num-input mono" value="24" min="1" max="24" onchange="saveProactiveConfig()" />
+              <span style="font-size: 12px; color: var(--text-secondary);">时</span>
+              <span style="font-size: 12px; color: var(--text-secondary); margin-left: 10px;">空闲阈值</span>
+              <input type="number" id="inputIdleHours" class="text-input num-input mono" value="6" min="1" max="48" onchange="saveProactiveConfig()" />
+              <span style="font-size: 12px; color: var(--text-secondary);">h</span>
+            </div>
+          </div>
+
+          <div class="row">
+            <label class="label" for="inputMasterChannel">主人私聊</label>
+            <input type="text" id="inputMasterChannel" class="text-input mono" value="private:10001" onchange="saveProactiveConfig()" />
+          </div>
+
+          <div class="row">
+            <span class="label">自建群聊</span>
+            <div class="control-inline" style="width: 100%; justify-content: space-between;">
+              <div class="tag-list" id="groupChipList"></div>
+              <div class="control-inline">
+                <input
+                  type="text"
+                  id="inputNewGroupChannel"
+                  class="text-input mono"
+                  style="width: 128px; flex: 0 0 auto;"
+                  placeholder="group:20099"
+                />
+                <button type="button" class="btn" id="btnAddGroup" onclick="addSelfGroupChannel()">
+                  + 添加
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= TAB 3：记忆检视 ================= -->
+      <section class="tab-pane" id="paneInspector" role="tabpanel">
+        <div class="filter-row">
+          <div class="owner-bar" id="ownerFilterBar"></div>
+          <span class="mono" style="font-size: 11.5px; color: var(--text-muted);" id="inspectorTotalBadge">5 条</span>
+        </div>
+
+        <div class="surface" id="memoryListContainer"></div>
+
+        <div class="surface">
+          <div class="row-between" style="background: var(--bg-control);">
+            <span style="font-size: 11.5px; font-weight: 600; color: var(--text-secondary);">待办到期 (pending)</span>
+            <span class="mono" style="font-size: 11px; color: var(--text-muted);" id="pendingCountPill">2</span>
+          </div>
+          <div id="pendingListContainer"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 底部极简悬浮胶囊：一键切换 5 种演示状态 + 主题 -->
+  <div class="floating-dock" role="region" aria-label="演示状态切换">
+    <button type="button" class="dock-btn active" id="simBtnReady" onclick="applyPreset('ready')">正常态</button>
+    <button type="button" class="dock-btn" id="simBtnError" onclick="applyPreset('error')">降级态</button>
+    <button type="button" class="dock-btn" id="simBtnStale" onclick="applyPreset('stale')">Stale态</button>
+    <button type="button" class="dock-btn" id="simBtnBuilding" onclick="applyPreset('building')">重建中</button>
+    <button type="button" class="dock-btn" id="simBtnAccel" onclick="applyPreset('accel')">1000×加速</button>
+    <span class="dock-divider"></span>
+    <button type="button" class="dock-btn" id="themeToggleBtn" onclick="toggleTheme()">
+      <span id="themeIcon">☀️</span>
+    </button>
+  </div>
+
+  <div class="toast-box" id="toastBox" role="status" aria-live="polite"></div>
+
+  <script>
+    const state = {
+      theme: 'dark',
+      activeTab: 'retrieval',
+      activePreset: 'ready',
+
+      retrieval: {
+        enabled: true,
+        baseURL: 'https://api.siliconflow.cn/v1',
+        apiKey: 'sk-fish-soul-9f8e7d6c5b4a',
+        model: 'BAAI/bge-m3',
+        dim: 1024,
+        fusionMethod: 'rrf',
+        topK: 5,
+        tokenBudget: 1200,
+        builtSnapshot: {
+          baseURL: 'https://api.siliconflow.cn/v1',
+          model: 'BAAI/bge-m3',
+          dim: 1024
+        },
+        vecMeta: {
+          status: 'ready',
+          generationId: 3,
+          latencyMs: 210,
+          builtAtText: '2 分钟前'
+        },
+        coverage: {
+          vectorizedCount: 812,
+          totalActiveCount: 1003,
+          isWorkerRunning: false
+        }
+      },
+
+      life: {
+        virtualTimeMs: new Date('2026-10-30T14:30:00+08:00').getTime(),
+        timeScale: 1,
+        dailyMoodTone: '慵懒',
+        currentSlotIndex: 1,
+        proactiveCount: 1,
+        dailyMaxCount: 2,
+        realCooldownSec: 0,
+        proactiveConfig: {
+          enabled: true,
+          dailyMaxCount: 2,
+          activeHours: [8, 24],
+          idleTriggerHours: 6,
+          masterPrivateChannelId: 'private:10001',
+          selfGroupChannelIds: ['group:20001', 'group:20088']
+        }
+      },
+
+      selectedOwnerId: 'all',
+      persons: [
+        { ownerId: 'self', displayName: 'self', relationStage: '' },
+        { ownerId: 'user:master', displayName: '阿泽', relationStage: 'close' },
+        { ownerId: 'user:p_8f9a2b1c', displayName: '小林', relationStage: 'acquaintance' },
+        { ownerId: 'user:p_3d7e91a0', displayName: '阿K', relationStage: 'stranger' }
+      ],
+      memories: [
+        {
+          id: 1003,
+          ownerId: 'user:master',
+          channelId: 'private:10001',
+          kind: 'event',
+          content: '明天下午三点体系结构期中考试，提前半小时提醒带准考证',
+          importance: 5,
+          vecGenId: null
+        },
+        {
+          id: 1002,
+          ownerId: 'user:master',
+          channelId: 'private:10001',
+          kind: 'fact',
+          content: '喝咖啡只喝冰美式，不加糖不加奶，熬夜写代码点双份浓缩',
+          importance: 4,
+          vecGenId: 3
+        },
+        {
+          id: 1001,
+          ownerId: 'self',
+          channelId: 'group:20001',
+          kind: 'feeling',
+          content: '昨晚把整季旧番补完了，今天下午有点犯困只想窝在沙发摸鱼',
+          importance: 2,
+          vecGenId: 3
+        },
+        {
+          id: 998,
+          ownerId: 'user:p_8f9a2b1c',
+          channelId: 'group:20001',
+          kind: 'fact',
+          content: '周末要去漫展拍场照，正在纠结带哪支定焦镜头',
+          importance: 3,
+          vecGenId: 3
+        },
+        {
+          id: 994,
+          ownerId: 'user:p_3d7e91a0',
+          channelId: 'group:20088',
+          kind: 'event',
+          content: '在测试群问了一句显卡驱动掉帧怎么排查',
+          importance: 1,
+          vecGenId: 2
+        }
+      ],
+      pendings: [
+        {
+          id: 19,
+          channelId: 'private:10001',
+          dueAtStr: '10-31 14:30',
+          reason: '提醒阿泽下午三点体系结构期中考试记得带准考证'
+        },
+        {
+          id: 18,
+          channelId: 'group:20001',
+          dueAtStr: '10-31 20:00',
+          reason: '问问小林漫展定焦镜头选好没'
+        }
+      ]
+    };
+
+    let workerTimer = null;
+    let accelClockTimer = null;
+    let cooldownTimer = null;
+
+    const scheduleSlots = [
+      { range: '08:30 - 12:00', activity: '专业课与整理笔记' },
+      { range: '14:00 - 17:00', activity: '窝在沙发看番回消息' },
+      { range: '19:30 - 23:30', activity: '打游戏 / 水群吹水' },
+      { range: '23:30 - 08:30', activity: '睡眠勿扰' }
+    ];
+
+    function showToast(msg) {
+      const box = document.getElementById('toastBox');
+      if (!box) return;
+      box.textContent = msg;
+      box.classList.add('show');
+      clearTimeout(box._hideTimer);
+      box._hideTimer = setTimeout(() => {
+        box.classList.remove('show');
+      }, 2000);
+    }
+
+    function toggleTheme() {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', state.theme);
+      document.getElementById('themeIcon').textContent = state.theme === 'dark' ? '☀️' : '🌙';
+    }
+
+    function switchTab(tabKey) {
+      state.activeTab = tabKey;
+      const mapping = {
+        retrieval: ['tabBtnRetrieval', 'paneRetrieval'],
+        life: ['tabBtnLife', 'paneLife'],
+        inspector: ['tabBtnInspector', 'paneInspector']
+      };
+      Object.keys(mapping).forEach((k) => {
+        const [btnId, paneId] = mapping[k];
+        document.getElementById(btnId).classList.toggle('active', k === tabKey);
+        document.getElementById(paneId).classList.toggle('active', k === tabKey);
+      });
+    }
+
+    function applyPreset(presetKey) {
+      stopWorkerSimulation();
+      stopAccelClockSimulation();
+
+      state.activePreset = presetKey;
+      const btnIds = {
+        ready: 'simBtnReady',
+        error: 'simBtnError',
+        stale: 'simBtnStale',
+        building: 'simBtnBuilding',
+        accel: 'simBtnAccel'
+      };
+      Object.keys(btnIds).forEach((k) => {
+        document.getElementById(btnIds[k]).classList.toggle('active', k === presetKey);
+      });
+
+      if (presetKey === 'ready') {
+        state.retrieval.enabled = true;
+        state.retrieval.baseURL = 'https://api.siliconflow.cn/v1';
+        state.retrieval.apiKey = 'sk-fish-soul-9f8e7d6c5b4a';
+        state.retrieval.model = 'BAAI/bge-m3';
+        state.retrieval.dim = 1024;
+        state.retrieval.builtSnapshot = {
+          baseURL: 'https://api.siliconflow.cn/v1',
+          model: 'BAAI/bge-m3',
+          dim: 1024
+        };
+        state.retrieval.vecMeta.status = 'ready';
+        state.retrieval.vecMeta.generationId = 3;
+        state.retrieval.vecMeta.latencyMs = 210;
+        state.retrieval.coverage.vectorizedCount = 812;
+        state.life.timeScale = 1;
+        switchTab('retrieval');
+      } else if (presetKey === 'error') {
+        state.retrieval.enabled = true;
+        state.retrieval.apiKey = '';
+        state.retrieval.vecMeta.status = 'error';
+        state.retrieval.vecMeta.latencyMs = 804;
+        state.life.timeScale = 1;
+        switchTab('retrieval');
+      } else if (presetKey === 'stale') {
+        state.retrieval.enabled = true;
+        state.retrieval.apiKey = 'sk-fish-soul-9f8e7d6c5b4a';
+        state.retrieval.model = 'text-embedding-3-small';
+        state.retrieval.vecMeta.status = 'stale';
+        state.life.timeScale = 1;
+        switchTab('retrieval');
+      } else if (presetKey === 'building') {
+        state.retrieval.enabled = true;
+        state.retrieval.apiKey = 'sk-fish-soul-9f8e7d6c5b4a';
+        state.retrieval.vecMeta.status = 'building';
+        state.retrieval.vecMeta.generationId = 4;
+        state.retrieval.builtSnapshot = {
+          baseURL: state.retrieval.baseURL,
+          model: state.retrieval.model,
+          dim: state.retrieval.dim
+        };
+        state.life.timeScale = 1;
+        switchTab('retrieval');
+        startWorkerSimulation();
+      } else if (presetKey === 'accel') {
+        state.life.timeScale = 1000;
+        switchTab('life');
+        startAccelClockSimulation();
+      }
+
+      syncRetrievalDom();
+      syncLifeDom();
+      renderInspector();
+    }
+
+    function onRetrievalModeChange(mode) {
+      state.retrieval.enabled = mode === 'hybrid';
+      syncRetrievalDom();
+    }
+
+    function togglePasswordVisibility() {
+      const input = document.getElementById('inputApiKey');
+      input.type = input.type === 'password' ? 'text' : 'password';
+    }
+
+    function onEndpointOrModelInput() {
+      const curUrl = document.getElementById('inputBaseUrl').value.trim();
+      const curModel = document.getElementById('inputModel').value.trim();
+      state.retrieval.baseURL = curUrl;
+      state.retrieval.model = curModel;
+
+      if (state.retrieval.coverage.isWorkerRunning) {
+        stopWorkerSimulation();
+      }
+
+      const snap = state.retrieval.builtSnapshot;
+      state.retrieval.vecMeta.status = (curUrl !== snap.baseURL || curModel !== snap.model) ? 'stale' : 'ready';
+      syncRetrievalDom();
+    }
+
+    function handleProbeConnection() {
+      const btn = document.getElementById('btnTestConn');
+      const apiKey = document.getElementById('inputApiKey').value.trim();
+      const baseURL = document.getElementById('inputBaseUrl').value.trim();
+      const model = document.getElementById('inputModel').value.trim();
+
+      state.retrieval.apiKey = apiKey;
+      state.retrieval.baseURL = baseURL;
+      state.retrieval.model = model;
+
+      btn.disabled = true;
+      btn.textContent = '测试中...';
+
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = '测试连接';
+
+        if (!apiKey || !baseURL) {
+          state.retrieval.vecMeta.status = 'error';
+          state.retrieval.vecMeta.latencyMs = 804;
+          syncRetrievalDom();
+          return;
+        }
+
+        const detectedDim = model.toLowerCase().includes('small') || model.toLowerCase().includes('ada') ? 1536 : 1024;
+        const latency = Math.floor(165 + Math.random() * 85);
+        state.retrieval.dim = detectedDim;
+        state.retrieval.vecMeta.latencyMs = latency;
+
+        const snap = state.retrieval.builtSnapshot;
+        state.retrieval.vecMeta.status =
+          (baseURL !== snap.baseURL || model !== snap.model || detectedDim !== snap.dim) ? 'stale' : 'ready';
+
+        syncRetrievalDom();
+      }, 320);
+    }
+
+    function onFusionChange(method) {
+      state.retrieval.fusionMethod = method;
+    }
+
+    function saveRetrievalConfig() {
+      state.retrieval.topK = parseInt(document.getElementById('inputTopK').value, 10) || 5;
+      state.retrieval.tokenBudget = parseInt(document.getElementById('inputTokenBudget').value, 10) || 1200;
+      showToast('已保存');
+    }
+
+    function handleRebuildToggle() {
+      if (state.retrieval.coverage.isWorkerRunning) {
+        stopWorkerSimulation();
+        state.retrieval.vecMeta.status = 'ready';
+        syncRetrievalDom();
+      } else {
+        if (state.retrieval.vecMeta.status === 'stale' || state.retrieval.coverage.vectorizedCount >= state.retrieval.coverage.totalActiveCount) {
+          state.retrieval.vecMeta.generationId += 1;
+          state.retrieval.coverage.vectorizedCount = 0;
+          state.retrieval.builtSnapshot = {
+            baseURL: state.retrieval.baseURL,
+            model: state.retrieval.model,
+            dim: state.retrieval.dim
+          };
+        }
+        state.retrieval.vecMeta.status = 'building';
+        startWorkerSimulation();
+        syncRetrievalDom();
+      }
+    }
+
+    function startWorkerSimulation() {
+      stopWorkerSimulation();
+      state.retrieval.coverage.isWorkerRunning = true;
+      workerTimer = setInterval(() => {
+        const cov = state.retrieval.coverage;
+        if (cov.vectorizedCount < cov.totalActiveCount) {
+          cov.vectorizedCount = Math.min(cov.totalActiveCount, cov.vectorizedCount + 5);
+          state.retrieval.vecMeta.builtAtText = '刚刚';
+          syncRetrievalDom();
+        } else {
+          stopWorkerSimulation();
+          state.retrieval.vecMeta.status = 'ready';
+          state.retrieval.vecMeta.builtAtText = '刚刚';
+          state.memories.forEach((m) => {
+            m.vecGenId = state.retrieval.vecMeta.generationId;
+          });
+          syncRetrievalDom();
+          renderInspector();
+        }
+      }, 500);
+    }
+
+    function stopWorkerSimulation() {
+      if (workerTimer) {
+        clearInterval(workerTimer);
+        workerTimer = null;
+      }
+      state.retrieval.coverage.isWorkerRunning = false;
+    }
+
+    function syncRetrievalDom() {
+      const r = state.retrieval;
+      document.getElementById('modeBm25Only').checked = !r.enabled;
+      document.getElementById('modeHybrid').checked = r.enabled;
+      document.getElementById('remoteVecSection').classList.toggle('is-disabled', !r.enabled);
+
+      const baseUrlInput = document.getElementById('inputBaseUrl');
+      if (document.activeElement !== baseUrlInput) baseUrlInput.value = r.baseURL;
+      const modelInput = document.getElementById('inputModel');
+      if (document.activeElement !== modelInput) modelInput.value = r.model;
+      const keyInput = document.getElementById('inputApiKey');
+      if (document.activeElement !== keyInput) keyInput.value = r.apiKey;
+      document.getElementById('inputDim').value = `${r.dim} dim`;
+
+      document.getElementById('headerGenBadge').textContent = `gen #${r.vecMeta.generationId}`;
+
+      const banner = document.getElementById('connStatusBanner');
+      const bannerText = document.getElementById('connStatusText');
+      const staleBanner = document.getElementById('staleWarningBanner');
+      const fill = document.getElementById('coverageBarFill');
+      const rebuildBtn = document.getElementById('btnRebuildIndex');
+
+      if (r.vecMeta.status === 'ready') {
+        banner.className = 'status-line ready';
+        bannerText.textContent = `可用 · 延迟 ${r.vecMeta.latencyMs}ms`;
+        staleBanner.style.display = 'none';
+        fill.className = 'progress-fill';
+        rebuildBtn.className = 'btn';
+        rebuildBtn.textContent =
+          r.coverage.vectorizedCount < r.coverage.totalActiveCount && r.coverage.vectorizedCount > 0
+            ? '继续重建'
+            : '重建索引';
+      } else if (r.vecMeta.status === 'stale') {
+        const nextGen = r.vecMeta.generationId + 1;
+        banner.className = 'status-line stale';
+        bannerText.textContent = '模型已变更 · 待重建索引';
+        staleBanner.style.display = 'inline';
+        staleBanner.textContent = `● 模型已变更，需重建 (#${r.vecMeta.generationId} → #${nextGen})`;
+        fill.className = 'progress-fill stale';
+        rebuildBtn.className = 'btn btn-warning';
+        rebuildBtn.textContent = '重建索引';
+      } else if (r.vecMeta.status === 'building') {
+        banner.className = 'status-line building';
+        bannerText.textContent = `重建中 (gen #${r.vecMeta.generationId}) · 32 条/分钟`;
+        staleBanner.style.display = 'none';
+        fill.className = 'progress-fill building';
+        rebuildBtn.className = 'btn btn-primary';
+        rebuildBtn.textContent = '暂停重建';
+      } else if (r.vecMeta.status === 'error') {
+        banner.className = 'status-line error';
+        bannerText.textContent = '连接失败/超时 · 已自动降级为纯 BM25（对话不受影响）';
+        staleBanner.style.display = 'none';
+        fill.className = 'progress-fill stale';
+        rebuildBtn.className = 'btn';
+        rebuildBtn.textContent = '重建索引';
+      }
+
+      const pct = r.coverage.totalActiveCount > 0
+        ? ((r.coverage.vectorizedCount / r.coverage.totalActiveCount) * 100).toFixed(1)
+        : '0.0';
+      document.getElementById('coverageCountText').textContent =
+        `${r.coverage.vectorizedCount.toLocaleString()} / ${r.coverage.totalActiveCount.toLocaleString()} 条`;
+      fill.style.width = `${pct}%`;
+      document.getElementById('lastBuiltTimeText').textContent = `上次重建：${r.vecMeta.builtAtText}`;
+    }
+
+    function formatClockShort(ms) {
+      const d = new Date(ms);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mi = String(d.getMinutes()).padStart(2, '0');
+      const ss = String(d.getSeconds()).padStart(2, '0');
+      return `${hh}:${mi}:${ss}`;
+    }
+
+    function updateSlotFromHour(hour) {
+      if (hour >= 8 && hour < 12) state.life.currentSlotIndex = 0;
+      else if (hour >= 12 && hour < 18) state.life.currentSlotIndex = 1;
+      else if (hour >= 18 && hour < 23) state.life.currentSlotIndex = 2;
+      else state.life.currentSlotIndex = 3;
+    }
+
+    function triggerManualTick() {
+      const prevDate = new Date(state.life.virtualTimeMs).getDate();
+      state.life.virtualTimeMs += 15 * 60 * 1000;
+      const curDateObj = new Date(state.life.virtualTimeMs);
+      if (curDateObj.getDate() !== prevDate) {
+        state.life.proactiveCount = 0;
+        const tones = ['元气', '慵懒', '平静'];
+        state.life.dailyMoodTone = tones[curDateObj.getDate() % tones.length];
+      }
+      updateSlotFromHour(curDateObj.getHours());
+      syncLifeDom();
+    }
+
+    function startAccelClockSimulation() {
+      stopAccelClockSimulation();
+      accelClockTimer = setInterval(triggerManualTick, 900);
+    }
+
+    function stopAccelClockSimulation() {
+      if (accelClockTimer) {
+        clearInterval(accelClockTimer);
+        accelClockTimer = null;
+      }
+    }
+
+    function simulateProactiveSpeak() {
+      if (state.life.realCooldownSec > 0) {
+        showToast(`冷却中 (${state.life.realCooldownSec}s)`);
+        return;
+      }
+      if (state.life.proactiveCount >= state.life.dailyMaxCount) {
+        showToast(`已达今日上限 (${state.life.proactiveCount}/${state.life.dailyMaxCount})`);
+        return;
+      }
+      state.life.proactiveCount += 1;
+      state.life.realCooldownSec = 15;
+
+      if (cooldownTimer) clearInterval(cooldownTimer);
+      cooldownTimer = setInterval(() => {
+        if (state.life.realCooldownSec > 0) {
+          state.life.realCooldownSec -= 1;
+        } else {
+          clearInterval(cooldownTimer);
+          cooldownTimer = null;
+        }
+      }, 1000);
+
+      syncLifeDom();
+      showToast('已发送主动消息');
+    }
+
+    function renderGroupChips() {
+      const container = document.getElementById('groupChipList');
+      container.innerHTML = '';
+      state.life.proactiveConfig.selfGroupChannelIds.forEach((cid, idx) => {
+        const chip = document.createElement('span');
+        chip.className = 'channel-chip mono';
+        chip.innerHTML = `<span>${cid}</span>`;
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'chip-remove';
+        delBtn.textContent = '×';
+        delBtn.onclick = () => {
+          state.life.proactiveConfig.selfGroupChannelIds.splice(idx, 1);
+          renderGroupChips();
+        };
+        chip.appendChild(delBtn);
+        container.appendChild(chip);
+      });
+    }
+
+    function addSelfGroupChannel() {
+      const input = document.getElementById('inputNewGroupChannel');
+      let val = input.value.trim();
+      if (!val) return;
+      if (!val.startsWith('group:')) val = 'group:' + val;
+      if (!state.life.proactiveConfig.selfGroupChannelIds.includes(val)) {
+        state.life.proactiveConfig.selfGroupChannelIds.push(val);
+        renderGroupChips();
+      }
+      input.value = '';
+    }
+
+    function saveProactiveConfig() {
+      const maxVal = Math.min(2, Math.max(1, parseInt(document.getElementById('inputDailyMax').value, 10) || 2));
+      document.getElementById('inputDailyMax').value = String(maxVal);
+      state.life.dailyMaxCount = maxVal;
+      state.life.proactiveConfig.enabled = document.getElementById('chkProactiveEnabled').checked;
+      state.life.proactiveConfig.dailyMaxCount = maxVal;
+      state.life.proactiveConfig.masterPrivateChannelId = document.getElementById('inputMasterChannel').value.trim();
+      syncLifeDom();
+      showToast('已保存');
+    }
+
+    function syncLifeDom() {
+      const l = state.life;
+      const isAccel = l.timeScale > 1;
+      const lifeScale = document.getElementById('lifeScalePill');
+
+      if (isAccel) {
+        lifeScale.className = 'quiet-pill accel mono';
+        lifeScale.textContent = `⚡ ${l.timeScale}×`;
+      } else {
+        lifeScale.className = 'quiet-pill mono';
+        lifeScale.textContent = '1×';
+      }
+
+      document.getElementById('virtualClockDisplay').textContent = formatClockShort(l.virtualTimeMs);
+      document.getElementById('moodToneDisplay').textContent = l.dailyMoodTone;
+
+      const slot = scheduleSlots[l.currentSlotIndex];
+      document.getElementById('currentActivityText').textContent = slot.activity;
+      document.getElementById('proactiveQuotaDisplay').textContent = `主动 ${l.proactiveCount} / ${l.dailyMaxCount}`;
+
+      const slotEls = document.querySelectorAll('#scheduleStripContainer .slot-cell');
+      slotEls.forEach((el, idx) => {
+        el.classList.toggle('current', idx === l.currentSlotIndex);
+      });
+
+      renderGroupChips();
+    }
+
+    function renderInspector() {
+      const bar = document.getElementById('ownerFilterBar');
+      bar.innerHTML = '';
+
+      const allChip = document.createElement('button');
+      allChip.type = 'button';
+      allChip.className = 'owner-pill' + (state.selectedOwnerId === 'all' ? ' active' : '');
+      allChip.innerHTML = `<span>全部</span>`;
+      allChip.onclick = () => {
+        state.selectedOwnerId = 'all';
+        renderInspector();
+      };
+      bar.appendChild(allChip);
+
+      state.persons.forEach((p) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'owner-pill' + (state.selectedOwnerId === p.ownerId ? ' active' : '');
+        const stageText = p.relationStage ? ` · ${p.relationStage}` : '';
+        btn.innerHTML = `<span>${p.displayName}${stageText}</span>`;
+        btn.onclick = () => {
+          state.selectedOwnerId = p.ownerId;
+          renderInspector();
+        };
+        bar.appendChild(btn);
+      });
+
+      const filtered = state.selectedOwnerId === 'all'
+        ? state.memories
+        : state.memories.filter((m) => m.ownerId === state.selectedOwnerId);
+
+      document.getElementById('inspectorTotalBadge').textContent = `${filtered.length} 条`;
+
+      const listEl = document.getElementById('memoryListContainer');
+      listEl.innerHTML = '';
+      const curGen = state.retrieval.vecMeta.generationId;
+
+      filtered.forEach((m) => {
+        const row = document.createElement('div');
+        row.className = 'mem-row';
+
+        const stars = '★'.repeat(m.importance);
+        const starColor = m.importance >= 3 ? 'var(--ready)' : 'var(--text-muted)';
+        const vecDot = m.vecGenId === null
+          ? `<span style="color: var(--building);" title="待向量化 (0.85×RRF补偿)">◐</span>`
+          : (m.vecGenId === curGen && state.retrieval.vecMeta.status !== 'stale'
+            ? `<span style="color: var(--ready);" title="已向量化">●</span>`
+            : `<span style="color: var(--stale);" title="世代过期">▲</span>`);
+
+        const left = document.createElement('div');
+        left.className = 'mem-left';
+        left.innerHTML = `
+          <span class="mem-kind">${m.kind}</span>
+          <span class="mem-text" title="${m.content}">${m.content}</span>
+        `;
+
+        const right = document.createElement('div');
+        right.className = 'mem-right mono';
+        right.innerHTML = `
+          <span style="color: ${starColor};" title="${m.importance >= 3 ? '豁免衰减' : '正常衰减'}">${stars}</span>
+          <span>${m.channelId}</span>
+          ${vecDot}
+        `;
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn-ghost-del';
+        delBtn.textContent = '×';
+        delBtn.title = '删除 (forget)';
+        delBtn.onclick = () => handleForgetMemory(m.id);
+        right.appendChild(delBtn);
+
+        row.appendChild(left);
+        row.appendChild(right);
+        listEl.appendChild(row);
+      });
+
+      const pendingListEl = document.getElementById('pendingListContainer');
+      pendingListEl.innerHTML = '';
+      document.getElementById('pendingCountPill').textContent = String(state.pendings.length);
+
+      state.pendings.forEach((p) => {
+        const pRow = document.createElement('div');
+        pRow.className = 'mem-row';
+        pRow.innerHTML = `
+          <div class="mem-left">
+            <span class="mem-kind" style="width: 72px;">${p.dueAtStr}</span>
+            <span class="mem-text">${p.reason}</span>
+          </div>
+          <div class="mem-right mono">
+            <span>${p.channelId}</span>
+          </div>
+        `;
+        pendingListEl.appendChild(pRow);
+      });
+    }
+
+    function handleForgetMemory(memoryId) {
+      const idx = state.memories.findIndex((m) => m.id === memoryId);
+      if (idx === -1) return;
+      const removed = state.memories.splice(idx, 1)[0];
+      state.retrieval.coverage.totalActiveCount = Math.max(0, state.retrieval.coverage.totalActiveCount - 1);
+      if (removed.vecGenId !== null && state.retrieval.coverage.vectorizedCount > 0) {
+        state.retrieval.coverage.vectorizedCount -= 1;
+      }
+      syncRetrievalDom();
+      renderInspector();
+      showToast(`已删除 #${memoryId}`);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      syncRetrievalDom();
+      syncLifeDom();
+      renderInspector();
+    });
+  </script>
+</body>
+</html>

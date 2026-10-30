@@ -1,0 +1,30 @@
+{
+  "name": "dsh-fish-soul",
+  "version": "0.1.0",
+  "description": "鱼 · 人格、按人记忆、日程自走与主动开口（DSH 插件，单角色 feiyu）",
+  "type": "module",
+  "main": "./lib/index.js",
+  "license": "MIT",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "slots"
+      ],
+      "external": [
+        "react"
+      ]
+    }
+  }
+}

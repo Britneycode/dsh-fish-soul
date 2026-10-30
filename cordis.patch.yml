@@ -1,0 +1,5 @@
+# dsh-fish-soul bundle patch: mounts the plugin into a profile.
+# `dsh plugin --profile desktop add` writes the same row.
+- insert:
+    - id: fish-soul
+      name: 'dsh-fish-soul'

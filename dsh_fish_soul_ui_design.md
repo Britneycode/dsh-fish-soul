@@ -1,60 +1,54 @@
-# dsh-fish-soul 前端 UI 设计文档（v1.3 · 极简自解释布局版）
+# dsh-fish-soul 前端 UI 设计文档（v1.4 · 宿主原生版）
 
-> **对应架构方案**：《dsh-fish-soul 设计方案》（v1.1）  
-> **宿主技术栈**：[`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness)（`packages/client/` · `@deepseek-ai/dsh-ui-settings-plugins` + `@deepseek-ai/dsh-ui-primitives` + `@deepseek-ai/dsh-ui-theme`）  
-> **核心设计信条**：**Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.**（摒弃冗余的副标题、括号注释与解释性小字，让空间排布、对齐关系与状态色点自然传达语义。）
+> **对应架构方案**：《dsh-fish-soul 设计方案》（DESIGN-fish-soul.md）  
+> **宿主技术栈**：[`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness)（`packages/client/` · `ui-theme` 的 `--dsw-alias-*` 令牌 + `ui-primitives` 控件）  
+> **核心设计信条**：**Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.**  
+> **实现文件**：`lib/client.js`（主面板）、`lib/client.douyin.js`（抖音页，按需加载）、`lib/panel.css`（全部样式）
 
-## 1. 极简视觉原则与宿主对齐
+## 1. 原则
 
-### 1.1 让布局自解释（Layout Does the Explaining）
+### 1.1 让布局自解释
 
-在 DeepSeek Harness 桌面端插件面板中，界面不应成为架构文档的“文字复读机”，而应通过**结构、对齐、状态反馈与微交互**自解释：
-
-| 传统后台做法（已摒弃） | DSH 极简自解释做法（本版采用） |
+| 以前 | 现在 |
 | :--- | :--- |
-| 在每个配置项下堆砌长串灰色说明文字（如“关闭时仅用本地分词 BM25，保留下方配置”） | **用交互态表达**：切换至「仅关键词 BM25」时，下方向量表单区直接平滑置灰半透明，输入值原样保留，无需一行解释文字 |
-| 用多个文字徽章重复标注 `vec_meta.status = ready`、`gen #3`、`timeoutMs: 800` | **用单一状态点表达**：在向量区直接呈现 `● 可用 · 210 ms`，修改模型时原位切换为琥珀色 `● 模型已变更 · 需重建 (#3 → #4)` |
-| 将 `维度` 做成可疑的输入框再加括号注释“（测试后自动填入）” | **用附着式只读胶囊表达**：将 `1024 dim` 作为只读等宽胶囊内嵌在 `模型` 输入框右侧，点击「测试连接」后数值直接刷新 |
-| 在「她此刻状态」中用四张带标题、副标题、小字注释的厚重卡片堆砌 | **用单行状态头 + 四段式水平时间轴表达**：左看当前动作与心情，右看虚拟时钟与 `1 / 2` 配额点，下方一条 4 段式时间轴直接高亮当前所处时段 |
-| 在记忆列表中逐行打印 `keywords:`、`emotion:`、`importance >= 3 豁免衰减` 等冗长字段名 | **用紧凑单行表结构表达**：`[类型] 记忆正文 ··· ★★★★ (豁免图标) · channel_id · 向量状态点 · [×]`，悬浮时才显露删除按钮 |
+| 每行下面一句灰色说明（“关着：只记不回（建议先这样跑一周）”“网页版拿不到抖音号……”） | 去掉。必要的状态只用一个短词贴在控件旁（`只记不回`），长解释留在 DESIGN 文档 |
+| 关掉总开关后，下面的表单半透明置灰 | **直接不显示**：依赖总开关的行只在开着时出现（主动开口、QQ 接入、混合检索的向量组、刷视频） |
+| 状态行堆字段（`已连接 · 昵称（QQ）· 好友 n`、`gen #3 → #4`） | **一颗 StateDot + 一个短句**；细节放进 `title` 悬浮提示 |
+| 顶栏品牌标题 + 图标 | 去掉。设置导航里已经有「鱼 · 记忆与自走」，面板从页签开始 |
+| 卡片 + 88px 左标签栅格 | 宿主「通用」设置页的**平铺行**：标题左、控件右、0.5px 分隔线；长文本（多行名单）用上下堆叠行 |
+| 小字说明“建议在抖音设置……” 常驻 | 只在打开「回所有能私信她的人」时出现这一句（唯一保留的说明，属于需要用户去做的事） |
 
-### 1.2 宿主架构与视觉层级
+### 1.2 宿主契约
 
-插件挂载于 `@deepseek-ai/dsh-ui-settings-plugins` 扩展槽位，位于 DeepSeek Harness 桌面端设置窗口右侧主视口（最大宽度 `640px`）：
+1. **只用 `--dsw-alias-*` 令牌**（`lib/panel.css` 里没有任何非 alias 的 `--dsw-*` 引用；圆角用宿主刻度的字面值 4 / 8 / 12 / 16）。唯一的字面颜色是 B站二维码底的白色（图像，不是界面）。
+2. **不 `require` 任何 Harness Client 包**：控件照抄 `@deepseek-ai/dsh-client-ui-primitives` 的结构、无障碍语义和样式，改名到 `fs-` 前缀下（见 §2）。主题包改名不会让面板崩，最坏只是样式退化。
+3. **样式随面板挂载/卸载**：`panel.css` 只拉一次，以 `<style>` 子元素渲染在面板里，面板卸载即移除，不写 `document.head`。
+4. 面板宽度按设置窗口右栏（800 − 188 − 48 ≈ 564px）设计，最大 720px；窄于 560px 时行自动折成上下两段。
+5. 亮 / 暗主题都已用宿主真实的 `design-platform.css` + `base.css` 渲染核对过。
 
-1. **顶栏与一级分段导航合一**：左侧为插件标识 `鱼 · dsh-fish-soul`，右侧直接放置三段式切换器（`记忆检索` / `自走与主动` / `记忆检视`），零副标题、零章节号角标。
-2. **单一表面卡片（Single Surface Grouping）**：每个 Tab 内部使用 `1px` 微光边框（`--border-hairline`）与 `96px` 固定左标签栅格，所有控件左边缘严格对齐在同一垂直轴线上。
+## 2. 控件对照（`ui-primitives` → `fs-*`）
 
-## 2. 设计 Token 体系（`@deepseek-ai/dsh-ui-theme`）
+| 宿主原语 | 面板里 | 保留的行为 |
+| :--- | :--- | :--- |
+| `SegmentedTabs`（sm） | `.fs-tabs` / `.fs-tab`（6 个页签） | `role="tablist"`/`tab`、`aria-selected`、←/→/Home/End 切换并移焦、滑动指示条 |
+| `SegmentedControl` | `.fs-seg`（检索方式、融合） | `role="radiogroup"`/`radio` + `aria-checked`，滑动指示条 |
+| `Switch` | `.fs-switch` | `<button role="switch" aria-checked aria-label>`，开 = `brand-primary` |
+| `Button`（sm） | `.fs-btn` + `primary` / `ghost` / `danger` | 28px、outline 内描边、hover / active / disabled |
+| `settings-form` 的 input | `.fs-input`（含 `num`、`textarea`、`select`） | 32px、0.5px `border-l4`、聚焦 `state-business-primary` 描边 |
+| `StateDot` | `.fs-dot` / `.fs-spin` | done / warning / error / idle 圆点，ongoing 转圈；`prefers-reduced-motion` 关动画 |
+| `Tag` | `.fs-tag[data-tone]` | neutral / outline / success / info / warning / danger |
+| `Pill` | `.fs-pill[aria-pressed]`（记忆按人筛选） | active 用 `button-ghost-active-*` |
+| `Toast` | `.fs-toast` | 顶部居中、`toast-bg` / `toast-label`（两种主题都是深色底） |
 
-| Token 名称 | Dark 暗色（默认） | Light 亮色 | 用途 |
+## 3. 状态表达（检索页「向量」组标题右侧）
+
+| 状态 | 条件 | 显示 | 索引行 |
 | :--- | :--- | :--- | :--- |
-| `--bg-window` | `#0f1116` | `#ffffff` | 设置视口主背景 |
-| `--bg-sidebar` | `#0b0d11` | `#f5f6f8` | 桌面端左侧设置导航底色 |
-| `--bg-surface` | `#14171f` | `#fbfcfe` | 表单分组卡片表面 |
-| `--bg-control` | `#0b0d12` | `#f1f3f6` | 输入框、分段控制器底槽 |
-| `--border-hairline` | `rgba(255, 255, 255, 0.06)` | `rgba(15, 23, 42, 0.06)` | `1px` 行间分割线与卡片外框 |
-| `--border-subtle` | `rgba(255, 255, 255, 0.10)` | `rgba(15, 23, 42, 0.11)` | 输入框与按钮描边 |
-| `--text-primary` | `#eef0f4` | `#111827` | 核心标签、正文与数值 |
-| `--text-secondary` | `#8b93a4` | `#4b5563` | 左侧表单字段名 |
-| `--text-muted` | `#565e6d` | `#9ca3af` | 次要时间戳、ID 与未激活态 |
-| `--accent` | `#4d6bfe` | `#4d6bfe` | DeepSeek 品牌主色（焦点、主按钮、进度条） |
-| `--ready` | `#34d399` | `#059669` | 可用态绿点、豁免衰减星标 |
-| `--stale` | `#fbbf24` | `#d97706` | 模型变更需重建黄点、`1000×` 加速标识 |
-| `--building` | `#60a5fa` | `#2563eb` | 索引重建流光蓝、待向量化补偿点 |
-| `--error` | `#f87171` | `#dc2626` | 超时降级红点、删除悬浮色 |
-| `--font-sans` | `"Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif` | 同左 | 界面标签与正文 |
-| `--font-mono` | `"JetBrains Mono", "SFMono-Regular", Consolas, monospace` | 同左 | 延迟 `ms`、维度 `dim`、配额、进度、ID（`tabular-nums`） |
-
-## 3. 组件状态矩阵（`vec_meta.status` 四态）
-
-| 状态 | 触发条件 | 状态行表现 | 进度条与操作区表现 |
-| :--- | :--- | :--- | :--- |
-| **`disabled`** | 选择 `仅关键词 BM25` | 向量配置区整体半透明置灰（保留输入值） | 索引区置灰 |
-| **`ready`** | 测试通过且模型未改 | `● 可用 · 210 ms`（绿点） | `812 / 1,003 (81.0%)` 蓝条 · `[重建索引]` |
-| **`stale`** | 修改了 `BaseURL` 或 `模型` | `● 模型已变更，需重建索引 (#3 → #4)`（黄点） | 进度条转琥珀黄 · 高亮 `[重建索引]` |
-| **`building`** | 正在按 `32 条/分钟` 重建 | `● 重建中 · 32 条/分钟`（蓝点脉冲） | 流光动画实时递增 · `[暂停重建]`（支持断点续传） |
-| **`error`** | Key 为空或超时 `>800ms` | `● 连接失败/超时 · 已降级纯 BM25`（红点） | 保持原进度快照 · 对话 fail-open 不受影响 |
+| 关键词 | 检索方式 = 关键词 | 向量组整组不显示 | — |
+| `ready` | 测试通过、模型没改 | `● 可用 · 182ms`（绿） | 进度条 + `继续重建` / `重建` |
+| `stale` | 改了接口地址或模型 | `● 模型变了，需要重建索引`（黄） | 进度条转黄，`重建` 变主按钮 |
+| `building` | 正在重建 | `◌ 正在重建`（转圈） | 进度条转蓝，`暂停` |
+| `error` | 没配置 / 连不上 | `● 未配置`（灰）/ `● 连不上，先只用关键词`（红） | 重建按钮禁用；对话照常（fail-open） |
 
 ## 4. 前后端 HTTP 路由契约表（`client.js` ↔ `ctx.connection.fetch.register`）
 

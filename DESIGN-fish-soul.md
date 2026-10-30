@@ -1,6 +1,6 @@
 # dsh-fish-soul 设计方案
 
-> 状态：已实现到 v0.5.0（QQ 直连 SnowLuma、B站小号、抖音小号）；v1.1 已合并架构审查 10 项修正
+> 状态：已实现到 v0.5.1（QQ 直连 SnowLuma、B站小号、抖音小号）；v1.1 已合并架构审查 10 项修正
 > 日期：2026-10-30
 
 ## 1. 要解决什么
@@ -473,3 +473,8 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
   - B站：refresh_token 自动续期（扫码登录自带，粘贴 Cookie 时可填 `ac_time_value`）、表情包 / 图片经图床发图、收到的表情当图片看；
   - 给主人的 QQ 提醒（`notifyMaster`，同一件事只提醒一次）：B站续期失败 / 登录失效、抖音掉登录 / 页面改版 / 浏览器老崩；
   - 设置页新增「抖音」页签（按需加载分块），样式移到 `lib/panel.css`；B站页签增加 `ac_time_value` 与续期状态。
+- v0.5.1（设置面板对齐宿主）——
+  - `lib/panel.css` 重写：只引用 `--dsw-alias-*` 令牌（原来引用的 `--dsw-alias-bg-hover`、`-border-focus`、`-label-success` 等宿主并不存在，亮色主题下会退回写死的暗色），控件照抄 `dsh-ui-primitives`（SegmentedTabs / SegmentedControl / Switch / Button / Input / StateDot / Tag / Pill / Toast），类名在 `fs-` 前缀下；
+  - 布局改成宿主「通用」设置页的平铺行；去掉顶栏品牌标题、各行说明小字和括号注释；依赖总开关的行在开关关着时不显示；状态 = 一颗 StateDot + 短句；
+  - 无障碍：`role="switch"`、`tablist` 键盘切换、`radiogroup`、`aria-label`；`prefers-reduced-motion` 关动画；
+  - 样式以 `<style>` 子元素随面板挂载 / 卸载，不再写 `document.head`；抖音分块通过 `props.ui` 复用同一套控件；接口与行为不变。见 `dsh_fish_soul_ui_design.md` v1.4。

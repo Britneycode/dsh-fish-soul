@@ -1,6 +1,6 @@
 {
   "name": "dsh-fish-soul",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "鱼 · 人格、按人记忆、日程自走与主动开口，直连 SnowLuma 收发 QQ，B站 / 抖音小号私信与自己刷视频（DSH 插件，单角色 feiyu）",
   "type": "module",
   "main": "./lib/index.js",

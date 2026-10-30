@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, privateDecrypt, constants as cryptoConstants } from 'node:crypto';
 
 const home = mkdtempSync(join(tmpdir(), 'dsh-'));
 process.env.DSH_HOME = home;
@@ -77,7 +77,10 @@ await new Promise((r) => wsSrv.listen(0, r));
 // ── 假 B站（api / vc / passport 共用一个 HTTP 服务；带 WBI 验签）──
 const MIXIN = 'ea1db124af3c7062474693fa704f4ff8';
 const bm = { sessions: new Map(), msgs: new Map(), fetches: [], sent: [], acks: [], likes: [], qrPolls: 0, badWbi: [], rcmdFail: false, extra: false, tick: 0,
-	relation: { 888: 6 }, names: { 777: '主人B站', 555: '路人甲', 888: '阿二B站' } };
+	relation: { 888: 6 }, names: { 777: '主人B站', 555: '路人甲', 888: '阿二B站' }, uploads: [], renew: [], needRefresh: false, token: '' };
+// Cookie 续期用的 RSA 密钥（换掉 B站的公钥，假服务器才解得开 correspondPath）
+const biliKeys = generateKeyPairSync('rsa', { modulusLength: 2048, publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' } });
+process.env.FISH_SOUL_BILI_PUBKEY = biliKeys.publicKey;
 const vids = {
 	BV1Ab411c7Zz: { aid: 101, cid: 1001, title: '猫咪打架实录', owner: { name: '猫UP' }, desc: '两只猫打起来了', tname: '动物圈' },
 	BV1Cd411c7Yy: { aid: 102, cid: 1002, title: '无聊的会议录像', owner: { name: '某公司' }, desc: '', tname: '知识' },
@@ -151,7 +154,28 @@ const biliSrv = http.createServer((req, res) => {
 				return login ? okj({ items: [{ modules: { module_author: { name: '饭UP' }, module_dynamic: { major: { archive: { bvid: 'BV1Ef411c7Xx', aid: 103, title: '深夜做饭' } } } } }] }) : json({ code: -101, message: '账号未登录' });
 			case '/x/web-interface/popular': return okj({ list: [rcmdItem('BV1Gh411c7Ww')].map((i) => ({ ...i, aid: i.id })) });
 			case '/x/web-interface/archive/like': bm.likes.push(form.get('aid')); return okj(null);
-			default: return json({ code: -404, message: `mock 没有 ${u.pathname}` });
+			case '/x/dynamic/feed/draw/upload_bfs':
+				bm.uploads.push({ csrf: /name="csrf"\r\n\r\n([^\r]*)/.exec(body)?.[1], file: /name="file_up"; filename="([^"]+)"/.exec(body)?.[1], png: body.includes('PNG'), multipart: /^multipart\/form-data; boundary=/.test(req.headers['content-type'] ?? '') });
+				return okj({ image_url: 'https://i0.hdslb.com/bfs/new_dyn/fish1.png', image_width: 16, image_height: 12, img_size: 1.5 });
+			case '/x/passport-login/web/cookie/info':
+				bm.renew.push(['info', q.get('csrf')]);
+				return login ? okj({ refresh: bm.needRefresh, timestamp: 1700000000123 }) : json({ code: -101, message: '账号未登录' });
+			case '/x/passport-login/web/cookie/refresh':
+				bm.renew.push(['refresh', Object.fromEntries(form)]);
+				if (form.get('refresh_csrf') !== 'RCSRF1' || form.get('refresh_token') !== bm.token) return json({ code: -111, message: 'csrf 校验失败' });
+				res.writeHead(200, { 'content-type': 'application/json', 'set-cookie': ['SESSDATA=good%2C456; Path=/; HttpOnly', 'bili_jct=jct2; Path=/', 'DedeUserID=999; Path=/'] });
+				return res.end(JSON.stringify({ code: 0, message: '0', data: { status: 0, message: '', refresh_token: 'fedcba9876543210fedcba9876543210' } }));
+			case '/x/passport-login/web/confirm/refresh': bm.renew.push(['confirm', Object.fromEntries(form), cookie]); return okj(null);
+			default: {
+				if (u.pathname.startsWith('/correspond/1/')) {
+					let plain = '';
+					try { plain = privateDecrypt({ key: biliKeys.privateKey, padding: cryptoConstants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' }, Buffer.from(u.pathname.slice('/correspond/1/'.length), 'hex')).toString(); } catch { /* 解不开 */ }
+					bm.renew.push(['correspond', plain]);
+					res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+					return res.end(/^refresh_\d{13}$/.test(plain) && /SESSDATA=good/.test(cookie) ? '<html><body><div id="1-name">RCSRF1</div></body></html>' : '<html>出错了</html>');
+				}
+				return json({ code: -404, message: `mock 没有 ${u.pathname}` });
+			}
 		}
 	});
 });
@@ -163,7 +187,8 @@ process.env.FISH_SOUL_BILI_MOCK = biliURL;
 writeFileSync(join(home, 'fish-soul-config.json'), JSON.stringify({
 	embedding: { enabled: true, baseURL, apiKey: 'sk-test', model: 'm1' },
 	proactive: { targets: { masterPrivateChannelId: 'private:10001', selfGroupChannelIds: [] } },
-	qq: { enabled: true, wsUrl: `ws://127.0.0.1:${wsSrv.address().port}`, accessToken: 'tok-1', batchMs: 200 }
+	qq: { enabled: true, wsUrl: `ws://127.0.0.1:${wsSrv.address().port}`, accessToken: 'tok-1', batchMs: 200 },
+	douyin: { batchMs: 100 }
 }));
 
 // ── PNG 角色卡（tEXt chara，带 {{char}}/{{user}} 与世界书）──
@@ -204,7 +229,7 @@ const services = {
 	attachments: { admitPromptContent: async (parts) => parts.map((p) => (p.type === 'image' ? { type: 'image', attachment: { attachmentId: 'a1' } } : p)) }
 };
 const ctx = {
-	logger: { info() {}, warn() {}, error: (m) => console.error('  log.error', m) },
+	logger: { info() {}, warn: (m) => process.env.DBG && console.error('  log.warn', m), error: (m) => console.error('  log.error', m) },
 	effect: (fn) => fn(),
 	get: (name) => services[name],
 	agents, workspaceRegistry,
@@ -214,6 +239,63 @@ const ctx = {
 	webServer: { register: (r) => { route = r; return () => {}; } }
 };
 const mod = await import('../lib/index.js');
+
+// ── 假抖音：专用浏览器和页面驱动都换成假的（真浏览器那部分在 test/douyin-browser.mjs）──
+const { ACTIVE_VIDEO_JS } = await import('../lib/douyin-browse.js');
+const dy = { convs: [], msgs: new Map(), reads: [], sent: [], loggedIn: true, canaryOk: true, canaries: 0, emojis: ['微笑', '比心'],
+	launches: 0, launchOpts: null, quits: 0, feed: [], feedAt: 0, gotos: [], likes: 0, details: new Map(), clicks: [] };
+const dyBrowser = {
+	sessionId: 'S1', targetId: 'T1', alive: false, onDead: null, onEvent: null,
+	isAlive() { return this.alive; },
+	async eval(expr) {
+		if (expr === 'location.href') return 'https://www.douyin.com/';
+		if (expr === ACTIVE_VIDEO_JS) { const v = dy.feed[dy.feedAt]; return v ? { ok: true, live: false, ad: false, author: '', ...v } : { ok: false }; }
+		if (/video-switch-next-arrow/.test(expr)) { dy.feedAt++; return true; }
+		if (/video-player-digg/.test(expr)) { dy.likes++; return true; }
+		if (/createImageBitmap/.test(expr)) return png.toString('base64');
+		return null;
+	},
+	async send(method, params) {
+		if (method === 'Page.captureScreenshot') return { data: Buffer.from('fake-jpeg').toString('base64') };
+		if (method === 'Page.getLayoutMetrics') return { cssVisualViewport: { clientWidth: 1280, clientHeight: 800 } };
+		if (method === 'Input.dispatchMouseEvent') dy.clicks.push([params.type, params.x, params.y]);
+		return {};
+	},
+	async goto(url) { dy.gotos.push(url); if (/recommend/.test(url)) dy.feedAt = 0; },
+	detach() {},
+	async quit() { this.alive = false; dy.quits++; }
+};
+/** 往抖音会话里塞一条对方发的私信（会话列表跟着变：时间、预览、未读）。 */
+function dyPush(name, text, { fromMe = false, type = 'text', media } = {}) {
+	const list = dy.msgs.get(name) ?? [];
+	list.push({ fromMe, text, type, media, time: Date.now() + list.length });
+	dy.msgs.set(name, list);
+	const d = new Date();
+	const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+	let c = dy.convs.find((x) => x.name === name);
+	if (!c) { c = { name, unread: 0 }; dy.convs.unshift(c); }
+	Object.assign(c, { time, preview: `${text}#${list.length}`, unread: fromMe ? c.unread : c.unread + 1 });
+}
+mod.testHooks.douyin = {
+	detect: async () => [{ kind: 'edge', name: 'Microsoft Edge', version: '130.0', path: '/fake/msedge.exe' }],
+	launch: async (opts) => { dy.launches++; dy.launchOpts = opts; dyBrowser.alive = true; return dyBrowser; },
+	driver: () => ({
+		checkLogin: async () => dy.loggedIn,
+		list: async () => ({ ok: true, conversations: dy.convs.map((c) => ({ ...c })) }),
+		read: async (name) => {
+			dy.reads.push(name);
+			const c = dy.convs.find((x) => x.name === name);
+			if (c) c.unread = 0;
+			return { ok: true, messages: (dy.msgs.get(name) ?? []).slice(-20) };
+		},
+		sendText: async (name, text) => { dy.sent.push([name, 'text', text]); return { ok: true }; },
+		sendImage: async (name, file) => { dy.sent.push([name, 'image', file]); return { ok: true }; },
+		sendEmoji: async (name, e) => (dy.emojis.includes(e) ? (dy.sent.push([name, 'emoji', e]), { ok: true }) : { ok: false, error: '没有这个表情' }),
+		canary: async () => { dy.canaries++; return dy.canaryOk ? { ok: true, broken: [] } : { ok: false, broken: ['私信列表'] }; }
+	}),
+	readDetail: async ({ id }) => dy.details.get(id) ?? { ok: false, error: '没有' },
+	pollRangeMs: [150, 200], typingMs: [0, 0], firstPollMs: 50, dwellMs: [0, 0], settleMs: 0
+};
 await mod.apply(ctx, { masterQqUin: '10001', embedding: { enabled: true, baseURL: '', apiKey: '', model: '' } });
 
 // 别的插件转进普通会话的消息：payload = { agent, message }，source 里带 QQ 号
@@ -328,6 +410,13 @@ ok('WS 直连：带 access_token，连上后取登录号和好友列表');
 const wsDir = join(home, 'fish-soul', 'workspace');
 mkdirSync(join(wsDir, '_stickers'), { recursive: true });
 writeFileSync(join(wsDir, '_stickers', 'ok.png'), png);
+// 1×1 的 webp（无损）：B站 / 抖音发之前要转成 png
+const webp1 = Buffer.from('UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==', 'base64');
+writeFileSync(join(wsDir, '_stickers', 'wow.webp'), webp1);
+// 后面"一键迁移"会把专用工作区换到 other-ws：那边也放一份
+mkdirSync(join(home, 'other-ws', '_stickers'), { recursive: true });
+writeFileSync(join(home, 'other-ws', '_stickers', 'ok.png'), png);
+writeFileSync(join(home, 'other-ws', '_stickers', 'wow.webp'), webp1);
 writeFileSync(join(home, 'secret.png'), png);
 const nowSec = () => Math.floor(Date.now() / 1000);
 conn.push({ post_type: 'message', message_type: 'private', sub_type: 'friend', user_id: 10001, message_id: 501, sender: { nickname: '主人' }, message: [{ type: 'text', data: { text: '我想喝冰美式' } }] });
@@ -515,6 +604,7 @@ assert.deepEqual(nm({ msg_type: 7, content: JSON.stringify({ title: '猫', bvid:
 assert.equal(nm({ msg_type: 1, msg_source: 8, content: '{"content":"感谢关注"}' }), null, '自动回复不当真人消息');
 assert.equal(nm({ msg_type: 1, msg_status: 1, content: '{"content":"撤回了"}' }), null);
 assert.equal(nm({ msg_type: 1, sender_uid: 999, content: '{"content":"自己发的"}' }), null);
+assert.deepEqual([nm({ msg_type: 6, content: JSON.stringify({ url: 'https://i0.hdslb.com/bfs/emote/x.png' }) })].map((x) => [x.text, x.images]), [['【表情】', [{ url: 'https://i0.hdslb.com/bfs/emote/x.png' }]]]);
 assert.deepEqual(findVideoRefs('看 https://b23.tv/abc123 和 BV1Ab411c7Zz 还有 BV1Ab411c7Zz'), { bvids: ['BV1Ab411c7Zz'], shorts: ['https://b23.tv/abc123'] });
 const qm = encodeQr('https://passport.bilibili.com/h5-app/passport/login/scan?navhide=1&qrcode_key=0123456789abcdef0123456789abcdef');
 assert.equal(qm.length, qm[0].length); assert.equal((qm.length - 17) % 4, 0);
@@ -536,6 +626,8 @@ assert.doesNotMatch(readFileSync(join(home, 'fish-soul-config.json'), 'utf8'), /
 assert.equal((await call('POST', '/bili/qr/poll', {})).json.status, 'expired', '用过的二维码作废');
 bs = await call('POST', '/bili/cookie', { cookie: 'SESSDATA=bad; bili_jct=x; DedeUserID=1' });
 assert.equal(bs.json.ok, false); assert.match(bs.json.error, /无效/);
+bs = await call('POST', '/bili/cookie', { cookie: 'SESSDATA=good%2C9; bili_jct=x; DedeUserID=1', acTimeValue: 'not hex!' });
+assert.equal(bs.json.ok, false); assert.match(bs.json.error, /ac_time_value/);
 cs = await call('GET', '/channels/state');
 assert.equal(cs.json.bili.loggedIn, true); assert.equal(cs.json.bili.uid, '999'); assert.equal(cs.json.bili.authInvalid, false);
 assert.equal(cs.json.bili.enabled, false);
@@ -601,15 +693,18 @@ assert.equal(host.followups.some((f) => f.msg.source.channelId === 'bili:555'), 
 assert.ok(db.prepare("SELECT 1 FROM memory WHERE content LIKE '%B站私信里说（当时没回）：在吗%'").get());
 assert.ok(bm.acks.some(([t, s, c]) => t === '777' && s === '3' && c === 'jct1'), '回复的会话发已读');
 turn(fb.id, '哈哈哈橘猫赢麻了\n\n这个UP主好会 ![ok](_stickers/ok.png)', fb.msg);
-await waitFor(() => bm.sent.length >= 2, 6000);
-assert.equal(bm.sent.length, 2);
-assert.deepEqual(bm.sent.map((x) => JSON.parse(x.f['msg[content]']).content), ['哈哈哈橘猫赢麻了', '这个UP主好会']);
+await waitFor(() => bm.sent.length >= 3, 6000);
+assert.equal(bm.sent.length, 3);
+assert.deepEqual(bm.sent.slice(0, 2).map((x) => JSON.parse(x.f['msg[content]']).content), ['哈哈哈橘猫赢麻了', '这个UP主好会']);
+assert.deepEqual([bm.uploads.length, bm.uploads[0].csrf, bm.uploads[0].file, bm.uploads[0].png, bm.uploads[0].multipart], [1, 'jct1', 'image.png', true, true], '表情包先传图床');
+assert.equal(bm.sent[2].f['msg[msg_type]'], '2');
+assert.deepEqual(JSON.parse(bm.sent[2].f['msg[content]']), { url: 'https://i0.hdslb.com/bfs/new_dyn/fish1.png', height: 12, width: 16, imageType: 'png', original: 1, size: 1.5 });
 assert.equal(bm.sent[0].f['msg[receiver_id]'], '777'); assert.equal(bm.sent[0].q.w_sender_uid, '999'); assert.equal(bm.sent[0].f.csrf, 'jct1');
 assert.equal(bm.sent[0].q.w_dev_id, bm.sent[0].f['msg[dev_id]']);
 assert.deepEqual(bm.badWbi, [], 'WBI 签名全部验过');
 cs = await call('GET', '/channels/state');
 assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId.startsWith('bili:')).map((c) => c.channelId).sort(), ['bili:777', 'bili:888']);
-ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先"看"一眼；按段发回（丢图、带签名和 csrf）；UID=QQ 合并到同一个人');
+ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先"看"一眼；按段发回（带签名和 csrf），表情包传图床后发图；UID=QQ 合并到同一个人');
 
 // 26 自己刷视频：关注优先 → 推荐；[划走] 不记、[点赞] 才点；看过的不再看；推荐被风控就看热门
 {
@@ -683,6 +778,11 @@ cs = await call('GET', '/channels/state');
 assert.equal(cs.json.bili.loggedIn, false);
 await call('POST', '/channels/bili-config', { enabled: false });
 ok('B站退出登录：删凭据、停轮询');
+
+// 30–39 v0.5：B站 Cookie 续期、抖音（在 smoke-v05.mjs）
+await (await import('./smoke-v05.mjs')).run({
+	assert, ok, call, sleep, waitFor, turn, at, context, route, db, dy, dyBrowser, dyPush, host, ob, bl, bm, authFile, home, sid1, LifeEngine, VirtualClock
+});
 
 console.log('\n全部通过');
 srv.close(); wsSrv.close(); biliSrv.close(); process.exit(0);

@@ -1,7 +1,7 @@
 {
   "name": "dsh-fish-soul",
-  "version": "0.4.0",
-  "description": "鱼 · 人格、按人记忆、日程自走与主动开口，直连 SnowLuma 收发 QQ，B站小号私信与自己刷视频（DSH 插件，单角色 feiyu）",
+  "version": "0.5.0",
+  "description": "鱼 · 人格、按人记忆、日程自走与主动开口，直连 SnowLuma 收发 QQ，B站 / 抖音小号私信与自己刷视频（DSH 插件，单角色 feiyu）",
   "type": "module",
   "main": "./lib/index.js",
   "license": "MIT",
@@ -28,6 +28,6 @@
     }
   },
   "scripts": {
-    "test": "node test/smoke.mjs"
+    "test": "node test/smoke.mjs && node test/douyin-browser.mjs"
   }
 }

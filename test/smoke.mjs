@@ -710,6 +710,17 @@ assert.equal(bm.sent[0].q.w_dev_id, bm.sent[0].f['msg[dev_id]']);
 assert.deepEqual(bm.badWbi, [], 'WBI 签名全部验过');
 cs = await call('GET', '/channels/state');
 assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId.startsWith('bili:')).map((c) => c.channelId).sort(), ['bili:777', 'bili:888']);
+// DSH 在我们的消息后面追加 runtime-context（也是 user/message）：B站回复照样要发出去
+{
+	const n = bm.sent.length;
+	handlers['session/event']({ id: f888.id }, { type: 'user/message', data: f888.msg });
+	handlers['session/event']({ id: f888.id }, { type: 'user/message', data: { id: 'ctx-b1', role: 'user', content: [{ type: 'text', text: '…' }], source: { kind: 'runtime-context', form: 'snapshot', sections: [] } } });
+	handlers['session/event']({ id: f888.id }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '收到啦' }] } } });
+	handlers['session/event']({ id: f888.id }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+	await waitFor(() => bm.sent.length > n, 6000);
+	assert.equal(JSON.parse(bm.sent[n].f['msg[content]']).content, '收到啦', '宿主追加的上下文不影响 B站发回');
+	assert.equal(bm.sent[n].f['msg[receiver_id]'], '888');
+}
 ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先"看"一眼；按段发回（带签名和 csrf），表情包传图床后发图；UID=QQ 合并到同一个人');
 
 // 26 自己刷视频：关注优先 → 推荐；[划走] 不记、[点赞] 才点；看过的不再看；推荐被风控就看热门

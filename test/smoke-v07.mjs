@@ -210,6 +210,27 @@ export async function run(t) {
 		// 群里的话交给学说法（点没点名都算）
 		await gw.onEvent({ post_type: 'message', message_type: 'group', group_id: 8802, user_id: 30003, message_id: ++mid, sender: { card: '阿三' }, message: [{ type: 'text', data: { text: '今天也绷不住了' } }] });
 		assert.deepEqual(seen.at(-1), ['group:8802', '阿三', '今天也绷不住了']);
+
+		// DSH 在我们的消息后面追加 runtime-context / model-selection（也是 user/message）：照样要发回去
+		await priv(70008, [{ type: 'text', data: { text: '在吗' } }]);
+		await waitFor(() => fups('private:70008').length === 1);
+		const fc = fups('private:70008')[0];
+		const hostMsg = (id, source) => ({ type: 'user/message', data: { id, role: 'user', content: [{ type: 'text', text: '…' }], source } });
+		const sentBefore = sent.length;
+		gw.onSessionEvent({ id: fc.id }, { type: 'user/message', data: fc.msg });
+		gw.onSessionEvent({ id: fc.id }, hostMsg('ctx-1', { kind: 'runtime-context', form: 'snapshot', sections: [] }));
+		gw.onSessionEvent({ id: fc.id }, hostMsg('ms-1', { kind: 'model-selection', form: 'notice', summary: 'a → b' }));
+		gw.onSessionEvent({ id: fc.id }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '在呢' }] } } });
+		gw.onSessionEvent({ id: fc.id }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+		await waitFor(() => sent.length === sentBefore + 1);
+		assert.deepEqual(sent.at(-1), ['private:70008', [{ type: 'text', data: { text: '在呢' } }]], '宿主追加的上下文不影响发回');
+
+		// 有人在 DSH 界面里直接打字（kind 'user'）：这一轮不发回 QQ
+		gw.onSessionEvent({ id: fc.id }, hostMsg('ui-1', { kind: 'user' }));
+		gw.onSessionEvent({ id: fc.id }, { type: 'assistant/message', data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: '界面里的回答' }] } } });
+		gw.onSessionEvent({ id: fc.id }, { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } });
+		await new Promise((r) => setTimeout(r, 50));
+		assert.equal(sent.length, sentBefore + 1, '界面里自己聊的不发出去');
 	}
 	ok('网关：QQ 语音转文字给她听；[语音] 段合成语音发（关着就发文字）；[收藏表情:名字] 存表情不发、同图去重；群话交给学说法');
 

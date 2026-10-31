@@ -1,4 +1,4 @@
-# dsh-fish-soul 前端 UI 设计文档（v1.6 · 宿主原生版）
+# dsh-fish-soul 前端 UI 设计文档（v1.7 · 宿主原生版）
 
 > **对应架构方案**：《dsh-fish-soul 设计方案》（DESIGN-fish-soul.md）  
 > **宿主技术栈**：[`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness)（`packages/client/` · `ui-theme` 的 `--dsw-alias-*` 令牌 + `ui-primitives` 控件）  
@@ -92,6 +92,22 @@
 
 **QQ 页签新增行**：`收藏表情包`、`学群里的说法` 两个开关（默认开）。
 
+## 3.7 v1.7 新增（v0.8.0）
+
+**记忆检索页新增「聊完自动记」组**（在「向量」组下面；组标题右侧整理中转圈或 `攒了 n 句`）：`自动整理` 开关（灰字说明会记什么）；开着时 `空多久整理 n 分钟`（失焦保存，1–240）；`上次` 行灰字 `x 分钟前 · 聊天名 · 记了 n 条：小结`，右侧 `现在整理`（没攒下句子时禁用，完成后 toast `整理了 n 段，记了 n 条`）。5 秒刷新。
+
+**记忆检视 · 人物卡**：
+
+| 行 | 内容 | 交互 |
+| :--- | :--- | :--- |
+| 关系 | Select（陌生人 / 认识 / 朋友 / 很熟）；灰字 `按好感自动升降` 或 `手动定的，不随好感自动升降`；锁住时左边 `改回自动` | 改了就保存并锁住 |
+| 好感 | 进度条 + 数字（0–100）；灰字为她此刻的情绪（`她现在有点担心（原因）`），没有情绪时一句说明 | 只读 |
+| 8 栏印象 | 怎么称呼 / 生日 / 在哪 / 做什么 / 重要的人·宠物 / 喜欢 / 雷区 / 最近，每栏一个输入框（占位 `还不知道`），主人写的左边 `手写` Tag | 失焦保存；写了 = 锁住这栏，清空 = 交还给 Dream |
+| 印象 | 灰字 `Dream 整理 / 改过 · 日期`；右侧 `现在整理一次` | 旧版只有一段话印象（没有分栏）时仍显示原来的文本框 + 保存 / 交给 Dream |
+| 最近聊过（组） | 最近 5 条小结 + 日期 | 只读 |
+
+**记忆条目**新增 Tag：`私密`（私聊里说的，群里不会提）、`关于 X`（别人说的关于这个人的事）；类型多一个 `聊过`（小结）。**动态**多一种 `记下`（绿色，内容为「聊完记了 n 条：小结」）。
+
 ## 4. 前后端 HTTP 路由契约表（`client.js` ↔ `ctx.connection.fetch.register`）
 
 | 序号 | 方法 | 路径 | 请求体 (Request JSON) | 响应体 (Response JSON) |
@@ -104,8 +120,8 @@
 | **6** | `POST` | `/api/plugins/fish-soul/life/proactive-config` | `{ enabled, dailyMaxCount, activeHours, idleTriggerHours, targets: { masterPrivateChannelId, selfGroupChannelIds } }` | `{ ok: true, savedAt }` |
 | **7** | `GET` | `/api/plugins/fish-soul/inspector/overview` | `?ownerId=all\|self\|user:master` | `{ ok: true, currentGenerationId, persons: [...], memories: [...], pendings: [...] }` |
 | **8** | `POST` | `/api/plugins/fish-soul/inspector/forget` | `{ targetType: 'memory', id: 1003 }` | `{ ok: true, deletedId: 1003, cascadedVecDeleted: true }` |
-| **9** | `GET` | `/api/plugins/fish-soul/inspector/person` | `?ownerId=user:…` | `{ ok, person: { ownerId, displayName, relationStage, qqUin, biliUid, douyinName, interactionCount, firstSeenAt, lastSeenAt }, profile: { text, by, locked, updatedAt } \| null, counts, outdated: [...], pendings: [...] }` |
-| **10** | `POST` | `/api/plugins/fish-soul/inspector/person` | `{ ownerId, displayName?, relationStage?, profile?, profileLocked? }` | `{ ok, profile }` |
+| **9** | `GET` | `/api/plugins/fish-soul/inspector/person` | `?ownerId=user:…` | `{ ok, person: { ownerId, displayName, relationStage, qqUin, biliUid, douyinName, interactionCount, firstSeenAt, lastSeenAt, affinity, stageLocked }, profile: { text, by, locked, updatedAt, fields?, lockedFields? } \| null, profileFields, lockedFields, fieldDefs: [{ id, label }], mood: { label, reason, level, at } \| null, episodes: [{ id, content, channelId, at }], counts, outdated: [...], pendings: [...] }`（v1.7 加好感 / 情绪 / 分栏印象 / 小结） |
+| **10** | `POST` | `/api/plugins/fish-soul/inspector/person` | `{ ownerId, displayName?, relationStage?（同时锁住阶段、好感跟到阶段基础值）, stageLocked?: false（改回自动）, profileFields?: { call?, birthday?, city?, work?, people?, likes?, dislikes?, recent? }（写了锁这栏、空串交还）, profile?, profileLocked? }` | `{ ok, profile, stageLocked, profileFields?, lockedFields? }` |
 | **11** | `POST` | `/api/plugins/fish-soul/inspector/dream` | `{ ownerId }` | `{ ok, profile }` |
 | **12** | `POST` | `/api/plugins/fish-soul/inspector/memory-edit` | `{ id, content?, kind?, importance? }` | `{ ok, id, replaced? }`（改内容 = 新 id，旧的 superseded） |
 | **13** | `POST` | `/api/plugins/fish-soul/inspector/memory-add` | `{ ownerId, content, kind?, importance? }` | `{ ok, id }` |
@@ -129,3 +145,5 @@
 | **31** | `GET` / `POST` | `/api/plugins/fish-soul/onboarding/state` · `/onboarding/dismiss` | `dismiss`：`{ dismissed? }`（默认 true） | `{ ok, dismissed, done, chats, steps: [{ id, title, done, optional, tab }] }` |
 | **32** | `POST` | `/api/plugins/fish-soul/web/test` | `{ query? }`（默认「今天有什么新闻」；DSH 自带的测不了） | `{ ok, query, count, latencyMs, answer, results: [{ title, url, site, date, snippet }]（前 3 条） }` |
 | **33** | `POST` | `/api/plugins/fish-soul/douyin/window` | `{ show: boolean }`（后台模式下临时显示 / 藏回去）；窗口模式本身走 `/channels/douyin-config` 的 `window: 'background' \| 'visible'` | `{ ok, windowShown }`；`/channels/state` 的 `douyin` 多 `window`、`windowShown` |
+| **34** | `GET` | `/api/plugins/fish-soul/memory/state` | 无 | `{ ok, autoExtract, idleMinutes, maxLines, pending, running, last: { at, channelId, title, lines, added, refreshed, replaced, outdated, self, summary, people } \| null }` |
+| **35** | `POST` | `/api/plugins/fish-soul/memory/config` · `/memory/digest-now` | `config`：`{ autoExtract?, idleMinutes?（1–240）, maxLines?（10–80） }`；`digest-now`：无 | 同 34（`digest-now` 另回 `{ chats, added }`）；`/inspector/overview` 的记忆多 `visibility`、`about`、`recallCount` |

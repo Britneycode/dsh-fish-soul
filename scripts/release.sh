@@ -13,6 +13,8 @@ TAG="v${VER}"
 
 cd "$(dirname "$0")/.."
 [ -f "$NOTES" ] || { echo "正文文件不存在: $NOTES" >&2; exit 1; }
+# Python 是 Windows 原生进程，看不懂 Git Bash 的 /tmp 这类路径；换成 Windows 形式
+NOTES_WIN="$(cygpath -w "$NOTES" 2>/dev/null || printf '%s' "$NOTES")"
 [ -z "$(git status --porcelain)" ] || { echo "工作区不干净，先提交" >&2; git status --short; exit 1; }
 [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ] || { echo "不在 main 上" >&2; exit 1; }
 
@@ -21,7 +23,7 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { echo "$TAG 已存在"
 grep -q "\"version\": \"$VER\"" package.json || echo "警告：package.json 版本不是 $VER" >&2
 
 # 先校验再打 tag：正文有坏字符 / 缺 token 时就别留个推上去的孤儿 tag
-python - "$NOTES" << 'PY'
+python - "$NOTES_WIN" << 'PY'
 import os, sys
 body = open(sys.argv[1], encoding="utf-8").read()
 if "\ufffd" in body:
@@ -35,7 +37,7 @@ PY
 git tag -a "$TAG" -m "$TAG"
 git push origin "$TAG"
 
-VER="$VER" NOTES="$NOTES" TAG="$TAG" REPO="$REPO" python - << 'PY'
+VER="$VER" NOTES="$NOTES_WIN" TAG="$TAG" REPO="$REPO" python - << 'PY'
 import json, os, sys, urllib.request, urllib.error
 ver, notes, tag, repo = (os.environ[k] for k in ("VER", "NOTES", "TAG", "REPO"))
 tok = os.environ.get("GITHUB_TOKEN_BRITNEYCODE")

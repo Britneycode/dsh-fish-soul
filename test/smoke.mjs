@@ -785,6 +785,11 @@ await (await import('./smoke-v05.mjs')).run({
 	assert, ok, call, sleep, waitFor, turn, at, context, route, db, dy, dyBrowser, dyPush, host, ob, bl, bm, authFile, home, sid1, LifeEngine, VirtualClock
 });
 
+// 40–47 v0.6：聊天记录导入、记忆纠正 / 印象、插话 / 戳一戳 / 撤回、暂停、动态、备份（在 smoke-v06.mjs）
+await (await import('./smoke-v06.mjs')).run({
+	assert, ok, call, sleep, waitFor, context, db, host, ob, services, agents, workspaceRegistry, inbox, at
+});
+
 console.log('\n全部通过');
 srv.close(); wsSrv.close(); biliSrv.close(); process.exit(0);
 

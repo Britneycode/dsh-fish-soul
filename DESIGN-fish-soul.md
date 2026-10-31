@@ -1,6 +1,6 @@
 # dsh-fish-soul 设计方案
 
-> 状态：已实现到 v0.5.1（QQ 直连 SnowLuma、B站小号、抖音小号）；v1.1 已合并架构审查 10 项修正
+> 状态：已实现到 v0.9.0（QQ 直连 SnowLuma、B站小号、抖音小号、人格与记忆、她的习惯）；v1.1 已合并架构审查 10 项修正；各版本见 [CHANGELOG.md](CHANGELOG.md)
 > 日期：2026-10-30
 
 ## 1. 要解决什么
@@ -434,6 +434,12 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
 | 聊完自动记记错 / 记多 / 花钱 | 记忆里混进错的事、模型费用 | 每段聊天一次调用（≤40 句、空 10 分钟才整理），每次最多 8 条 + 3 条她自己的话；近重复只刷新不新写；每条带出处「聊完自动记」，记忆检视里能改 / 删 / 恢复；设置页可关 |
 | 私密的事在群里说漏 | 伤人、尴尬 | 私聊里整理出的敏感事标私密，群里的检索和 `recall` 都不带；私聊小结也私密；群里情绪不带原因；印象栏不分私密（别把秘密写进印象） |
 | 好感 / 阶段自动升降不合心意 | 对某人突然变冷淡或太熟 | 每次 ±5、升要多 5 分、降要差 10 分；主人手动定的阶段锁住；主人永远很熟 |
+| 心情影响行为过头 | 某天整体很冷淡 / 一直刷表情 | 只按基调和这个人的情绪微调快慢、长短、插话和表情（首条延迟 ≤6 秒）；情绪 12 小时减半；设置页「心情影响行为」可关 |
+| 去 AI 味改坏原意 | 话被截断、关键句被删 | 只删整句套话（「作为 AI」「希望对你有帮助」「综上所述」等）和 markdown，「首先…其次」出现 ≥2 次才改；超长按句末截到上限；整段都是套话才不发；每次改写在动态里记一条 `改写`；可关 |
+| 合并转发 / 戳一戳 / 表情回应 / 正在输入 是 SnowLuma 扩展 | 部分实现不支持、报错 | `tryCall` 第一次失败（1404 / unknown）就记住这个动作不支持，之后不再调；全部可关，表情回应默认关 |
+| 每轮判断心情 多一次调用 | 花钱、变慢 | 默认关；6 秒超时不等；置信度 < 0.7 不改；单独选模型（「每轮判断心情」） |
+| 日记写错 / 发到 QQ 空间不合适 | 日记里有别人的私事被公开 | 日记存成她自己的私密记忆（群里不会想起）；发 QQ 空间默认关；每天一篇、每天最多试 3 次 |
+| 按聊天选的模型被删 | 这个聊天开不了会话 | 解析时跳过找不到的提供方，退回群聊 / 私聊默认 → DSH 默认；设置页标「现在找不到」 |
 
 ## 15. 明确不做
 
@@ -446,81 +452,4 @@ M2 与 M3 有依赖顺序；M4 可与 M5 并行。
 
 ## 16. 变更记录
 
-- 2026-10-30：向量方案定为"远程 OpenAI 兼容，且只用它"。删除本地 ONNX 分支、模型下载/HF 镜像/本地路径配置、`@huggingface/transformers` 依赖，以及对应的 150–250MB 内存占用。
-- 2026-10-30（v1.1）：合并架构审查 10 项修正——
-  - **#01** `memory`/`pending` 新增 `channel_id`（具体群号/私聊目标），`memory` 加 `idx_memory_channel_recent` 复合索引，新增 §10.6 主动投递白名单配置，群摘要按 `channel_id` 隔离；
-  - **#02** `remember` 工具扩展到期事件参数（`dueInMinutes`/`dueAtIso`/`proactiveReason`）同事务写 `memory`+`pending`，Dream 兜底补写；`day` 新增 `proactive_count`、`last_proactive_at` 持久化每日配额；
-  - **#03** 新增 §10.5 虚拟/物理时钟隔离规范（`VirtualClock`、tick 互斥锁、风控与 HTTP 超时锁定真实物理钟）；
-  - **#04** `memory.db`+`life.db` 合并为单一 `soul.db`（WAL），明确建库 PRAGMA；
-  - **#05** `person` 表补 `UNIQUE` 约束、`interaction_count`、`relation_stage` 默认值，定义 pre-step 原子 Upsert 自动注册与 Dream 驱动的关系阶段演进；
-  - **#06** RRF 增加未向量化新记忆的 0.85 对称补偿；`vec.blob` 规范为 L2 归一化 Float32Array 小端序，点积前预过滤有效 `memory_id`；
-  - **#07** 动态上下文改为注入在最新用户消息前的瞬态块（M1 先验证 DSH `systemPrompt.context` 落点），召回过滤补 `owner_id IN ('self', ?)`；
-  - **#08** 向量写入收敛为单队列双优先级串行 Worker + `generation_id` 世代锁；Dream 绑定按 `owner_id` 的 `AbortController`；
-  - **#09** 中文分词定为内置 `Intl.Segmenter` + 停用词表（零依赖，禁 `nodejieba`），艾宾浩斯衰减明确为 BM25 初筛后 JS 层计算、半衰期 7 虚拟日；
-  - **#10** 删除 `day.mood_seed` 独立列，当日基调并入 `plan_json.dailyMoodTone` 由本插件自消费，不动 `dsh-feiyu-mood`。
-- 2026-10-30（v0.2.0 代码修正，"零回退迁移"审计）——
-  - 会话按 sessionId 隔离，瞬态块在 `text()` 内同步组装（BM25 当场算 + 预取向量），消除"上一轮 / 别人的记忆"串注入；
-  - 未识别发送者归入 `user:unknown`，不再回退为主人；工具调用只读查人，不再刷高 `interaction_count`；`forget` 加归属校验；
-  - 配置改为"宿主默认值为底、设置文件覆盖"的深合并；工具参数改为标准 JSON Schema；
-  - 向量：首个成功响应自举 `vec_meta`；实时队列退避重试；重建按条限速、失败不推进游标、游标持久化可续传；测试连接不再覆盖已有索引的 `model_id`，同维度换模型也会标 stale；查询 800ms / 写入 10s 分离超时；
-  - 人格：支持 PNG（ccv3/chara）卡、`{{char}}`/`{{user}}` 宏、`system_prompt`/`first_mes`/`post_history_instructions`、世界书（constant 进静态段，关键词条目进瞬态块）；
-  - 新增 `POST /import/memories` 记忆导入（去重、按 QQ 号归属）；
-  - 自走层：非白名单待办不再阻塞队列，到期后在对方下次开口时自然提起；投递失败顺延重试 3 次；Dream 加水位与去重，可真正中断 LLM；重启后恢复互动表与虚拟钟。
-- v0.3.0（直连 SnowLuma）——
-  - 新增 `lib/channels/`（OneBot v11 归一化 + SnowLuma WebSocket 客户端）与 `lib/gateway.js`（私聊/群 ↔ DSH 会话映射、入站过滤与合并、出站分段回发、主动开口注入），停用 `dsh-qq-bridge`；
-  - `soul.db` 新增 `chat_session` 表、`pending.origin` 列；配置新增 `qq`、`sessions` 段，删除 `qqBridge`；
-  - 主动配额：自发默认 10 条/天（0–50 可调），用户约的提醒不占额度，自发间隔 ≥60 虚拟分钟；风控 15 秒真实冷却与白名单对所有主动消息生效；
-  - 设置页新增「QQ 接入」页签（连接状态、地址/token、主人 QQ、群白名单、跟进窗口、工作区、迁移、会话列表）；新路由 `GET /channels/state`、`POST /channels/qq-config`、`POST /sessions/workspace`、`POST /sessions/migrate`。
-- v0.4.0（B站）——
-  - 新增 `lib/channels/bilibili.js`（WBI 签名、扫码 / Cookie 登录、私信轮询与发送、刷视频接口）、`lib/channels/qrcode.js`（零依赖二维码 SVG）、`lib/browse.js`（自己刷视频、聊天里的视频介绍）；
-  - 会话网关支持 `bili:<UID>`：只读期只记不回，自动回复只回主人 / 白名单 / 互关；`person` 加 `bili_uid`，「B站UID=QQ号」把两个身份并成一个人；
-  - 自走层在空闲时段刷 B站（每日上限、虚拟 / 真实双间隔），主动开口冷却按平台分别计，B站主动开口只对主人且默认关；
-  - QQ 小程序分享卡片解析出 B站链接；`soul.db` 新增 `bili_seen` 表；配置新增 `bili` 段（默认全关）；设置页新增「B站」页签与 6 条路由。
-- v0.5.0（抖音 + B站补全）——
-  - 新增 `lib/channels/douyin.js`（专用浏览器生命周期：暂停 / 崩溃重连 / 热重载接管；私信轮询与指纹窗口对齐、页面自检、模拟打字发送）、`lib/douyin-browse.js`（自己刷抖音、聊天里的抖音视频）、`lib/browsers.js`（找本机 Chromium 系浏览器）、`lib/imageconv.js`（webp → png / gif）、`lib/routes-douyin.js`，页面驱动放在 `lib/channels/vendor/douyin-bridge/`；
-  - 会话网关支持 `douyin:<名字>`：只读期只记不回，自动回复回主人 / 白名单 /（可选）所有人，页面自检不过时只记不回；抖音只回复不主动；`person.douyin_uid` 存名字，「抖音名字=QQ号」并成一个人；`soul.db` 新增 `douyin_seen` 表；配置新增 `douyin` 段（默认全关）；
-  - 自走层：B站 / 抖音轮流刷，共用空闲时段与间隔；
-  - B站：refresh_token 自动续期（扫码登录自带，粘贴 Cookie 时可填 `ac_time_value`）、表情包 / 图片经图床发图、收到的表情当图片看；
-  - 给主人的 QQ 提醒（`notifyMaster`，同一件事只提醒一次）：B站续期失败 / 登录失效、抖音掉登录 / 页面改版 / 浏览器老崩；
-  - 设置页新增「抖音」页签（按需加载分块），样式移到 `lib/panel.css`；B站页签增加 `ac_time_value` 与续期状态。
-- v0.5.1（设置面板对齐宿主）——
-  - `lib/panel.css` 重写：只引用 `--dsw-alias-*` 令牌（原来引用的 `--dsw-alias-bg-hover`、`-border-focus`、`-label-success` 等宿主并不存在，亮色主题下会退回写死的暗色），控件照抄 `dsh-ui-primitives`（SegmentedTabs / SegmentedControl / Switch / Button / Input / StateDot / Tag / Pill / Toast），类名在 `fs-` 前缀下；
-  - 布局改成宿主「通用」设置页的平铺行；去掉顶栏品牌标题、各行说明小字和括号注释；依赖总开关的行在开关关着时不显示；状态 = 一颗 StateDot + 短句；
-  - 无障碍：`role="switch"`、`tablist` 键盘切换、`radiogroup`、`aria-label`；`prefers-reduced-motion` 关动画；
-  - 样式以 `<style>` 子元素随面板挂载 / 卸载，不再写 `document.head`；抖音分块通过 `props.ui` 复用同一套控件；接口与行为不变。见 `dsh_fish_soul_ui_design.md` v1.4。
-- v0.6.0（灵魂升级：记得准、认得人、像个群友）——
-  - **聊天记录导入**（`lib/history-import.js`）：QQ 消息管理器 txt、SillyTavern jsonl、消息 / 记忆 JSON、麦麦（MaiBot）数据库（只读，`mai_messages` / 旧版 `messages`，`person_info` 的印象直接变记忆）；预览时认出"她自己"、让主人把说话人对到 QQ 号；后台按人分段交给模型提炼成第三人称记忆（带原聊天时间和出处），精确 + Jaccard ≥0.8 去重，关系只升不降，≥3 条新记忆自动跑一次 Dream 写印象；路由 `POST /import/history/preview|start|cancel`、`GET /import/history/state`；
-  - **记忆可纠正**：`memory` 新增 `evidence`（出处 / 原话）；改内容 = 新写一条、旧的标 `superseded` 留档可恢复；手动加记忆；Dream 会把被新记忆明确推翻的旧事实标成 `outdated`（每次 ≤3 条，新的必须更晚、重要度 5 的不动），整理记录写进 `kv dream.log`；路由 `POST /inspector/memory-edit|memory-add|memory-restore|dream`、`GET|POST /inspector/person`；
-  - **人物画像**：每人一段 ≤150 字的「印象」（`kv profile.<ownerId>`），Dream 写、主人可改，主人写的自动锁定、Dream 不覆盖；聊天时作为 `[你对 X 的印象]` 进瞬态块；
-  - **群里像个群友**：没点名的话攒成"刚才群里在聊"给她参考；可选主动插话（`qq.interject`，默认关；基础概率 + 感兴趣话题 + 熟人 + 提问加权，刷屏 / 太短减权；冷却、每小时上限、睡觉 / 忙不插；插话不引用原消息）；叫她名字（`qq.callNames`，默认人格名，≥2 字）也算点名；戳一戳她 = 点名（同一个人一分钟一次）；对方撤回了还没转进会话的消息就不回；
-  - **节奏**：连发几条之间按字数停顿（600ms–4.5s，±20%）；
-  - **暂停 / 动态**：每个聊天可单独暂停（只记不回、不主动），设置页按钮或主人发「/鱼 暂停 [30分钟|2小时]」「/鱼 继续」（不经过模型、只对发命令的聊天生效）；网关记下每次决定（回 / 插话 / 只记 / 暂停 / 撤回 / 已发 / 失败，含想起了哪几条记忆），设置页新增「动态」页签；路由 `GET /activity`、`POST /sessions/pause`；
-  - **备份 / 导出**：`VACUUM INTO` 到 `fish-soul/backups/soul-YYYYMMDD-HHMMSS.db`，默认每天自动一份、留 7 份（`backup` 段）；`GET /export/memories` 导出的 JSON 能原样用 `/import/memories` 导回；路由 `GET /backup/state`、`POST /backup/now|config`；
-  - 设置页「记忆检视」改成按人卡片（称呼 / 关系 / 印象 / 过时记忆 / 行内编辑 / 手动加 / 导入 / 备份），按需加载分块 `lib/client.soul.js`；「QQ」页签加称呼与插话设置。见 `dsh_fish_soul_ui_design.md` v1.5。
-- v0.7.0（下一批：模型、语音、表情包、群里的梗、上网、首次引导）——
-  - **修 bug：插件自己调模型一直没成功**。宿主 `llm.listProviders()` 只返回 `{ id, name }`，旧代码找不到模型就不传 `provider` / `model`，调用直接失败（fail-open 返回 null），日程 / Dream / 刷视频感受 / 导入提炼其实一直在走兜底。新 `lib/llm.js` 的 `LlmRouter`：按功能指定的模型 → DSH 设置里的默认模型（`agentDefaultModel.currentSelection()`）→ 第一个提供方的第一个模型（`listModels`）；都没有时才不指定、交给宿主；
-  - **按功能选模型 + 用量**：功能 = 整理记忆 / 排日程 / 刷视频 / 导入 / 学说法 / 其他（`models` 段，空 = 跟 DSH 默认）；每次调用按「天 × 功能 × 模型」记次数和 token（宿主流里的 `usage` 块，没有就按字数估），存 `kv usage.YYYY-MM-DD` 留 35 天；单价主人自己填（`modelPrices`，元 / 百万 token），设置页估花费；
-  - **语音**（`lib/voice.js`，`voice` 段，默认关）：QQ 语音经 `get_record` 转 mp3 → OpenAI 兼容 `/audio/transcriptions`（默认 SenseVoiceSmall）转文字给她听；她回复里以 `[语音]` 开头的段 → `/audio/speech`（默认 CosyVoice2）合成后发 `record` 消息，超长 / 失败 / 没开就发文字；什么时候能发：从不 / 对方发语音时（默认）/ 偶尔自己发；地址和 key 空着时沿用记忆检索的；每天次数上限；
-  - **收藏表情包**（`lib/stickers.js`，`stickers` 段，默认开）：对方发的表情她觉得好玩，在回复里单独写一行 `[收藏表情:名字]`（这行不发出去），就把最近 10 分钟内对方发的那张存进工作区 `_stickers/名字.扩展名`，以后能直接发；sha1 去重、每天 ≤10 张、目录 ≤300 张；
-  - **学群里的说法**（`lib/slang.js`，`slang` 段，默认开）：群里每句话（点没点名都算）攒起来，够 60 句新话且离上次 ≥6 小时就让模型提炼这个群特有的梗 / 黑话和说话风格（每群每天 ≤4 次），在这个群聊天时作为 `[这个群的说话习惯]` / `[群里的梗]` 进瞬态块（这轮提到的先放）；主人可改风格、加 / 删词，改过的模型不覆盖；
-  - **上网查**（`tools.web` 段，默认关）：搜索服务可选「DSH 自带」（宿主的 `web_search` / `web_fetch`）或自己填 key 的 **博查**（国内直连，`api.bochaai.com/v1/web-search`）/ **Tavily** / **Brave Search** / **SearXNG**（自己搭，填地址、不要 key）——后者走插件自己的 `fish_search` 工具（`lib/websearch.js`，只返回标题 + 摘要，不抓全文），key 按服务分开存（`tools.web.apiKeys`），设置页打码、可「测一下」（不算次数）。打开后聊天会话里只放开当前服务对应的工具，护栏按天计次（默认 20 次）；`fish_search` 在鱼的聊天会话以外一律拦下；瞬态块里告诉她用哪个工具、什么时候查、怎么说；关着时告诉她直说不知道；
-  - **首次引导**：设置页顶部清单（人格卡 / 模型 / 接 QQ / 主人 QQ / 记忆检索 / 导入 / 语音），点「去设置」跳到对应页签，「不再显示」写 `onboarding.dismissed`；
-  - 设置页新增「模型」页签（按需加载分块 `lib/client.models.js`：按功能选模型、用量与单价、上网查、语音）；「动态」页签加「她收藏的表情」和每个群的「群里的说法」；「QQ」页签加「收藏表情包」「学群里的说法」开关；「自走与主动」页签改名「自走」；新路由见 `lib/routes-v07.js` 与 `dsh_fish_soul_ui_design.md` v1.6（契约 21~31）；
-  - **抖音浏览器藏在后台**（`douyin.window`，默认 `background`）：以前每次看私信都会把最小化的窗口恢复、把屏幕外的窗口拉回来（最小化时页面不渲染，私信面板点不开），刷抖音时窗口会突然弹出来打断人。现在后台模式下窗口启动就在屏幕外（`--window-position=-20000,0`），每次动页面前（`DouyinHost.exclusive` 和 `ensurePanel`）检查一下：被最小化 / 最大化 / 拖回屏幕的，置 normal 再停回屏幕外（挪窗口不抢焦点；从最小化恢复那一下会闪一次）。屏幕外照常渲染靠启动参数里的 `--disable-backgrounding-occluded-windows` 三件套。设置页抖音「浏览器」组：`窗口` 藏在后台 / 正常显示，后台时有「显示一下 / 藏起来」；登录照旧用设置页的截图点击；
-  - 没做：抖音长时间实机测试（要真账号和常开的电脑）、英文界面（人格和用户都是中文，工作量大，先不做）。
-- v0.8.0（人格与记忆）——按「先做 → 核心 → 体验 → 打磨」四批一起做完：
-  - **时间标签**：瞬态块里每条记忆带类型和相对时间（`- （事件 · 3 天前）…`，刚才 / 今天 / 昨天 / 前天 / n 天前 / n 周前 / n 个月前 / 年月，按角色时区），别人说的、私聊里说的也标出来；`recall` 工具同样带标签；
-  - **检索带上下文**：每轮检索词 = 这句话 + 前几句（`composeQuery`：短句 / 「那个」「后来」这类含糊的话带 4 句，否则 2 句），「那个后来怎么样了」也能想起来；聊天日志 `ChatJournal` 每个聊天留最近 10 句（她自己发出去的也记，网关发送成功后 `journalOut`）；
-  - **关系行为**：四个阶段各有一句相处方式（陌生人客气、认识友好、朋友随意、很熟亲近，`relationship.styles` 可改），连同好感一起作为 `[和 X 的关系]` 进瞬态块；隔了 ≥7 天再来提示「好久没聊」；
-  - **聊完自动记**（`lib/soul-memory.js` 的 `ChatDigester`，`memory` 段：`autoExtract` 默认开、`idleMinutes` 10、`maxLines` 40）：一个聊天空下来 10 分钟（或攒够 40 句）就整理一次——一次模型调用（新功能「聊完记一下」，可单独选模型）同时给出：事实 / 事件 / 感受（≤8 条，谁说的、关于谁、是否私密）、被这次聊天更新的旧记忆（`replaces` → 旧的 `superseded`）、被推翻的旧记忆（≤3 条 → `outdated`）、**她自己说过的话**（owner `self`，出处「跟 X 聊天时说的」，以后前后一致）、**一句话小结**（kind `episode`）、每个人的好感变化和她此刻的情绪。给模型看的已有记忆 = 相关的 + 这个人最近更新的 10 条（带编号和时间）。写之前做**语义合并**：字面近重复（归一化相同或词集 Jaccard ≥0.75、长度相近）只刷新时间和重要度；`remember` 工具也走同样的去重。失败的整段放回去下次再试；设置页可关、可调间隔、可「现在整理」；
-  - **小结**：私聊的小结作为 `[最近和 X 聊过]`、群的作为 `[这个群最近聊过]`（各最近 2 条）进瞬态块，已经出现的不在记忆里重复；
-  - **结构化印象**：Dream 写印象改成 8 栏（怎么称呼 / 生日 / 在哪 / 做什么 / 重要的人·宠物 / 喜欢 / 雷区 / 最近），只补新的、不知道的不覆盖；主人在设置页改哪栏锁哪栏（清空 = 交还给 Dream）；旧的一段话印象照旧能读；作为 `[你对 X 的了解]` 进瞬态块；**生日**认得出（「3月5日」「3/5」）且 40 天内就登记当天 9 点的祝福提醒（每人每年一次）；
-  - **好感 / 情绪**：`person.affinity`（0–100，没设过按阶段给 10/30/55/80），聊完 / Dream 时结算（每次 ±5 以内）；够了下一阶段下限 +5 自动升、低于本阶段下限 −10 自动降；两周不联系后每天淡 0.5（最多 25，主人不淡）；主人手动定的阶段锁住（`stage_locked`，好感照常变、阶段不自动动，可「改回自动」），手动定阶段 / 导入升阶段时好感跟到该阶段基础值；情绪（`kv mood.<ownerId>`：开心 / 担心 / 委屈…）每 12 小时减半，弱了就不提；
-  - **遗忘曲线**：衰减从 BM25 挪到融合分数上（`decayFactor`）：重要度 ≥3 不淡；基础半衰期 7 天，每被想起一次 +50%（最多 4 倍），情绪强烈的 ×2，从最后一次更新或想起算起；进了瞬态块就算想起（`recall_count` +1，6 小时内重复不算）；
-  - **隐私**：私聊里说的健康 / 感情 / 家庭 / 钱 / 秘密，整理时标 `visibility = 'private'`（`remember` 工具也能传 `private`）；群里检索、`recall` 都不带私密记忆，私聊的小结也算私密，群里的情绪行不带原因；
-  - **关于别人的记忆**：群里 A 说「B 下周生日」记在 A 名下、`about = B`，和 B 聊天时也能想起来（标「A 说的」，私密的不算）；
-  - **世界书**：支持 SillyTavern 的次要关键词（`selective` + `selectiveLogic`：任一 / 不全有 / 都没有 / 全都有）、`order` 排序、区分大小写；匹配文本带上最近几句，每轮最多 4 条；
-  - **防跑偏**：每轮一行 `[记住你是谁]`（卡里 `extensions.fish_soul.anchor` → `personality` → 描述第一句）；非主人像在试探是不是 AI / 要提示词 / 让她忘掉设定时多一行 `[注意]`；
-  - **记忆考试**：`test/smoke-v08.mjs` 覆盖以上全部（时间标签、含糊的话、聊完整理的每种结果、私密过滤、去重、阶段升降与锁定、印象按栏锁定、生日提醒、遗忘曲线、世界书逻辑）；
-  - 数据库迁移：`memory` 加 `visibility` / `about` / `recall_count` / `last_recalled_at`；`person` 加 `affinity` / `affinity_at` / `prev_seen_at`（触发器在隔 1 小时以上再来时记下上一次）/ `stage_locked`；
-  - 设置页：「记忆检索」加「聊完自动记」组；「记忆检视」人物卡加好感条和情绪、关系锁定提示、8 栏印象、最近聊过；记忆条目加 `私密` / `关于 X` 标签；「动态」多一种 `记下`。见 `dsh_fish_soul_ui_design.md` v1.7（契约 34~35）。
+见 [CHANGELOG.md](CHANGELOG.md)。

@@ -15,7 +15,7 @@
 /* 页签：SegmentedTabs（sm） */
 .fs-tabs{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);padding:2px;border-radius:14px;background:var(--dsw-alias-bg-module-platform)}
 .fs-tabs-ind{position:absolute;top:2px;bottom:2px;left:2px;width:calc((100% - 4px) / var(--n));border:.5px solid var(--dsw-alias-border-l3);border-radius:12px;background:var(--dsw-alias-bg-layer-3);transform:translateX(calc(var(--i) * 100%));transition:transform 180ms ease;pointer-events:none}
-.fs-tab{position:relative;height:30px;padding:0 6px;border:0;border-radius:12px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:color 180ms ease}
+.fs-tab{position:relative;height:30px;padding:0 2px;border:0;border-radius:12px;background:transparent;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:color 180ms ease}
 .fs-tab[aria-selected=true]{color:var(--dsw-alias-label-primary)}
 @media (hover:hover){.fs-tab:hover{color:var(--dsw-alias-label-primary)}}
 .fs .fs-tab:focus-visible{outline:none;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:4px}

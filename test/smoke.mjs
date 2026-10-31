@@ -525,13 +525,15 @@ const { ChatGateway } = await import('../lib/gateway.js');
 const sent2 = []; const resumed2 = [];
 let gw2;
 const ctx2 = {
-	get: (n) => (n === 'agents' ? agents2 : undefined),
+	get: (n) => (n === 'agents' ? agents2 : n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'ds', model: 'ds-chat' }) } : undefined),
 	tools: { get: () => ({}) }
 };
+const resumeOpts2 = [];
 const agents2 = {
 	get: () => undefined,
 	async resume(opts) {
 		resumed2.push(opts.resumeSessionId);
+		resumeOpts2.push(opts);
 		const agent = { id: opts.resumeSessionId, session: { id: opts.resumeSessionId }, async followup(msg) {
 			setTimeout(() => {
 				gw2.onSessionEvent({ id: agent.id }, { type: 'user/message', data: msg });
@@ -551,9 +553,34 @@ const okP = await gw2.triggerProactive('private:10001', '主人说 9 点提醒�
 assert.equal(okP, true);
 const row10001 = db.prepare("SELECT session_id FROM chat_session WHERE channel_id = 'private:10001' AND status = 'active'").get();
 assert.deepEqual(resumed2, [row10001.session_id]);
+assert.deepEqual(resumeOpts2[0].agentOptions, { provider: 'ds', model: 'ds-chat' }, '恢复会话要带上模型（DSH 的 {{model}} 靠它）');
 assert.equal(sent2[0][0], 'private:10001');
 assert.equal(sent2[0][1][0].data.text, '开会别迟到哦');
 ok('主动开口：重启后恢复原会话，模型写的那句发出去才返回成功');
+
+// 19b 已经开着、但当初没带模型的会话（旧版恢复留下的）：换新会话并带上模型
+{
+	const created3 = [];
+	const stale = { id: row10001.session_id, session: { id: row10001.session_id }, options: {}, async followup() {} };
+	const agents4 = {
+		get: (id) => (id === row10001.session_id ? stale : undefined),
+		async resume() { throw new Error('不该恢复'); },
+		async create(opts) { created3.push(opts); return { agent: { id: opts.sessionId, session: { id: opts.sessionId }, options: opts.agentOptions, async followup() {} } }; }
+	};
+	const reg4 = { create: async (path, title) => ({ path, title, attachSession: async () => {} }), list: () => [] };
+	const gw4 = new ChatGateway({
+		ctx: { get: (n) => (n === 'agents' ? agents4 : n === 'workspaceRegistry' ? reg4 : n === 'agentDefaultModel' ? { currentSelection: () => ({ provider: 'ds', model: 'ds-chat' }) } : undefined), tools: { get: () => ({}) } },
+		db, clock: { now: () => Date.now() }, getConfig: () => ({ qq: { enabled: true }, masterQqUin: '10001' }), log: () => {},
+		channel: { connected: true, selfId: '1000', send: async () => '1', groupName: async () => '', getMessage: async () => null, isFriend: () => true },
+		soul: { beginTurn() {}, nowLabel: () => '现在', resolvePerson() { return null; }, memorizeUnanswered() {} }
+	});
+	const a4 = await gw4.ensureSession({ channelId: 'private:10001', chatType: 'private', targetId: '10001', title: '主人' });
+	assert.equal(created3.length, 1, '没模型的旧会话换成新会话');
+	assert.deepEqual(created3[0].agentOptions, { provider: 'ds', model: 'ds-chat' });
+	assert.notEqual(a4.id, row10001.session_id);
+	assert.equal(db.prepare('SELECT status FROM chat_session WHERE session_id = ?').get(row10001.session_id).status, 'retired');
+}
+ok('没带模型的旧会话：换新会话并带上模型，不再每轮报 {{model}} 没有值');
 
 // 20 主动配额：自发每天 ≤ 上限、两条间隔 ≥ 60 虚拟分钟；用户交代的提醒不占配额、按时发
 {

@@ -27,7 +27,8 @@ export async function run(t) {
 		assert.match(bm.renew[3][2], /SESSDATA=good%2C456/);
 		const saved = JSON.parse(readFileSync(authFile, 'utf8'));
 		assert.deepEqual([saved.cookies.SESSDATA, saved.cookies.bili_jct, saved.refreshToken], ['good%2C456', 'jct2', 'fedcba9876543210fedcba9876543210']);
-		assert.equal(statSync(authFile).mode & 0o777, 0o600);
+		// Windows 没有 POSIX 权限位（Node 只能切只读，stat 永远报 0o666/0o444），只在类 Unix 上查 0600
+		if (process.platform !== 'win32') assert.equal(statSync(authFile).mode & 0o777, 0o600);
 		assert.ok(c.renewStatus().renewedAt > 0);
 		// 续期失败：记下原因、提醒主人一次（下次 3 小时后再试）；成功后提醒清掉
 		const notes = [];

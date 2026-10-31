@@ -128,7 +128,12 @@ export async function run(t) {
 	assert.equal(fd.msg.source.kind, 'fish-soul/douyin');
 	assert.equal(fd.msg.content[0].text, '看这个 https://www.douyin.com/video/7300000000000000001 笑死\n【抖音视频：猫猫打架；作者 猫博主；热评：橘猫赢了】');
 	assert.ok(host.titles.some(([sid, t]) => sid === fd.id && t === '抖音·主人抖音（主人）'));
-	const dyBlock = context.text(at(fd.id));
+	// 向量预取是异步的（lib/index.js prefetchVec 用 void 发起），块里只在预取回来且 query 相同时才融合。
+	// "冰美式"和这句抖音消息没有词面重合，纯 BM25 召不回，所以这里等预取落地再看块（断言不变）。
+	const dyBlock = await waitFor(() => {
+		const t = context.text(at(fd.id));
+		return /冰美式/.test(t) ? t : null;
+	}, 3000) ?? context.text(at(fd.id));
 	assert.match(dyBlock, /抖音私信回复规则/); assert.match(dyBlock, /冰美式/, '主人在 QQ 说过的事在抖音也记得');
 	assert.match(dyBlock, /可用：[^\n]*ok\.png[^\n]*wow\.webp/, '浏览器在跑：webp 表情包也能用');
 	const fa = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'douyin:阿二抖音'), 6000);

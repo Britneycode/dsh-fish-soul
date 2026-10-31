@@ -2,3 +2,8 @@ node_modules/
 *.log
 .DS_Store
 test/eval/reports/
+
+# 本地设计文档，不进仓库
+DESIGN-fish-soul.md
+dsh_fish_soul_deepseek_harness.html
+dsh_fish_soul_ui_design.md

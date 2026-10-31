@@ -83,8 +83,10 @@
 | 按功能选模型 | 组标题右侧 `DSH 默认：提供方 · 模型`；每个功能一行（整理记忆 / 写印象、排日程、刷视频写感受、导入聊天记录、学群里的说法、其他），没单独选的行下方灰字 `现在用 xxx` | Select：`跟 DSH 默认（模型）` + 按提供方分组的模型；选了就存。找不到的旧选择显示 `xxx（现在找不到）`；上次调用失败时多一行红点错误 |
 | 用量 | 组标题右侧 `7 天 / 30 天` Seg；`合计` 行：`n 次 · 输入 x · 输出 y token` + `约 ¥z` Tag（填了单价才有），有估算时下方灰字说明；每个功能一行：次数（失败数）、token、花费 | — |
 | 单价 | 每个用过的模型一行：token 数、输入 / 输出单价（元 / 百万 token）、花费 | 失焦保存；两个都清空 = 删掉单价 |
-| 上网查 | `聊天时可以上网查` 开关（DSH 没装 `web_search` 时禁用 + 灰字说明；开着时左边 `今天 n/上限`）；开着才出现 `每天最多 n 次` | — |
+| 上网查 | `聊天时可以上网查` 开关（选的服务用不了时禁用 + 灰字说明：DSH 没装 `web_search` / 先填 API Key / 先填 SearXNG 地址；开着时左边 `今天 n/上限`）；`搜索服务` Select（DSH 自带 / 博查（国内直连）/ Tavily / Brave Search / SearXNG（自己搭）），下方灰字一句去哪申请；需要 key 的出现 `API Key`（Secret，打码占位，已填时左边 `已填`）；SearXNG 出现地址输入；自己的服务配好后出现 `测一下`（结果写在灰字里：条数 · 秒数 · 第一条标题）；开着才出现 `每天最多 n 次` | 切服务立即保存；Key / 地址失焦保存；key 按服务分开存 |
 | 语音 | `语音` 开关（关着灰字一句说明；开着显示 `今天还能听 n 条 · 说 n 条` / `还没有 key` / 错误）；开着才出现：接口地址、API Key（空 = 沿用记忆检索的 key 时占位符这样写）、听语音的模型、说话的模型、音色、`什么时候发语音` Seg（从不 / 对方发语音时 / 偶尔自己发）、一条语音最多 n 字、每天最多听 n 说 n 条、试听（输入 + `播放`） | 失焦保存；Key 打码不回传 |
+
+**抖音页「浏览器」组新增**：`窗口` 行，Seg（藏在后台 / 正常显示），下方灰字一句说明当前模式的效果；后台模式且浏览器在跑时左边 `显示一下` / `藏起来` 按钮。
 
 **动态页新增**：`她收藏的表情`（缩略图网格，悬浮看从谁那里存的、什么时候，右上角 `删除`；没有时一句说明）；每个有数据的群一组 `群里的说法 · 群名`（右侧 `x 小时前学的 · 攒了 n 句` + `现在学一次`；`说话风格` 输入框（改过的下方灰字「你改过，不会被覆盖」）；梗列表：**词** + 意思，悬浮看例句，`手动` Tag，`删除`；`加一个`：说法 + 什么意思 + `添加`）。
 
@@ -114,8 +116,8 @@
 | **18** | `GET` | `/api/plugins/fish-soul/export/memories` | 无 | 附件 JSON：`[{ ownerId, qqUin?, nickname?, content, kind, importance, emotion, channel, channelId, createdAt, evidence? }]` |
 | **19** | `POST` | `/api/plugins/fish-soul/import/history/preview` | `{ text, fileName }` 或 `{ dbPath }`（≤40 MB） | `{ ok, previewId, format, chats, chatCount, messageCount, memoryCount, speakers: [{ key, name, qq, suggestQq, count, self, existing }], estimate: { persons, calls }, warnings }` |
 | **20** | `POST` / `GET` | `/api/plugins/fish-soul/import/history/start` · `/state` · `/cancel` | `start`：`{ previewId, selfKeys, mapping: { key: qq }, maxCalls }` | `{ ok, job: { status, fileName, total, done, inserted, duplicates, direct, current, persons, errors } }` |
-| **21** | `GET` | `/api/plugins/fish-soul/models/state` | 无 | `{ ok, providers: [{ id, name, models: [{ id, name }] }], features: [{ id, label, selection: { provider, model } \| null, resolved: { provider, model, from: 'feature' \| 'host' \| 'first' } \| null }], hostDefault, prices, usage7, usage30, lastError, web: { enabled, perDay, usedToday, available } }`；`usage*`：`{ days, byFeature: { id: { calls, failed, in, out, estimated, cost } }, byModel: { model: { calls, in, out, cost \| null } }, daily, total }` |
-| **22** | `POST` | `/api/plugins/fish-soul/models/config` | `{ models?: { feature: { provider, model } \| null }, prices?: { model: { in, out } \| null }, web?: { enabled, perDay } }` | `{ ok, web }` |
+| **21** | `GET` | `/api/plugins/fish-soul/models/state` | 无 | `{ ok, providers: [{ id, name, models: [{ id, name }] }], features: [{ id, label, selection: { provider, model } \| null, resolved: { provider, model, from: 'feature' \| 'host' \| 'first' } \| null }], hostDefault, prices, usage7, usage30, lastError, web: { enabled, perDay, usedToday, available, provider, providers: [{ id, label, needsKey, needsBaseURL, hint }], hostAvailable, hasApiKey, apiKeyMasked, baseURL } }`；`usage*`：`{ days, byFeature: { id: { calls, failed, in, out, estimated, cost } }, byModel: { model: { calls, in, out, cost \| null } }, daily, total }` |
+| **22** | `POST` | `/api/plugins/fish-soul/models/config` | `{ models?: { feature: { provider, model } \| null }, prices?: { model: { in, out } \| null }, web?: { enabled, perDay, provider?: 'host' \| 'bocha' \| 'tavily' \| 'brave' \| 'searxng', apiKey?（存到当前 / 新选的服务名下；打码的忽略）, baseURL? } }` | `{ ok, web }` |
 | **23** | `GET` | `/api/plugins/fish-soul/voice/state` | 无 | `{ ok, enabled, baseURL, hasApiKey, hasOwnKey, apiKeyMasked, sharesEmbedding, sttModel, ttsModel, ttsVoice, speak, maxChars, ttsPerDay, sttPerDay, ttsLeft, sttLeft, lastError }` |
 | **24** | `POST` | `/api/plugins/fish-soul/voice/config` | `{ enabled?, baseURL?, apiKey?（打码的忽略）, sttModel?, ttsModel?, ttsVoice?, speak?: 'never' \| 'mirror' \| 'sometimes', maxChars?, ttsPerDay?, sttPerDay? }` | 同 23 |
 | **25** | `POST` | `/api/plugins/fish-soul/voice/test` | `{ text }` | `{ ok, mediaType: 'audio/mpeg', base64 }` |
@@ -125,3 +127,5 @@
 | **29** | `GET` | `/api/plugins/fish-soul/slang/state` | 无 | `{ ok, config: { enabled, minLines, intervalHours }, groups: [{ channelId, title, style, styleByUser, terms: [{ term, meaning, example, byUser? }], learnedAt, lines, newLines }] }` |
 | **30** | `POST` | `/api/plugins/fish-soul/slang/learn` · `/slang/edit` · `/slang/config` | `learn`：`{ channelId }`；`edit`：`{ channelId, style?, add?: { term, meaning }, remove? }`；`config`：`{ enabled?, minLines?, intervalHours? }` | `{ ok, added?, total?, group }` / `{ ok, config }` |
 | **31** | `GET` / `POST` | `/api/plugins/fish-soul/onboarding/state` · `/onboarding/dismiss` | `dismiss`：`{ dismissed? }`（默认 true） | `{ ok, dismissed, done, chats, steps: [{ id, title, done, optional, tab }] }` |
+| **32** | `POST` | `/api/plugins/fish-soul/web/test` | `{ query? }`（默认「今天有什么新闻」；DSH 自带的测不了） | `{ ok, query, count, latencyMs, answer, results: [{ title, url, site, date, snippet }]（前 3 条） }` |
+| **33** | `POST` | `/api/plugins/fish-soul/douyin/window` | `{ show: boolean }`（后台模式下临时显示 / 藏回去）；窗口模式本身走 `/channels/douyin-config` 的 `window: 'background' \| 'visible'` | `{ ok, windowShown }`；`/channels/state` 的 `douyin` 多 `window`、`windowShown` |

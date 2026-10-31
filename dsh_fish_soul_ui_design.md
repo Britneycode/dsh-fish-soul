@@ -1,9 +1,9 @@
-# dsh-fish-soul 前端 UI 设计文档（v1.7 · 宿主原生版）
+# dsh-fish-soul 前端 UI 设计文档（v1.8 · 宿主原生版）
 
 > **对应架构方案**：《dsh-fish-soul 设计方案》（DESIGN-fish-soul.md）  
 > **宿主技术栈**：[`deepseek-ai/deepseek-harness`](https://github.com/deepseek-ai/deepseek-harness)（`packages/client/` · `ui-theme` 的 `--dsw-alias-*` 令牌 + `ui-primitives` 控件）  
 > **核心设计信条**：**Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.**  
-> **实现文件**：`lib/client.js`（主面板）、`lib/client.douyin.js`（抖音页，按需加载）、`lib/client.soul.js`（记忆检视 / 动态页，按需加载）、`lib/client.models.js`（模型页，按需加载）、`lib/panel.css`（全部样式）
+> **实现文件**：`lib/client.js`（主面板）、`lib/client.douyin.js`（抖音页，按需加载）、`lib/client.soul.js`（记忆检视 / 动态页，按需加载）、`lib/client.models.js`（模型页，按需加载）、`lib/client.behavior.js`（习惯页，按需加载）、`lib/panel.css`（全部样式）
 
 ## 1. 原则
 
@@ -108,6 +108,24 @@
 
 **记忆条目**新增 Tag：`私密`（私聊里说的，群里不会提）、`关于 X`（别人说的关于这个人的事）；类型多一个 `聊过`（小结）。**动态**多一种 `记下`（绿色，内容为「聊完记了 n 条：小结」）。
 
+## 3.8 v1.8 新增（v0.9.0）
+
+**页签**：九个，`记忆检索 / 自走 / 记忆检视 / 动态 / 习惯 / 模型 / QQ / B站 / 抖音`；等宽，页签左右内边距收到 2px 让四字标签在 564px 宽放得下，放不下时省略号 + `title` 显示全名。
+
+**习惯页**（`client.behavior.js`，`GET /behavior/state` 一次拿全）：
+
+| 组 | 行 | 交互 |
+| :--- | :--- | :--- |
+| 心情和说话 | `心情影响行为`（灰字说明影响什么）· `每轮判断心情`（默认关）· `去 AI 味` · 开着时 `一次最多说多少字 n 字`（60–2000） | 开关即存；数字失焦保存 |
+| QQ 小习惯 | `看合并转发`（+ 最多几条）· `被戳了戳回去`（+ 概率 %）· `群里点表情回应`（默认关）· `私聊显示正在输入` · `群里冷热`（灰字讲规则 + `热闹的条数`） | 同上 |
+| 每个群 | 每个群一行：群名 + 冷热 Tag（`热闹` 橙 / `冷却中` 蓝 / `潜水` 描边）+ `最近 n 条 · n 人`；下面一个多行框写群设定（占位给例子，≤500 字） | 失焦保存，清空 = 删除，toast `群设定已保存 / 已清空` |
+| 聊天用哪个模型 | 组标题右侧灰字 `单个聊天 → 私聊 / 群聊默认 → DSH 默认`；`私聊默认`（QQ / B站 / 抖音私信）、`群聊默认`、每个聊过的聊天一行；Select 按提供方分组，空选项 = `跟 DSH 默认（模型名）` / `跟私聊默认` / `跟群聊默认`，找不到的模型显示 `（现在找不到）` | 选了就存，toast `已保存，下一轮就用` |
+| 日记 | 组标题右侧 `现在写一篇`；`每晚写日记`、开着时 `几点写 n 点以后`（18–23）、`发到 QQ 空间`（默认关）；昨晚想聊的（`想聊` Tag + `谁：什么`）；最近 7 篇（去掉日期前缀，右侧相对时间） | 写成 toast `写好了` |
+
+**记忆检视 · 记忆调试**（选了某个人时，人物卡下面）：一行输入框（占位 `假如他说……`）+ `在群里` 开关 + `试一下`；组标题右侧 Tag `关键词 + 意思` / `只有关键词`。结果一个列表：想起来的 `#1` `#2`（绿 Tag）、没想起的（描边 Tag，最多 8 条）、不参与的（橙 Tag，最多 6 条）；每行右侧分数（悬停看 `原始 × 新鲜度 · 关键词第 n · 意思第 n`）、相对时间、原因灰字。
+
+**动态**新增种类：`改写`（去 AI 味改了 / 没发）、`日记`、`心情`、`戳回`、`回应`。**模型页**功能多 `写日记`、`每轮判断心情`。
+
 ## 4. 前后端 HTTP 路由契约表（`client.js` ↔ `ctx.connection.fetch.register`）
 
 | 序号 | 方法 | 路径 | 请求体 (Request JSON) | 响应体 (Response JSON) |
@@ -147,3 +165,9 @@
 | **33** | `POST` | `/api/plugins/fish-soul/douyin/window` | `{ show: boolean }`（后台模式下临时显示 / 藏回去）；窗口模式本身走 `/channels/douyin-config` 的 `window: 'background' \| 'visible'` | `{ ok, windowShown }`；`/channels/state` 的 `douyin` 多 `window`、`windowShown` |
 | **34** | `GET` | `/api/plugins/fish-soul/memory/state` | 无 | `{ ok, autoExtract, idleMinutes, maxLines, pending, running, last: { at, channelId, title, lines, added, refreshed, replaced, outdated, self, summary, people } \| null }` |
 | **35** | `POST` | `/api/plugins/fish-soul/memory/config` · `/memory/digest-now` | `config`：`{ autoExtract?, idleMinutes?（1–240）, maxLines?（10–80） }`；`digest-now`：无 | 同 34（`digest-now` 另回 `{ chats, added }`）；`/inspector/overview` 的记忆多 `visibility`、`about`、`recallCount` |
+| **36** | `GET` | `/api/plugins/fish-soul/behavior/state` | 无 | `{ ok, config: { moodAffects, outFilter: { enabled, maxChars }, forward: { enabled, maxLines }, heat: { enabled, windowSec, hotCount, hotSpeakers, boost, coolMinutes }, interactions: { pokeBack, pokeBackChance, react, reactChance, typing }, turnMood: { enabled, minConfidence }, diary: { enabled, hour, qzone } }, groups: [{ groupId, channelId, title, note, noteAt, heat: { state: 'diving' \| 'hot' \| 'cooling' \| 'off', label, count, speakers, factor } }], chatModels: { config: { private, group, overrides }, providers, hostDefault, chats: [{ channelId, title, override, resolved }] }, diary: { config, last, topics: { date, at, items: [{ ownerId, who, topic }] }, entries: [{ id, content, at }] } \| null }` |
+| **37** | `POST` | `/api/plugins/fish-soul/behavior/config` | 36 里 `config` 的任意部分（只改传了的，数字夹到上下限） | `{ ok, config }` |
+| **38** | `POST` | `/api/plugins/fish-soul/groups/note` | `{ groupId（1–12 位数字）, note（≤500 字，空串 = 删除） }` | `{ ok, groupId, note }` |
+| **39** | `POST` | `/api/plugins/fish-soul/chat-models/config` | `{ private?, group?, overrides? }`（`{ provider, model }` \| null）或 `{ channelId, selection }`（null = 跟默认） | 同 36 的 `chatModels` + `ok` |
+| **40** | `POST` | `/api/plugins/fish-soul/memory/debug` | `{ ownerId: 'user:…', text, inGroup? }` | `{ ok, query, inGroup, topK, vector, recalled: [{ id, content, kind, rank, score, raw, decay, bm25Rank, vecRank, why, when }], others: [同上，最多 30], excluded: [{ id, content, kind, why }] }` |
+| **41** | `POST` | `/api/plugins/fish-soul/diary/write-now` | 无 | `{ ok, entry, diary }`；失败 `{ ok: false, error: '正在写' \| '没写成（模型没给结果）' \| '日记没起来' }` |

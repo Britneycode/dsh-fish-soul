@@ -20,6 +20,18 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { echo "$TAG 已存在"
 
 grep -q "\"version\": \"$VER\"" package.json || echo "警告：package.json 版本不是 $VER" >&2
 
+# 先校验再打 tag：正文有坏字符 / 缺 token 时就别留个推上去的孤儿 tag
+python - "$NOTES" << 'PY'
+import os, sys
+body = open(sys.argv[1], encoding="utf-8").read()
+if "\ufffd" in body:
+    sys.exit("正文有编码坏字符（U+FFFD），先修文件")
+if not os.environ.get("GITHUB_TOKEN_BRITNEYCODE"):
+    sys.exit("缺 GITHUB_TOKEN_BRITNEYCODE")
+if not body.strip():
+    sys.exit("正文是空的")
+PY
+
 git tag -a "$TAG" -m "$TAG"
 git push origin "$TAG"
 

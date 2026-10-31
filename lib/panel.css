@@ -160,3 +160,12 @@ select.fs-input{appearance:none;-webkit-appearance:none;padding-right:32px;curso
 
 @media (max-width:560px){.fs-row{flex-wrap:wrap;gap:8px 16px}.fs-row-title{max-width:none}.fs-input,.fs-affix{flex:1 1 100%;width:100%}}
 @media (prefers-reduced-motion:reduce){.fs-tabs-ind,.fs-seg-ind,.fs-tab,.fs-seg-btn,.fs-switch-thumb,.fs-fill{transition:none}.fs-spin g,.fs-spin circle:last-child,.fs-toast{animation:none}}
+/* v0.6：记忆编辑 / 导入预览 / 动态 */
+a.fs-btn{text-decoration:none}
+.fs-item.edit{flex-direction:column;align-items:stretch;gap:8px}
+.fs-item.edit .fs-ctl{justify-content:flex-start;flex-wrap:wrap}
+.fs-item-sub{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere}
+.fs-fill-gap{flex:1 1 auto}
+.fs-check{display:inline-flex;flex:none;align-items:center;gap:4px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);cursor:pointer}
+.fs-check input{margin:0;accent-color:var(--dsw-alias-state-business-primary)}
+.fs-strong{font-weight:500;color:var(--dsw-alias-label-primary)}

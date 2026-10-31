@@ -220,8 +220,9 @@ export async function run(t) {
 		assert.match(guard({ agent: { id: sid }, name: 'web_search' }), /不能上网/);
 		tools.web_search = { name: 'web_search' }; tools.web_fetch = { name: 'web_fetch' };
 		p = await call('GET', '/models/state');
-		assert.deepEqual(p.json.web, { enabled: false, perDay: 20, usedToday: 0, available: true });
-		assert.match(context.text(at(sid)), /现在不能用 web_search/);
+		assert.deepEqual({ ...p.json.web, providers: undefined }, { enabled: false, perDay: 20, usedToday: 0, available: true, provider: 'host', providers: undefined, hostAvailable: true, hasApiKey: false, apiKeyMasked: '', baseURL: '' });
+		assert.deepEqual(p.json.web.providers.map((x) => x.id), ['host', 'bocha', 'tavily', 'brave', 'searxng']);
+		assert.match(context.text(at(sid)), /现在不能上网查/);
 		p = await call('POST', '/models/config', { web: { enabled: true, perDay: 2 } });
 		assert.equal(p.json.web.enabled, true);
 		assert.match(context.text(at(sid)), /可以先用 web_search 查/);
@@ -234,6 +235,90 @@ export async function run(t) {
 		delete tools.web_search; delete tools.web_fetch;
 	}
 	ok('上网查：默认关；打开后聊天会话能用 web_search / web_fetch，按天限次数；主会话不受影响');
+
+	// 54b 上网查 · 自己的搜索 key：博查 / Tavily / Brave / SearXNG；fish_search 只在聊天会话里、跟着开关和次数走
+	{
+		const calls = [];
+		let mode = 'ok';
+		mod.testHooks.webFetch = async (url, init = {}) => {
+			calls.push({ url: String(url), init });
+			const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+			if (mode === 'fail') return json(401, { message: 'Invalid API key' });
+			if (String(url).includes('bochaai')) return json(200, { code: 200, data: { webPages: { value: [
+				{ name: 'S16 总决赛落幕', url: 'https://www.example.com/a', siteName: '某体育', datePublished: '2026-11-02T10:00:00+08:00', snippet: '短', summary: '某队 3:1 夺冠' },
+				{ name: '第二条', url: 'https://b.example.org/x', snippet: '第二条摘要' }] } } });
+			if (String(url).includes('tavily')) return json(200, { answer: '一句话概要', results: [{ title: 'T1', url: 'https://t.example/1', content: 'tavily 内容' }] });
+			if (String(url).includes('brave')) return json(200, { web: { results: [{ title: 'B1', url: 'https://br.example/1', description: '<strong>brave</strong> 内容' }] } });
+			if (String(url).includes('/search?')) return json(200, { results: [{ title: 'S1', url: 'https://s.example/1', content: 'searx 内容' }] });
+			return json(404, {});
+		};
+		const fs = tools.fish_search;
+		assert.ok(fs, 'fish_search 注册了');
+		const used0 = (await call('GET', '/models/state')).json.web.usedToday;
+		// 没配 key：不可用、开关打不开（UI 置灰）、工具直接说没配好
+		p = await call('POST', '/models/config', { web: { provider: 'bocha' } });
+		assert.equal(p.json.web.provider, 'bocha');
+		assert.equal(p.json.web.available, false);
+		assert.match(await fs.execute({ query: 'x' }, {}), /没配好/);
+		assert.equal((await call('POST', '/web/test', {})).json.ok, false);
+		// 填 key：掩码回显；再提交掩码不覆盖
+		p = await call('POST', '/models/config', { web: { apiKey: 'sk-bocha-secret-1234', enabled: true, perDay: used0 + 2 } });
+		assert.equal(p.json.web.available, true);
+		assert.equal(p.json.web.hasApiKey, true);
+		assert.match(p.json.web.apiKeyMasked, /1234$/);
+		assert.ok(!JSON.stringify(p.json).includes('bocha-secret'), 'key 不回传');
+		await call('POST', '/models/config', { web: { apiKey: p.json.web.apiKeyMasked } });
+		p = await call('POST', '/web/test', { query: '英雄联盟 总决赛' });
+		assert.equal(p.json.ok, true);
+		assert.equal(p.json.count, 2);
+		assert.equal(calls.at(-1).init.headers.Authorization, 'Bearer sk-bocha-secret-1234', '掩码没覆盖真 key');
+		assert.deepEqual(JSON.parse(calls.at(-1).init.body), { query: '英雄联盟 总决赛', summary: true, count: 3, freshness: 'noLimit' });
+		assert.equal(p.json.results[0].site, '某体育');
+		assert.equal(p.json.results[1].site, 'b.example.org');
+		assert.equal((await call('GET', '/models/state')).json.web.usedToday, used0, '测一下不算次数');
+		// 会话里：上下文提 fish_search；护栏放行 fish_search、挡宿主的 web_search；主会话不能用 fish_search
+		assert.match(context.text(at(sid)), /可以先用 fish_search 查/);
+		assert.match(guard({ agent: { id: sid }, name: 'web_search' }), /请用 fish_search/);
+		assert.match(guard({ agent: { id: 'main-session' }, name: 'fish_search' }), /只给鱼的聊天会话用/);
+		assert.equal(guard({ agent: { id: sid }, name: 'fish_search' }), undefined);
+		const out = await fs.execute({ query: '总决赛' }, {});
+		assert.match(out, /搜「总决赛」的结果/);
+		assert.match(out, /1\. S16 总决赛落幕（某体育 2026-11-02）\n {3}某队 3:1 夺冠/);
+		assert.equal(guard({ agent: { id: sid }, name: 'fish_search' }), undefined);
+		assert.match(guard({ agent: { id: sid }, name: 'fish_search' }), /次数用完了/);
+		// 出错：工具不抛，告诉她没搜成
+		mode = 'fail';
+		assert.match(await fs.execute({ query: '总决赛' }, {}), /没搜成（博查 返回 401：Invalid API key）/);
+		assert.match((await call('POST', '/web/test', {})).json.error, /401/);
+		mode = 'ok';
+		// 每个服务各存一个 key：换 Tavily 要重新填，换回博查 key 还在
+		p = await call('POST', '/models/config', { web: { provider: 'tavily' } });
+		assert.equal(p.json.web.hasApiKey, false);
+		p = await call('POST', '/models/config', { web: { apiKey: 'tvly-key-9999', perDay: 500 } });
+		p = await call('POST', '/web/test', {});
+		assert.equal(p.json.answer, '一句话概要');
+		assert.equal(calls.at(-1).init.headers.Authorization, 'Bearer tvly-key-9999');
+		assert.match(await fs.execute({ query: 'q' }, {}), /概要：一句话概要/);
+		p = await call('POST', '/models/config', { web: { provider: 'brave', apiKey: 'brv-1' } });
+		assert.equal(p.json.web.available, true);
+		p = await call('POST', '/web/test', { query: '猫' });
+		assert.equal(p.json.results[0].snippet, 'brave 内容');
+		assert.equal(calls.at(-1).init.headers['X-Subscription-Token'], 'brv-1');
+		assert.match(calls.at(-1).url, /q=%E7%8C%AB&count=3/);
+		p = await call('POST', '/models/config', { web: { provider: 'searxng', baseURL: 'http://127.0.0.1:8888/' } });
+		assert.equal(p.json.web.available, true);
+		assert.equal(p.json.web.baseURL, 'http://127.0.0.1:8888');
+		p = await call('POST', '/web/test', {});
+		assert.equal(p.json.results[0].title, 'S1');
+		assert.match(calls.at(-1).url, /^http:\/\/127\.0\.0\.1:8888\/search\?q=.+&format=json$/);
+		p = await call('POST', '/models/config', { web: { provider: 'bocha' } });
+		assert.equal(p.json.web.hasApiKey, true, '博查的 key 还在');
+		// 换回 DSH 自带：fish_search 被护栏挡
+		await call('POST', '/models/config', { web: { provider: 'host', enabled: false } });
+		assert.match(guard({ agent: { id: sid }, name: 'fish_search' }), /不能上网/);
+		mod.testHooks.webFetch = null;
+	}
+	ok('上网查 · 自己的 key：博查 / Tavily / Brave / SearXNG 都能搜；key 掩码、按服务分开存；测一下不算次数；fish_search 只在聊天会话里、跟开关和次数走');
 
 	// 55 路由：模型 / 用量 / 单价、语音、表情包、学说法、首次引导
 	{

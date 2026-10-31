@@ -169,3 +169,10 @@ a.fs-btn{text-decoration:none}
 .fs-check{display:inline-flex;flex:none;align-items:center;gap:4px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);cursor:pointer}
 .fs-check input{margin:0;accent-color:var(--dsw-alias-state-business-primary)}
 .fs-strong{font-weight:500;color:var(--dsw-alias-label-primary)}
+.fs-group-aside{display:inline-flex;align-items:center;gap:8px;font-weight:400}
+.fs-stickers{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;padding:8px 0}
+.fs-sticker{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 4px 4px;border-radius:8px;background:var(--dsw-alias-bg-module-platform)}
+.fs-sticker img{width:64px;height:64px;object-fit:contain}
+.fs-sticker figcaption{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.fs-sticker .fs-icon-btn{position:absolute;top:2px;right:2px;opacity:0}
+.fs-sticker:hover .fs-icon-btn,.fs-sticker:focus-within .fs-icon-btn{opacity:1}

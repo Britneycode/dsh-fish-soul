@@ -790,6 +790,11 @@ await (await import('./smoke-v06.mjs')).run({
 	assert, ok, call, sleep, waitFor, context, db, host, ob, services, agents, workspaceRegistry, inbox, at
 });
 
+// 50–55 v0.7：按功能选模型 / 用量、语音、收藏表情包、学群里的说法、上网查、首次引导（在 smoke-v07.mjs）
+await (await import('./smoke-v07.mjs')).run({
+	assert, ok, call, sleep, waitFor, context, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod
+});
+
 console.log('\n全部通过');
 srv.close(); wsSrv.close(); biliSrv.close(); process.exit(0);
 

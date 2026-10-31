@@ -243,7 +243,8 @@ const mod = await import('../lib/index.js');
 // ── 假抖音：专用浏览器和页面驱动都换成假的（真浏览器那部分在 test/douyin-browser.mjs）──
 const { ACTIVE_VIDEO_JS } = await import('../lib/douyin-browse.js');
 const dy = { convs: [], msgs: new Map(), reads: [], sent: [], loggedIn: true, canaryOk: true, canaries: 0, emojis: ['微笑', '比心'],
-	launches: 0, launchOpts: null, quits: 0, feed: [], feedAt: 0, gotos: [], likes: 0, details: new Map(), clicks: [] };
+	launches: 0, launchOpts: null, quits: 0, feed: [], feedAt: 0, gotos: [], likes: 0, details: new Map(), clicks: [],
+	win: { left: 100, top: 100, width: 1400, height: 1000, windowState: 'normal' } };
 const dyBrowser = {
 	sessionId: 'S1', targetId: 'T1', alive: false, onDead: null, onEvent: null,
 	isAlive() { return this.alive; },
@@ -259,6 +260,9 @@ const dyBrowser = {
 		if (method === 'Page.captureScreenshot') return { data: Buffer.from('fake-jpeg').toString('base64') };
 		if (method === 'Page.getLayoutMetrics') return { cssVisualViewport: { clientWidth: 1280, clientHeight: 800 } };
 		if (method === 'Input.dispatchMouseEvent') dy.clicks.push([params.type, params.x, params.y]);
+		if (method === 'Browser.getWindowForTarget') return { windowId: 7 };
+		if (method === 'Browser.getWindowBounds') return { bounds: { ...dy.win } };
+		if (method === 'Browser.setWindowBounds') Object.assign(dy.win, params.bounds);
 		return {};
 	},
 	async goto(url) { dy.gotos.push(url); if (/recommend/.test(url)) dy.feedAt = 0; },
@@ -424,7 +428,7 @@ const f1 = await waitFor(() => host.followups[0]);
 assert.ok(f1, '好友私聊应转进会话');
 const sid1 = f1.id;
 assert.equal(host.created[0].meta.cwd, wsDir);
-assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget'] });
+assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'fish_search'] });
 assert.equal(f1.msg.source.kind, 'fish-soul/qq');
 assert.match(f1.msg.content[0].text, /我想喝冰美式/);
 assert.match(host.titles[0][1], /QQ·主人（主人）/);

@@ -337,7 +337,7 @@ export async function run(t) {
 			p = await call('GET', '/models/state');
 			assert.equal(p.json.ok, true);
 			assert.deepEqual(p.json.providers, [{ id: 'ds', name: 'DeepSeek', models: [{ id: 'ds-chat', name: 'V3' }, { id: 'ds-r1', name: 'R1' }] }]);
-			assert.deepEqual(p.json.features.map((f) => f.id), ['dream', 'extract', 'schedule', 'browse', 'import', 'slang', 'other']);
+			assert.deepEqual(p.json.features.map((f) => f.id), ['dream', 'extract', 'schedule', 'browse', 'import', 'slang', 'diary', 'mood', 'other']);
 			assert.deepEqual(p.json.features[5].resolved, { provider: 'ds', model: 'ds-chat', from: 'host' });
 			assert.deepEqual(p.json.hostDefault, { provider: 'ds', model: 'ds-chat' });
 			p = await call('POST', '/models/config', { models: { slang: { provider: 'ds', model: 'ds-r1' }, dream: { provider: '', model: 'x' } }, prices: { 'ds-r1': { in: 4, out: '16' }, '': { in: 1 } } });

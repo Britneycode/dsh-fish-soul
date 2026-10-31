@@ -60,6 +60,22 @@ export async function run(t) {
 		assert.equal(dyc.newFrom(['a', 'b', 'c'], ['a', 'b', 'c']), 3, '没有新消息');
 		assert.equal(dyc.newFrom(['a', 'b', 'c'], ['p', 'q']), 0, '整个对不上：末尾不认识的一段算新的');
 		assert.equal(dyc.newFrom(['a', 'b', 'c'], ['b', 'p', 'q']), 1);
+		{
+			// 对方连发同一句话：DOM 去重不能把第二条删掉，窗口对比要认出它是新的，ID 也不能撞
+			const { dedupeNestedMessages } = await import('../lib/channels/vendor/douyin-bridge/media.mjs');
+			const t = (text, y) => ({ fromMe: false, type: 'text', text, media: {}, y });
+			const page = [t('可以开始聊天了', 10), t('有刷到什么好看的视频吗', 60), t('撤回', 110), t('你好', 160), t('你好', 166), t('你好', 210)];
+			const uniq = dedupeNestedMessages(page);
+			assert.deepEqual(uniq.map((m) => m.y), [10, 60, 110, 160, 210], '只合并 y 几乎重合的嵌套节点，连发的同文消息都留着');
+			assert.deepEqual(dedupeNestedMessages([t('b', 50), t('a', 0)]).map((m) => m.text), ['a', 'b'], '按 y 排序');
+			const prev = uniq.slice(0, 4).map(dyc.messageFingerprint);
+			const cur = uniq.map(dyc.messageFingerprint);
+			assert.equal(dyc.newFrom(prev, cur), 4, '新的「你好」不会被当成旧的');
+			const occ = dyc.occurrenceIndexes(cur);
+			assert.deepEqual(occ, [0, 0, 0, 0, 1]);
+			assert.deepEqual(dyc.occurrenceIndexes(['a', 'b', 'a', 'a']), [0, 0, 1, 2]);
+			assert.notEqual(`${cur[3]}-1-${occ[3]}`, `${cur[4]}-1-${occ[4]}`, '同一分钟两条同文消息 ID 不同');
+		}
 		const img = (q) => ({ type: 'image', media: { src: `https://p3-pc-sign.douyinpic.com/obj/tos-cn-i-0813/abc~tplv.image?x-expires=${q}&x-signature=zz${q}` } });
 		assert.equal(dyc.messageFingerprint(img(1)), dyc.messageFingerprint(img(2)), '图片地址的签名参数会变，不算');
 		assert.notEqual(dyc.messageFingerprint({ text: '在吗' }), dyc.messageFingerprint({ text: '在吗', fromMe: true }));

@@ -34,6 +34,8 @@ fish-soul 只用它的「浏览器 + 页面操作」部分，不用它的桥接 
 - `media.mjs`：`mergeMessages()` 末尾原来把已经放进结果的 API 消息又追加了一遍，
   会让窗口对比把旧消息当成新消息；改成只补没匹配上的更新消息。
 - `douyin-dm.mjs`：`shapeResult()` 带上分享视频的 `shareAweme`（视频 id）。
+- `douyin-panel.mjs`：新增后台模式（`parkWindow` / `showWindow` / `PARK_LEFT`）。`Browser` 对象上的 `windowMode()` 返回 `'background'` 时，
+  `ensureWindowVisible` 不再把窗口恢复 / 拉回屏幕，而是停到屏幕外（被最小化的先置 normal 再停出去）；不设 `windowMode` 时行为和原来一样。
 - 拆分带来的 import 调整（`sleep`、`hasInput` 移到公共位置）。
 
 刷推荐页时读当前视频的做法参考了

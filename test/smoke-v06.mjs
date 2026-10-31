@@ -191,7 +191,7 @@ export async function run(t) {
 		assert.equal((await call('POST', '/inspector/dream', { ownerId: 'user:nobody' })).json.ok, false);
 		// 聊天时她看得到这份印象；"相关记忆"带出处
 		inbox('40004', '我的鼓到了', null);
-		assert.match(context.text(at('p40004')), /\[你对 .+ 的印象\] 四哥：大学室友，在学架子鼓/);
+		assert.match(context.text(at('p40004')), /\[你对 .+ 的了解\] 四哥：大学室友，在学架子鼓/);
 		const ov = (await call('GET', `/inspector/overview?ownerId=${encodeURIComponent(ownerA)}`)).json;
 		const im = ov.memories.find((m) => /豆豆/.test(m.content));
 		assert.match(im.evidence, /^导入：阿四\.txt/); assert.equal(im.source, '导入（聊天记录）');

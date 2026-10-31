@@ -102,6 +102,25 @@ export async function run(t) {
 	assert.match(dy.launchOpts.userDataDir, /fish-soul[\\/]douyin-browser[\\/]edge$/);
 	assert.equal(dy.launchOpts.exe, '/fake/msedge.exe'); assert.ok(dy.launchOpts.extraArgs.includes('--mute-audio')); assert.equal(dy.launchOpts.preloadScripts.length, 1);
 	assert.equal(dy.canaries, 1, '启动时自检一次');
+	// 窗口：默认藏在后台（启动参数就在屏幕外，连上后再停一次）；显示一下 / 藏起来；换成正常显示马上挪回来
+	assert.ok(dy.launchOpts.extraArgs.includes('--window-position=-20000,0'));
+	assert.equal(dy.win.left, -20000);
+	cs = await call('GET', '/channels/state');
+	assert.deepEqual([cs.json.douyin.window, cs.json.douyin.windowShown, cs.json.douyin.host.window], ['background', false, 'background']);
+	p = await call('POST', '/douyin/window', { show: true });
+	assert.deepEqual(p.json, { ok: true, windowShown: true });
+	assert.deepEqual([dy.win.left, dy.win.top], [40, 40]);
+	p = await call('POST', '/douyin/window', { show: false });
+	assert.equal(p.json.windowShown, false);
+	assert.equal(dy.win.left, -20000);
+	assert.equal((await call('POST', '/channels/douyin-config', { window: 'visible' })).json.ok, true);
+	assert.equal(dy.win.left, 40, '换成正常显示：挪回屏幕');
+	cs = await call('GET', '/channels/state');
+	assert.deepEqual([cs.json.douyin.window, cs.json.douyin.windowShown], ['visible', false]);
+	assert.equal((await call('POST', '/channels/douyin-config', { window: 'nope' })).json.ok, true);
+	assert.equal((await call('GET', '/channels/state')).json.douyin.window, 'visible', '乱填的不改');
+	assert.equal((await call('POST', '/channels/douyin-config', { window: 'background' })).json.ok, true);
+	assert.equal(dy.win.left, -20000);
 	ok('抖音设置：名字 / 对应关系 / 浏览器路径校验，次数夹到范围；启用后先记基线');
 
 	// 32 只读阶段：不回；启用前就有的未读补进来但太旧只记；主人按名字认到主人

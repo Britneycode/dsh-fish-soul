@@ -243,7 +243,8 @@ const mod = await import('../lib/index.js');
 // ── 假抖音：专用浏览器和页面驱动都换成假的（真浏览器那部分在 test/douyin-browser.mjs）──
 const { ACTIVE_VIDEO_JS } = await import('../lib/douyin-browse.js');
 const dy = { convs: [], msgs: new Map(), reads: [], sent: [], loggedIn: true, canaryOk: true, canaries: 0, emojis: ['微笑', '比心'],
-	launches: 0, launchOpts: null, quits: 0, feed: [], feedAt: 0, gotos: [], likes: 0, details: new Map(), clicks: [] };
+	launches: 0, launchOpts: null, quits: 0, feed: [], feedAt: 0, gotos: [], likes: 0, details: new Map(), clicks: [],
+	win: { left: 100, top: 100, width: 1400, height: 1000, windowState: 'normal' } };
 const dyBrowser = {
 	sessionId: 'S1', targetId: 'T1', alive: false, onDead: null, onEvent: null,
 	isAlive() { return this.alive; },
@@ -259,6 +260,9 @@ const dyBrowser = {
 		if (method === 'Page.captureScreenshot') return { data: Buffer.from('fake-jpeg').toString('base64') };
 		if (method === 'Page.getLayoutMetrics') return { cssVisualViewport: { clientWidth: 1280, clientHeight: 800 } };
 		if (method === 'Input.dispatchMouseEvent') dy.clicks.push([params.type, params.x, params.y]);
+		if (method === 'Browser.getWindowForTarget') return { windowId: 7 };
+		if (method === 'Browser.getWindowBounds') return { bounds: { ...dy.win } };
+		if (method === 'Browser.setWindowBounds') Object.assign(dy.win, params.bounds);
 		return {};
 	},
 	async goto(url) { dy.gotos.push(url); if (/recommend/.test(url)) dy.feedAt = 0; },
@@ -294,7 +298,8 @@ mod.testHooks.douyin = {
 		canary: async () => { dy.canaries++; return dy.canaryOk ? { ok: true, broken: [] } : { ok: false, broken: ['私信列表'] }; }
 	}),
 	readDetail: async ({ id }) => dy.details.get(id) ?? { ok: false, error: '没有' },
-	pollRangeMs: [150, 200], typingMs: [0, 0], firstPollMs: 50, dwellMs: [0, 0], settleMs: 0
+	pollRangeMs: [150, 200], typingMs: [0, 0], firstPollMs: 50, dwellMs: [0, 0], settleMs: 0,
+	digestEveryMs: 3_600_000 // 聊完自动记：测试里只手动触发
 };
 await mod.apply(ctx, { masterQqUin: '10001', embedding: { enabled: true, baseURL: '', apiKey: '', model: '' } });
 
@@ -424,7 +429,7 @@ const f1 = await waitFor(() => host.followups[0]);
 assert.ok(f1, '好友私聊应转进会话');
 const sid1 = f1.id;
 assert.equal(host.created[0].meta.cwd, wsDir);
-assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget'] });
+assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'fish_search'] });
 assert.equal(f1.msg.source.kind, 'fish-soul/qq');
 assert.match(f1.msg.content[0].text, /我想喝冰美式/);
 assert.match(host.titles[0][1], /QQ·主人（主人）/);
@@ -794,6 +799,9 @@ await (await import('./smoke-v06.mjs')).run({
 await (await import('./smoke-v07.mjs')).run({
 	assert, ok, call, sleep, waitFor, context, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod
 });
+
+// 80–84 v0.8：记忆考试（时间标签 / 检索带上下文 / 关系 / 聊完自动记 / 隐私 / 印象 / 生日 / 遗忘曲线，在 smoke-v08.mjs）
+await (await import('./smoke-v08.mjs')).run({ assert, ok, call, context, db, services, at, tools, inbox, mod });
 
 console.log('\n全部通过');
 srv.close(); wsSrv.close(); biliSrv.close(); process.exit(0);

@@ -137,6 +137,50 @@ try {
 	assert.equal(img.type, 'png'); assert.match(img.path, /img-cache/);
 	ok('抖音浏览器启动：打开抖音、截图、点击转发到页面；webp 在浏览器里转成 png');
 
+	// 1b 窗口：默认后台 = 停在屏幕外；被最小化了下次动页面前停回去（不弹到屏幕上）；显示一下 / 藏起来；正常显示模式按原样拉回屏幕
+	{
+		const { PARK_LEFT, ensureWindowVisible } = await import('../lib/channels/vendor/douyin-bridge/douyin-panel.mjs');
+		const b = host.browser;
+		const { windowId } = await b.send('Browser.getWindowForTarget', { targetId: b.targetId });
+		const bounds = async () => (await b.send('Browser.getWindowBounds', { windowId })).bounds;
+		assert.equal(host.status().window, 'background');
+		assert.ok(host.extraArgs().includes(`--window-position=${PARK_LEFT},0`));
+		let bd = await bounds();
+		assert.equal(bd.left, PARK_LEFT, JSON.stringify(bd));
+		assert.equal(bd.windowState, 'normal');
+		// 用户最小化 → 下一次动页面前：恢复成 normal 但还在屏幕外
+		await userCdp('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+		await sleep(300);
+		assert.equal((await bounds()).windowState, 'minimized');
+		assert.equal(await host.exclusive('测试', async () => 1), 1);
+		bd = await bounds();
+		assert.equal(bd.windowState, 'normal'); assert.equal(bd.left, PARK_LEFT);
+		// 拖回屏幕里 → ensureWindowVisible（私信每次都调）停回去
+		await b.send('Browser.setWindowBounds', { windowId, bounds: { left: 10, top: 10 } });
+		assert.equal(await ensureWindowVisible(b), true);
+		assert.equal((await bounds()).left, PARK_LEFT);
+		assert.equal(await ensureWindowVisible(b), false, '停好了就不再动');
+		// 显示一下：挪回屏幕，动页面也不再藏；藏起来：停回去
+		assert.equal(await host.showWindow(), true);
+		assert.equal((await bounds()).left, 40);
+		assert.equal(host.status().windowShown, true);
+		await host.exclusive('测试', async () => 1);
+		assert.equal((await bounds()).left, 40);
+		await host.hideWindow();
+		assert.equal((await bounds()).left, PARK_LEFT);
+		// 正常显示模式：原来的行为（屏幕外的拉回来）
+		pref.window = 'visible';
+		assert.ok(!host.extraArgs().some((a) => a.startsWith('--window-position')));
+		await host.exclusive('测试', async () => 1);
+		assert.equal((await bounds()).left, PARK_LEFT, '正常显示模式下动页面不挪窗口');
+		await ensureWindowVisible(b);
+		assert.ok((await bounds()).left >= 0, '正常显示：屏幕外的拉回来');
+		delete pref.window;
+		await host.exclusive('测试', async () => 1);
+		assert.equal((await bounds()).left, PARK_LEFT);
+	}
+	ok('抖音浏览器窗口：默认停在屏幕外；被最小化 / 拖回来会在动页面前停回去；显示一下 / 藏起来；正常显示模式照旧');
+
 	// 2 刷推荐页：跳过直播 / 广告；箭头没了就按 ↓；详情页里点赞
 	host.loggedIn = true;
 	const prompts = [];

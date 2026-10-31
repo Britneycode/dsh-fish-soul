@@ -77,11 +77,6 @@ npm test
 
 模拟宿主 + 真实 headless Chromium 跑两套；找不到 Chromium 系浏览器或 `openssl` 时，浏览器用例自动跳过。
 
-## 文档
-
-- [DESIGN-fish-soul.md](DESIGN-fish-soul.md) — 架构、数据模型、变更记录与风险
-- [dsh_fish_soul_ui_design.md](dsh_fish_soul_ui_design.md) — 设置页设计、路由契约
-
 ## 许可
 
 MIT

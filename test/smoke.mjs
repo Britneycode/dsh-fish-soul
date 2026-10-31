@@ -620,7 +620,8 @@ assert.equal((await call('POST', '/bili/qr/poll', {})).json.status, 'scanned');
 bs = await call('POST', '/bili/qr/poll', {});
 assert.equal(bs.json.status, 'ok'); assert.equal(bs.json.uname, '鱼的小号'); assert.equal(bs.json.uid, '999');
 const authFile = join(home, 'fish-soul', 'bili-auth.json');
-assert.equal(statSync(authFile).mode & 0o777, 0o600);
+// Windows 没有 POSIX 权限位（Node 只能切只读，stat 永远报 0o666/0o444），只在类 Unix 上查 0600
+if (process.platform !== 'win32') assert.equal(statSync(authFile).mode & 0o777, 0o600);
 assert.equal(JSON.parse(readFileSync(authFile, 'utf8')).cookies.SESSDATA, 'good%2C123');
 assert.doesNotMatch(readFileSync(join(home, 'fish-soul-config.json'), 'utf8'), /SESSDATA|bili_jct/);
 assert.equal((await call('POST', '/bili/qr/poll', {})).json.status, 'expired', '用过的二维码作废');

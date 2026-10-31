@@ -803,6 +803,9 @@ await (await import('./smoke-v07.mjs')).run({
 // 80–84 v0.8：记忆考试（时间标签 / 检索带上下文 / 关系 / 聊完自动记 / 隐私 / 印象 / 生日 / 遗忘曲线，在 smoke-v08.mjs）
 await (await import('./smoke-v08.mjs')).run({ assert, ok, call, context, db, services, at, tools, inbox, mod });
 
+// 90–92 v0.9：她的习惯（心情影响行为 / 去 AI 味 / 合并转发 / 群设定 / 按聊天选模型 / 冷热 / 记忆调试器 / 日记 / 小互动 / 每轮判断心情，在 smoke-v09.mjs）
+await (await import('./smoke-v09.mjs')).run({ assert, ok, call, sleep, waitFor, context, db, services, workspaceRegistry, inbox, at, mod });
+
 console.log('\n全部通过');
 srv.close(); wsSrv.close(); biliSrv.close(); process.exit(0);
 

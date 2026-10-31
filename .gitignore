@@ -1,6 +1,7 @@
 node_modules/
 *.log
 .DS_Store
+test/eval/reports/
 
 # 本地设计文档，不进仓库
 DESIGN-fish-soul.md

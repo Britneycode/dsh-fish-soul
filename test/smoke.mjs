@@ -844,6 +844,9 @@ await (await import('./smoke-v08.mjs')).run({ assert, ok, call, context, db, ser
 // 90–92 v0.9：她的习惯（心情影响行为 / 去 AI 味 / 合并转发 / 群设定 / 按聊天选模型 / 冷热 / 记忆调试器 / 日记 / 小互动 / 每轮判断心情，在 smoke-v09.mjs）
 await (await import('./smoke-v09.mjs')).run({ assert, ok, call, sleep, waitFor, context, db, services, workspaceRegistry, inbox, at, mod });
 
+// 100–107 人格页：模板 / 编辑 / 导入 / 撤销 / 热加载 / 排日程带人格 / 换人格开新会话；学说话方式（在 smoke-persona.mjs）
+await (await import('./smoke-persona.mjs')).run({ assert, ok, call, context, db, at, home, section, png });
+
 console.log('\n全部通过');
 srv.close(); wsSrv.close(); biliSrv.close(); process.exit(0);
 

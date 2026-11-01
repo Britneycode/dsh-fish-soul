@@ -142,7 +142,7 @@ export async function run(t) {
 		const reg = { create: async (path, title) => ({ path, title, attachSession: async () => {} }), list: () => [{ path: wsDir, title: 'v07', sessionIds: [] }] };
 		const ctx4 = { get: (n) => (n === 'workspaceRegistry' ? reg : services[n]), agents, workspaceRegistry: reg, tools: { get: () => ({}) } };
 		const gw = new gwMod.ChatGateway({
-			ctx: ctx4, db, clock: { now: () => Date.now() }, getConfig: () => ({ qq, masterQqUin: '10001', sessions: { workspacePath: wsDir }, douyin: { masterName: '未云' }, bili: { masterUid: '555' } }), log: () => {},
+			ctx: ctx4, db, clock: { now: () => Date.now() }, getConfig: () => ({ qq, masterQqUin: '10001', sessions: { workspacePath: wsDir }, douyin: { masterName: '测试主人' }, bili: { masterUid: '555' } }), log: () => {},
 			channel: {
 				connected: true, selfId: '1000', isFriend: () => true, groupName: async () => '测试群', getMessage: async () => null,
 				send: async (cid, segs) => { sent.push([cid, segs]); return String(8800 + sent.length); },
@@ -192,10 +192,10 @@ export async function run(t) {
 		// 抖音 / B站私信发不了语音：主人要的转到主人 QQ 私聊，别人的去掉标记当文字发
 		{
 			const n0 = sent.length;
-			assert.equal(gw.voiceRelayTarget('douyin:未云'), 'private:10001');
+			assert.equal(gw.voiceRelayTarget('douyin:测试主人'), 'private:10001');
 			assert.equal(gw.voiceRelayTarget('bili:555'), 'private:10001');
 			assert.equal(gw.voiceRelayTarget('douyin:路人'), '', '不是主人');
-			let left = await gw.relayDmVoice({ channel_id: 'douyin:未云', title: '抖音·未云（主人）' }, '好呀\n\n[语音] 给你听听\n\nQQ 上发你了');
+			let left = await gw.relayDmVoice({ channel_id: 'douyin:测试主人', title: '抖音·测试主人（主人）' }, '好呀\n\n[语音] 给你听听\n\nQQ 上发你了');
 			assert.equal(left, '好呀\n\nQQ 上发你了', '语音那段不在抖音里发');
 			assert.equal(sent.length, n0 + 1);
 			assert.equal(sent.at(-1)[0], 'private:10001'); assert.equal(sent.at(-1)[1][0].type, 'record');
@@ -205,9 +205,9 @@ export async function run(t) {
 			assert.equal(sent.length, n0 + 1);
 			assert.ok(gw.decisions.some((d) => d.kind === 'filtered' && /抖音私信发不了语音，改成打字/.test(d.reason)));
 			vcfg.speak = 'never';
-			assert.equal(gw.voiceRelayTarget('douyin:未云'), '', '设成从不发语音');
+			assert.equal(gw.voiceRelayTarget('douyin:测试主人'), '', '设成从不发语音');
 			vcfg.speak = 'mirror';
-			assert.equal(await gw.relayDmVoice({ channel_id: 'douyin:未云', title: '' }, '没有语音'), '没有语音');
+			assert.equal(await gw.relayDmVoice({ channel_id: 'douyin:测试主人', title: '' }, '没有语音'), '没有语音');
 
 			// 提示：点名要语音才说；QQ「对方发语音才回」时点名要也能发；私信里说清楚发不了 / 发到 QQ
 			const vc = voiceMod.voiceConfig({ enabled: true, apiKey: 'k', speak: 'mirror' });

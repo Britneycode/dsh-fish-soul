@@ -62,7 +62,7 @@
     }
   },
   "scripts": {
-    "test": "node test/smoke.mjs && node test/douyin-browser.mjs && node test/startup-gate.mjs",
+    "test": "node test/smoke.mjs && node test/douyin-browser.mjs && node test/startup-gate.mjs && node test/outbox.mjs && node test/import-coverage.mjs",
     "eval": "node test/eval/persona-eval.mjs"
   }
 }

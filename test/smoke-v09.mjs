@@ -294,6 +294,26 @@ export async function run(t) {
 		const { setKv } = await import('../lib/db.js');
 		setKv(db, 'diary.last', '');
 		assert.equal(await diary.tick(), null, '还没到点 / 今天没聊过就不写（取决于虚拟时间）');
+		// 模型常见的坏 JSON：字符串里直接换行、正文里英文引号、包在思考段 / 代码块里 → 照样写成
+		const fake = (text) => { services.llm = { listProviders: () => [], async *stream() { yield { type: 'text-delta', text }; } }; };
+		for (const [label, text, want] of [
+			['换行', '{"diary":"今天下雨。\n晚上吃了面，挺好。","topics":[]}', /今天下雨。\n晚上吃了面/],
+			['引号', '<think>格式 {"diary":...}</think>```json\n{"diary":"她说"好"然后就睡了","topics":[]}\n```', /她说"好"然后就睡了/],
+			['截断', '{"diary":"今天一整天都在发呆，傍晚出去走了走，风挺大', /傍晚出去走了走/]
+		]) {
+			fake(text);
+			try { p = await call('POST', '/diary/write-now', {}); } finally { delete services.llm; }
+			assert.equal(p.json.ok, true, `${label}：${JSON.stringify(p.json)}`);
+			assert.match(p.json.entry.diary, want, label);
+		}
+		// 写不成要说清楚是哪一步：没回 / 格式不对
+		fake('');
+		try { p = await call('POST', '/diary/write-now', {}); } finally { delete services.llm; }
+		assert.equal(p.json.ok, false);
+		assert.match(p.json.error, /模型没回/);
+		fake('{"mood":"开心"}');
+		try { p = await call('POST', '/diary/write-now', {}); } finally { delete services.llm; }
+		assert.match(p.json.error, /不是要的格式/);
 
 		// 每轮判断心情：把握够才改，同一个情绪不重复记
 		const notes = [];

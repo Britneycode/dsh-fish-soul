@@ -36,6 +36,8 @@ PY
 
 git tag -a "$TAG" -m "$TAG"
 git push origin "$TAG"
+# 分支也要推：只推 tag 会让远程 main 停在旧提交，tag 落在分支之外（2026-11-02 踩过）
+git push origin main
 
 VER="$VER" NOTES="$NOTES_WIN" TAG="$TAG" REPO="$REPO" python - << 'PY'
 import json, os, sys, urllib.request, urllib.error

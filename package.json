@@ -1,10 +1,44 @@
 {
   "name": "dsh-fish-soul",
-"version": "0.9.0",
+  "version": "0.10.0",
   "description": "鱼 · 人格、按人记忆（可纠正、有印象、能导入旧聊天记录）、日程自走与主动开口，直连 SnowLuma 收发 QQ（群里会自己插话），B站 / 抖音小号私信与自己刷视频；按功能选模型并统计用量花费，能听会说 QQ 语音、收藏表情包、学群里的梗，可选上网查；心情影响说话、去 AI 味、每个群的设定、按聊天选模型、每晚写日记（DSH 插件，单角色 feiyu）",
   "type": "module",
   "main": "./lib/index.js",
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Britneycode/dsh-fish-soul.git"
+  },
+  "homepage": "https://github.com/Britneycode/dsh-fish-soul#readme",
+  "bugs": {
+    "url": "https://github.com/Britneycode/dsh-fish-soul/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "deepseek-harness",
+    "persona",
+    "memory",
+    "qq",
+    "bilibili",
+    "douyin"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",

@@ -77,7 +77,7 @@ export async function run(t) {
 		assert.deepEqual(stMod.parseCollect('哈哈\n[收藏表情:狗头]\n[存表情：猫猫/震惊]'), { text: '哈哈', names: ['狗头', '猫猫/震惊'] });
 		assert.equal(stMod.stickerName(' ../猫猫/震惊?.png '), '猫猫震惊');
 		assert.deepEqual(stMod.stickerConfig(undefined), { collect: true, perDay: 10 });
-		assert.deepEqual(slMod.slangConfig(undefined), { enabled: true, minLines: 60, intervalHours: 6 });
+		assert.deepEqual(slMod.slangConfig(undefined), { enabled: true, minLines: 60, intervalHours: 6, expressions: true, privateChats: true });
 		const s = segmentsToText([{ type: 'record', data: { file: 'a.amr', url: 'http://x/a' } }, { type: 'image', data: { file: 'f1', sub_type: 1 } }, { type: 'mface', data: { url: 'u', summary: '[狗头]' } }, { type: 'image', data: { file: 'f2' } }]);
 		assert.deepEqual(s.records, [{ file: 'a.amr', url: 'http://x/a', path: undefined }]);
 		assert.deepEqual(s.images.map((x) => x.sticker), [true, true, false]);
@@ -89,13 +89,15 @@ export async function run(t) {
 	{
 		const prompts = [];
 		let reply = { terms: [{ term: '绷不住了', meaning: '忍不住笑', example: '绷不住了哈哈' }, { term: 'v我50', meaning: '开玩笑要钱' }, { term: '', meaning: 'x' }], style: '短句多，爱用草' };
-		const cfg = { enabled: true, minLines: 10, intervalHours: 0 };
+		const cfg = { enabled: true, minLines: 10, intervalHours: 0, privateChats: false };
 		const sl = new slMod.SlangLearner({ db, callLlm: async (pr) => { prompts.push(pr); return `好的\n${JSON.stringify(reply)}`; }, getConfig: () => cfg, personaName: () => '小鱼', titleOf: () => '摸鱼群' });
-		sl.observe('private:1', 'a', '私聊不学');
+		sl.observe('private:1', 'a', '私聊关了就不学');
+		sl.observe('bili:1', 'a', 'B站不学');
 		sl.observe('group:8801', 'a', '【表情图】');
 		for (let i = 0; i < 12; i++) sl.observe('group:8801', `u${i % 3}`, `第${i}句 绷不住了`);
 		assert.equal(sl.buffer('group:8801').lines.length, 12, '只学群、纯占位符不算');
 		assert.equal(sl.buffer('private:1').lines.length, 0);
+		assert.equal(sl.buffer('bili:1').lines.length, 0);
 		await sl.tick();
 		assert.equal(prompts.length, 1); assert.match(prompts[0], /QQ 群「摸鱼群」/); assert.match(prompts[0], /u1：第1句/);
 		let d = sl.data('group:8801');
@@ -118,7 +120,7 @@ export async function run(t) {
 		assert.deepEqual(sl.contextLines('group:8801'), []);
 		assert.equal((await new slMod.SlangLearner({ db, callLlm: async () => null, getConfig: () => cfg, personaName: () => '', titleOf: () => '' }).learn('group:8801')).ok, false);
 	}
-	ok('学群里的说法：只学群、攒够才学、提炼梗和风格、提到的梗先给她看、主人改的不被覆盖');
+	ok('学群里的说法：只学 QQ 群 / 私聊（私聊能关）、攒够才学、提炼梗和风格、提到的梗先给她看、主人改的不被覆盖');
 
 	// 53 独立网关：听语音（转文字）→ 回 [语音] 段（合成）/ 合成不了发文字；[收藏表情:名字] 存表情、这行不发
 	const wsDir = mkdtempSync(join(tmpdir(), 'fish-v07-ws-'));
@@ -210,6 +212,8 @@ export async function run(t) {
 		// 群里的话交给学说法（点没点名都算）
 		await gw.onEvent({ post_type: 'message', message_type: 'group', group_id: 8802, user_id: 30003, message_id: ++mid, sender: { card: '阿三' }, message: [{ type: 'text', data: { text: '今天也绷不住了' } }] });
 		assert.deepEqual(seen.at(-1), ['group:8802', '阿三', '今天也绷不住了']);
+		assert.ok(seen.some((a) => a[0] === 'private:70007' && a[1] === 'p70007' && a.length === 3), '好友私聊也交给学说法');
+		assert.ok(seen.some((a) => a[0] === 'private:70007' && a[2] === '这个也好玩' && a[3]?.self === true), '她自己发出去的也记一份（只当上下文）');
 
 		// DSH 在我们的消息后面追加 runtime-context / model-selection（也是 user/message）：照样要发回去
 		await priv(70008, [{ type: 'text', data: { text: '在吗' } }]);

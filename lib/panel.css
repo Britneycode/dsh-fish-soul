@@ -176,3 +176,20 @@ a.fs-btn{text-decoration:none}
 .fs-sticker figcaption{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .fs-sticker .fs-icon-btn{position:absolute;top:2px;right:2px;opacity:0}
 .fs-sticker:hover .fs-icon-btn,.fs-sticker:focus-within .fs-icon-btn{opacity:1}
+/* 人格页：模板卡片、说话示例气泡、世界书编辑 */
+.fs-persona{padding:10px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
+.fs-persona:last-child{border-bottom:0}
+.fs-persona-head{display:flex;align-items:center;gap:12px}
+.fs-persona-title{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:13px;line-height:20px}
+.fs-persona-title .fs-row-desc{flex-basis:100%}
+.fs-persona-body{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.fs-persona-desc{margin:0;font-size:12px;line-height:19px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap}
+.fs-persona-foot{justify-content:flex-end;padding-top:10px}
+.fs-tags{display:flex;flex-wrap:wrap;gap:6px}
+.fs-chat{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:12px;background:var(--dsw-alias-bg-module-platform);font-size:13px;line-height:20px}
+.fs-chat-sep{height:4px}
+.fs-chat-sep:first-child{display:none}
+.fs-bubble{align-self:flex-start;max-width:80%;padding:4px 10px;border-radius:10px;background:var(--dsw-alias-bg-layer-1);box-shadow:inset 0 0 0 .5px var(--dsw-alias-border-l3);color:var(--dsw-alias-label-primary);white-space:pre-wrap}
+.fs-bubble[data-me]{align-self:flex-end;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);box-shadow:none}
+.fs-lore{display:flex;flex-direction:column;gap:8px;width:100%}
+.fs-lore-item{display:grid;grid-template-columns:minmax(120px,1fr) 3fr auto;gap:8px;align-items:start}

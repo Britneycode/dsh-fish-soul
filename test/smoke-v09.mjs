@@ -237,9 +237,9 @@ export async function run(t) {
 		p = await call('POST', '/groups/note', { groupId: '777', note: '这是考研群，别聊游戏；大家叫你"鱼老师"' });
 		assert.equal(p.json.ok, true);
 		inbox('20002', '今天复习了吗', 777);
-		assert.match(context.text(at('g777')), /\[这个群的设定（主人写的，只在这个群适用）\] 这是考研群，别聊游戏/);
+		assert.match(context.text(at('g777')), /\[你在这个群（主人写的，只在这个群适用[^\]]*\] 这是考研群，别聊游戏/);
 		inbox('20002', '今天复习了吗', 778);
-		assert.doesNotMatch(context.text(at('g778')), /这个群的设定/);
+		assert.doesNotMatch(context.text(at("g778")), /你在这个群（主人写的/);
 		assert.equal((await call('GET', '/behavior/state')).json.groups.find((x) => x.groupId === '777').note.slice(0, 5), '这是考研群');
 
 		// 按聊天选模型

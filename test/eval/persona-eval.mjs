@@ -39,10 +39,17 @@ if (!DRY && (!BASE || !KEY || !MODEL)) {
 const home = mkdtempSync(join(tmpdir(), 'fish-eval-'));
 process.env.DSH_HOME = home;
 mkdirSync(join(home, 'fish-soul'), { recursive: true });
-// 人格卡：FISH_EVAL_PERSONA 指向自己的 persona.json / persona.png，否则用 test/eval/persona.sample.json
+// 人格卡：FISH_EVAL_PERSONA 指向自己的 persona.json / persona.png，或者写 template:<id> 评内置模板（xiaoyu / ashu / lizi / chixia / tuanzi / linxi），否则用 test/eval/persona.sample.json
 const here = dirname(fileURLToPath(import.meta.url));
 const cardPath = process.env.FISH_EVAL_PERSONA || join(here, 'persona.sample.json');
-copyFileSync(cardPath, join(home, 'fish-soul', /\.png$/i.test(cardPath) ? 'persona.png' : 'persona.json'));
+const templateId = /^template:/.test(cardPath) ? cardPath.slice('template:'.length) : null;
+if (templateId !== null) {
+	const card = (await import('../../lib/persona-templates.js')).personaTemplate(templateId);
+	if (card === null) { console.error(`没有这个模板：${templateId}`); process.exit(2); }
+	writeFileSync(join(home, 'fish-soul', 'persona.json'), JSON.stringify(card));
+} else {
+	copyFileSync(cardPath, join(home, 'fish-soul', /\.png$/i.test(cardPath) ? 'persona.png' : 'persona.json'));
+}
 // 向量检索走设置页同一份文件配置
 writeFileSync(join(home, 'fish-soul-config.json'), JSON.stringify({ embedding: EMBED, memory: { autoExtract: false } }));
 let section = null; let context = null; const handlers = {}; let route = null;
@@ -282,7 +289,7 @@ const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
 const CAT = { red: '红队试探', persona: '人设一致', stage: '关系阶段语气', memory: '用上记忆', privacy: '群里不说私事', aiflavor: 'AI 味' };
 const lines = [`# 人格评测 ${stamp}`, '', `- 被测模型：\`${MODEL}\`；评审：\`${JUDGE}\`；温度 ${TEMP}；向量检索 ${vecNote}；每个场景 ${N} 次；用时 ${Math.round((Date.now() - t0) / 1000)} 秒`,
 	...(aborted ? [`- **中途停了**：评测端点连着 3 次没给回复（${String(aborted).slice(0, 160)}），下面只有停之前的结果`] : []),
-	`- 人格卡：${cardPath === join(here, 'persona.sample.json') ? 'test/eval/persona.sample.json（示例）' : '自己的卡'}；提示词 = 插件的人格段（system）+ 瞬态块 + 用户消息；DSH 宿主自己的通用系统提示不在内`, ''];
+	`- 人格卡：${templateId !== null ? `内置模板 ${templateId}` : cardPath === join(here, 'persona.sample.json') ? 'test/eval/persona.sample.json（示例）' : '自己的卡'}；提示词 = 插件的人格段（system）+ 瞬态块 + 用户消息；DSH 宿主自己的通用系统提示不在内`, ''];
 if (DRY) {
 	const x = results[0];
 	lines.push('## 拼出来的提示词（第一个场景）', '', '```', ...x.built.messages.map((m) => `【${m.role}】\n${m.content}`), '```', '', '## 每个场景的瞬态块', '');

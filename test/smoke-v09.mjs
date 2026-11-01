@@ -28,7 +28,8 @@ export async function run(t) {
 		assert.equal(r.text, '我觉得这个不错。\n\n你要多喝水。早点睡。');
 		assert.deepEqual(r.changes, ['markdown', 'AI 自称', '客套收尾', '首先其次']);
 		r = bh.deAi('## 推荐\n- 火锅\n- 烧烤\n\n[点这里](https://x.cn) 看');
-		assert.equal(r.text, '推荐\n火锅\n烧烤\n\n点这里 看');
+		assert.equal(r.text, '推荐\n火锅\n烧烤\n\n点这里 https://x.cn 看', 'markdown 链接去壳但留下网址（分享视频要用）');
+		assert.equal(bh.deAi('[https://b23.tv/x](https://b23.tv/x)').text, 'https://b23.tv/x');
 		assert.deepEqual(bh.deAi('首先我想说你好棒').changes, [], '只出现一次"首先"不算列条目');
 		assert.deepEqual(bh.deAi('如果你还有其他问题，随时问我。'), { text: '', changes: ['客套收尾', '整段都是套话'] });
 		assert.equal(bh.deAi('好呀\n\n[语音] 晚安').text, '好呀\n\n[语音] 晚安', '正常的话不动');

@@ -330,6 +330,7 @@ assert.doesNotMatch(block.split('[本群近期]')[0], /考高数/, 'B 的相关�
 inbox('20002', '高数复习好难', 777);
 block = context.text(at('g777'));
 assert.match(block, /\[相关记忆\][\s\S]*下周三要考高数/);
+assert.equal(block.split('（你记得的事。').length, 2, '记忆段的提示只带一次：对得上的说出具体的事');
 ok('群聊按人隔离 + 本轮消息即时召回（无一轮滞后）');
 
 // 4 认不出发送者不再当主人

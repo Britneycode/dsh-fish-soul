@@ -22,6 +22,8 @@ scripts/parse-group-final.mjs
 scripts/parse-group-messages.mjs
 scripts/parse-group-pb.mjs
 scripts/parse-group-thread.mjs
+scripts/parse-uid-map.mjs
+scripts/parse-uid-precise.mjs
 scripts/probe-douyin-chatdom.mjs
 scripts/probe-douyin-group.mjs
 scripts/probe-douyin-list-dom.mjs
@@ -29,10 +31,13 @@ scripts/probe-douyin-open.mjs
 scripts/probe-group-api.mjs
 scripts/probe-group-at.mjs
 scripts/probe-group-avatar.mjs
+scripts/probe-group-avatar-uid.mjs
+scripts/probe-group-fiber-uid.mjs
 scripts/probe-group-history.mjs
 scripts/probe-group-id.mjs
 scripts/probe-group-members.mjs
 scripts/probe-group-mention.mjs
 scripts/probe-group-real.mjs
+scripts/probe-group-uid-api.mjs
 scripts/verify-mention-rule.mjs
 scripts/verify-sender-rule.mjs

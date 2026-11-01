@@ -7,3 +7,7 @@ test/eval/reports/
 DESIGN-fish-soul.md
 dsh_fish_soul_deepseek_harness.html
 dsh_fish_soul_ui_design.md
+
+# 抖音抓包原始数据（解出来是真实 uid / sec_uid，别进仓库）
+probe-*/
+probe-gid/

@@ -35,6 +35,13 @@ dsh plugin --profile desktop add dsh-fish-soul
 
 插件注入 `webServer / tools / systemPrompt / llm / agents / workspaceRegistry`，设置页在 DSH 的插件设置里（「人格 / 记忆 / QQ / B站 / 抖音 / 自走 / 模型 / 习惯 / 动态」）。
 
+已在 DSH **0.2.1-rc.5** 上验证；更早的 rc 版本未逐一验证，遇到问题请先升级复测。
+
+设置页读不到时怎么分辨：
+
+- **HTTP 404**：插件后台根本没加载（或宿主没把 `/api/plugins/fish-soul/*` 转给插件）。看宿主日志里有没有 `[fish-soul] 启动闸门已挂`。
+- **503「插件还在启动 / 插件启动失败，挂在第 N 步…」**：插件加载了，但初始化还没走完或中途失败。宿主日志里有对应的 `[fish-soul] 启动失败：挂在第 N/M 步「…」` 和错误堆栈；走完会打 `[fish-soul] 路由已挂`。
+
 ## 配置与数据
 
 `$DSH_HOME` 缺省 `~/.dsh`。

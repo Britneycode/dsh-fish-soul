@@ -20,7 +20,10 @@ NOTES_WIN="$(cygpath -w "$NOTES" 2>/dev/null || printf '%s' "$NOTES")"
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && { echo "$TAG 已存在" >&2; exit 1; }
 
-grep -q "\"version\": \"$VER\"" package.json || echo "警告：package.json 版本不是 $VER" >&2
+grep -q "\"version\": \"$VER\"" package.json || { echo "package.json 版本不是 $VER（先改再发）" >&2; exit 1; }
+
+# README 第 5 行要同步：0.11.0→0.11.2 连发两版都没更新，对外行为变了文档却没跟上
+grep -q "版本 \*\*$VER\*\*" README.md || { echo "README 里的版本没写成 $VER（搜「版本 **」那一行）" >&2; exit 1; }
 
 # 先校验再打 tag：正文有坏字符 / 缺 token 时就别留个推上去的孤儿 tag
 python - "$NOTES_WIN" << 'PY'

@@ -122,7 +122,7 @@ export async function run(t) {
 	}
 	ok('学群里的说法：只学 QQ 群 / 私聊（私聊能关）、攒够才学、提炼梗和风格、提到的梗先给她看、主人改的不被覆盖');
 
-	// 53 独立网关：听语音（转文字）→ 回 [语音] 段（合成）/ 合成不了发文字；[收藏表情:名字] 存表情、这行不发
+	// 53 独立网关：听语音（转文字）→ 回 [语音] 段（合成）/ 合成不了发文字（记原因）；抖音 / B站里主人要的语音转到 QQ；[收藏表情:名字] 存表情、这行不发
 	const wsDir = mkdtempSync(join(tmpdir(), 'fish-v07-ws-'));
 	let collectedFile = '';
 	{
@@ -142,7 +142,7 @@ export async function run(t) {
 		const reg = { create: async (path, title) => ({ path, title, attachSession: async () => {} }), list: () => [{ path: wsDir, title: 'v07', sessionIds: [] }] };
 		const ctx4 = { get: (n) => (n === 'workspaceRegistry' ? reg : services[n]), agents, workspaceRegistry: reg, tools: { get: () => ({}) } };
 		const gw = new gwMod.ChatGateway({
-			ctx: ctx4, db, clock: { now: () => Date.now() }, getConfig: () => ({ qq, masterQqUin: '10001', sessions: { workspacePath: wsDir } }), log: () => {},
+			ctx: ctx4, db, clock: { now: () => Date.now() }, getConfig: () => ({ qq, masterQqUin: '10001', sessions: { workspacePath: wsDir }, douyin: { masterName: '未云' }, bili: { masterUid: '555' } }), log: () => {},
 			channel: {
 				connected: true, selfId: '1000', isFriend: () => true, groupName: async () => '测试群', getMessage: async () => null,
 				send: async (cid, segs) => { sent.push([cid, segs]); return String(8800 + sent.length); },
@@ -186,7 +186,42 @@ export async function run(t) {
 		reply(f2, '[语音] 听不清诶');
 		await waitFor(() => sent.length === 3);
 		assert.deepEqual(sent[2][1], [{ type: 'text', data: { text: '听不清诶' } }]);
+		assert.ok(gw.decisions.some((d) => d.kind === 'filtered' && /语音没发成（「说」那组没配好），改成打字/.test(d.reason)), '没发成语音记原因');
 		vcfg.enabled = true;
+
+		// 抖音 / B站私信发不了语音：主人要的转到主人 QQ 私聊，别人的去掉标记当文字发
+		{
+			const n0 = sent.length;
+			assert.equal(gw.voiceRelayTarget('douyin:未云'), 'private:10001');
+			assert.equal(gw.voiceRelayTarget('bili:555'), 'private:10001');
+			assert.equal(gw.voiceRelayTarget('douyin:路人'), '', '不是主人');
+			let left = await gw.relayDmVoice({ channel_id: 'douyin:未云', title: '抖音·未云（主人）' }, '好呀\n\n[语音] 给你听听\n\nQQ 上发你了');
+			assert.equal(left, '好呀\n\nQQ 上发你了', '语音那段不在抖音里发');
+			assert.equal(sent.length, n0 + 1);
+			assert.equal(sent.at(-1)[0], 'private:10001'); assert.equal(sent.at(-1)[1][0].type, 'record');
+			assert.ok(gw.decisions.some((d) => d.kind === 'sent' && /抖音里要的语音，发到 QQ 私聊/.test(d.reason) && d.text === '🔊给你听听'));
+			left = await gw.relayDmVoice({ channel_id: 'douyin:路人', title: '抖音·路人' }, '[语音] 你好呀');
+			assert.equal(left, '你好呀', '别人：当文字发');
+			assert.equal(sent.length, n0 + 1);
+			assert.ok(gw.decisions.some((d) => d.kind === 'filtered' && /抖音私信发不了语音，改成打字/.test(d.reason)));
+			vcfg.speak = 'never';
+			assert.equal(gw.voiceRelayTarget('douyin:未云'), '', '设成从不发语音');
+			vcfg.speak = 'mirror';
+			assert.equal(await gw.relayDmVoice({ channel_id: 'douyin:未云', title: '' }, '没有语音'), '没有语音');
+
+			// 提示：点名要语音才说；QQ「对方发语音才回」时点名要也能发；私信里说清楚发不了 / 发到 QQ
+			const vc = voiceMod.voiceConfig({ enabled: true, apiKey: 'k', speak: 'mirror' });
+			const ask = [{ query: '发语音听听' }];
+			assert.deepEqual(voiceMod.voiceLines({ v: vc, ttsReady: true, speakers: [{ query: '在干嘛' }] }), []);
+			assert.match(voiceMod.voiceLines({ v: vc, ttsReady: true, speakers: ask })[0], /对方想听你的语音.*这次可以发/);
+			assert.match(voiceMod.voiceLines({ v: vc, ttsReady: false, speakers: ask })[0], /发不了语音.*别编/);
+			assert.match(voiceMod.voiceLines({ v: voiceMod.voiceConfig({ speak: 'never' }), ttsReady: true, speakers: ask })[0], /发不了语音/);
+			assert.deepEqual(voiceMod.voiceLines({ v: vc, speakers: [{ query: '在干嘛' }], where: '抖音', relay: true }), []);
+			assert.match(voiceMod.voiceLines({ v: vc, speakers: ask, where: '抖音', relay: true })[0], /抖音私信发不了语音.*QQ 私聊/);
+			assert.match(voiceMod.voiceLines({ v: vc, speakers: [{ query: '你能发语音吗' }], where: 'B站' })[0], /B站私信发不了语音.*别编/);
+			for (const x of ['来条语音', '说给我听', '想听你声音', '你会不会发语音']) assert.ok(voiceMod.askedForVoice([{ query: x }]), x);
+			for (const x of ['我刚听了首歌', '语音转文字好用吗']) assert.ok(!voiceMod.askedForVoice([{ query: x }]), x);
+		}
 
 		// 收藏表情：对方发表情 → 她回 [收藏表情:狗头] → 存进工作区 _stickers，这行不发
 		await priv(70007, [{ type: 'image', data: { file: `base64://${PNG.toString('base64')}`, sub_type: 1, summary: '[动画表情]' } }, { type: 'text', data: { text: '哈哈哈' } }]);

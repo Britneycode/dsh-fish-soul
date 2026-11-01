@@ -385,7 +385,7 @@ const { LifeEngine } = await import('../lib/life.js');
 const { VirtualClock } = await import('../lib/clock.js');
 const sent = [];
 const clock = new VirtualClock(1, Date.parse('2026-11-01T04:00:00Z')); // 12:00 UTC+8
-const life = new LifeEngine({ db, clock, getConfig: () => ({ proactive: { targets: { masterPrivateChannelId: 'private:10001', selfGroupChannelIds: [] } } }), callLlm: async () => null, deliver: async (c, t) => { sent.push([c, t]); return true; } });
+const life = new LifeEngine({ db, clock, getConfig: () => ({ proactive: { activeHours: [0, 24], targets: { masterPrivateChannelId: 'private:10001', selfGroupChannelIds: [] } } }), callLlm: async () => null, deliver: async (c, t) => { sent.push([c, t]); return true; } });
 await life.tick();
 assert.deepEqual(sent[0], ['private:10001', 'master reminder']);
 ok('主动消息：非白名单待办不再阻塞队列');

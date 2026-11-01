@@ -116,7 +116,7 @@ export async function run(t) {
 
 	// 91 网关：独立网关 + 假渠道（OneBot 扩展接口会失败的先试、记住不支持的）
 	{
-		const qq = { enabled: true, batchMs: 30, followUpCount: 0, followUpSeconds: 60, interject: { enabled: false } };
+		const qq = { enabled: true, allGroups: true, batchMs: 30, followUpCount: 0, followUpSeconds: 60, interject: { enabled: false } };
 		const cfg = { qq, masterQqUin: '10001', behavior: { interactions: { pokeBackChance: 1, react: true, reactChance: 1 } }, chatModels: {} };
 		const sent = []; const turns = []; const calls = []; const fups = []; const created = []; const selects = []; const live = new Map();
 		let mood = bh.NEUTRAL_MOOD; let judged = [];

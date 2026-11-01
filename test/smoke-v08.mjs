@@ -95,7 +95,7 @@ export async function run(t) {
 	services.llm = {
 		listProviders: () => [],
 		async *stream({ messages }) {
-			const prompt = String(messages[0].content);
+			const prompt = [].concat(messages[0].content).map((b) => b?.text ?? b).join('');
 			if (!/整理记忆/.test(prompt)) return;
 			extractPrompts.push(prompt);
 			if (!/n60006：/.test(prompt)) { yield { type: 'text-delta', text: '{}' }; return; }

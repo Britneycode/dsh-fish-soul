@@ -16,7 +16,8 @@ export async function run(t) {
 
 	// 100 每个模板都是能用的卡：名字 ≥2 字（能点名）、一句话人设 ≤80、有作息、说话示例、世界书关键词条目
 	{
-		assert.ok(PERSONA_TEMPLATES.length >= 6);
+		assert.ok(PERSONA_TEMPLATES.length >= 7);
+		assert.equal(PERSONA_TEMPLATES[0].id, 'feiyu', '第一张是通用的肥鱼');
 		assert.equal(new Set(PERSONA_TEMPLATES.map((x) => x.id)).size, PERSONA_TEMPLATES.length);
 		for (const tpl of PERSONA_TEMPLATES) {
 			const dir = mkdtempSync(join(tmpdir(), 'fish-persona-'));
@@ -36,11 +37,28 @@ export async function run(t) {
 			assert.ok(examples.length >= 3 && examples.every((b) => /\{\{user\}\}: /.test(b) && /\{\{char\}\}: /.test(b)), `${tpl.id}：说话示例格式`);
 			assert.ok(!/作为|AI|助手|综上/.test(JSON.stringify(tpl.card)), `${tpl.id}：模板自己别带 AI 味`);
 		}
-		const yu = pm.loadPersona((() => { const d = mkdtempSync(join(tmpdir(), 'fish-persona-')); writeFileSync(join(d, 'persona.json'), JSON.stringify(personaTemplate('xiaoyu'))); return d; })());
-		assert.match(pm.matchLore(yu.lore, '你家芋圆最近还踩键盘吗').map((e) => e.content).join(), /橘猫/);
+		const yu = pm.loadPersona((() => { const d = mkdtempSync(join(tmpdir(), 'fish-persona-')); writeFileSync(join(d, 'persona.json'), JSON.stringify(personaTemplate('zhi'))); return d; })());
+		assert.match(pm.matchLore(yu.lore, '你家周一最近还啃水草吗').map((e) => e.content).join(), /金鱼/);
 		assert.equal(pm.matchLore(yu.lore, '今天天气不错').length, 0, '没聊到就不带');
+		// 不同心情下怎么说话：每张都写了五种；读进来、规整都留着；字符串一行一条也收，不认识的心情丢掉
+		for (const tpl of PERSONA_TEMPLATES) assert.deepEqual(Object.keys(tpl.card.data.extensions.fish_soul.moods), pm.MOOD_KEYS, `${tpl.id}：心情`);
+		assert.match(yu.moods.生气, /句号结尾/);
+		// 通用肥鱼：生活细节一律不写死（没有宠物名、人名），问到宠物 / 爱好 / 对象都带「没写死」的说法
+		const fy = pm.loadPersona((() => { const d = mkdtempSync(join(tmpdir(), 'fish-persona-')); writeFileSync(join(d, 'persona.json'), JSON.stringify(personaTemplate('feiyu'))); return d; })());
+		for (const q of ['你养宠物吗', '你平时有啥爱好', '你有对象吗', '你做什么工作的', '你在哪个城市']) assert.match(pm.matchLore(fy.lore, q).map((e) => e.content).join(), /没写死/, q);
+		assert.match(fy.staticText, /说过的就算数/);
+		// 城市只说个大概，但每张卡的「大概」不一样（不然六个人都说南方）
+		const regions = PERSONA_TEMPLATES.map((x) => x.card.data.character_book.entries.find((e) => e.keys.includes('哪个城市')).content.match(/大概——(.+?)，每次/)[1]);
+		assert.equal(new Set(regions).size, PERSONA_TEMPLATES.length);
+		assert.deepEqual(pm.moodsOf('开心：话多一点\n乱写：x\n生气: 只回几个字'), { 开心: '话多一点', 生气: '只回几个字' });
+		assert.deepEqual(pm.normalizeCard({ name: '测试', extensions: { fish_soul: { moods: { 低落: '不说话', 无聊: 'x' } } } }).data.extensions.fish_soul.moods, { 低落: '不说话' });
+		const { moodStyle } = await import('../lib/behavior.js');
+		assert.equal(moodStyle(yu.moods, { mood: '委屈', tone: '' }), `你低落的时候一般：${yu.moods.低落}`);
+		assert.equal(moodStyle(yu.moods, { mood: '', tone: '慵懒' }), `你懒洋洋的时候一般：${yu.moods.犯懒}`);
+		assert.equal(moodStyle(yu.moods, { mood: '', tone: '平静' }), '');
+		assert.equal(moodStyle({}, { mood: '生气' }), '');
 	}
-	ok('人格模板：6 张都能直接用（点名、人设、作息、说话示例、世界书）');
+	ok('人格模板：通用肥鱼 + 6 张都能直接用（点名、人设、作息、说话示例、世界书、不同心情下怎么说话）');
 
 	// 101 规整：认识的字段清理，别家字段原样留着；V3 / 扁平都收；没名字报错
 	{
@@ -100,12 +118,12 @@ export async function run(t) {
 		assert.equal(p.json.current.name, '小鱼');
 		assert.equal(p.json.canUndo, false);
 
-		p = await call('POST', '/persona/apply', { templateId: 'ashu' });
+		p = await call('POST', '/persona/apply', { templateId: 'jichuan' });
 		assert.equal(p.json.ok, true, JSON.stringify(p.json));
-		assert.deepEqual([p.json.current.name, p.json.current.source, p.json.current.template, p.json.canUndo], ['阿树', 'persona.json', 'ashu', true]);
-		assert.match(p.json.current.routine, /九点多出门/);
-		assert.match(section.text(), /阿树/); assert.match(section.text(), /糖水/); assert.doesNotMatch(section.text(), /住在杭州/);
-		assert.match(context.text(at('p10001')), /\[记住你是谁\] 你是阿树：佛系丧但靠谱的阿树/);
+		assert.deepEqual([p.json.current.name, p.json.current.source, p.json.current.template, p.json.canUndo], ['季川', 'persona.json', 'jichuan', true]);
+		assert.match(p.json.current.routine, /七点起/);
+		assert.match(section.text(), /季川/); assert.match(section.text(), /迷迭香/); assert.doesNotMatch(section.text(), /住在杭州/);
+		assert.match(context.text(at('p10001')), /\[记住你是谁\] 你是季川：清醒又温柔的季川/);
 		const onboarding = await call('GET', '/onboarding/state');
 		assert.equal(onboarding.json.steps.find((s) => s.id === 'persona').tab, 'persona');
 
@@ -150,8 +168,8 @@ export async function run(t) {
 		});
 		const chat = { channelId: 'private:10001', chatType: 'private', targetId: '10001', title: '主人' };
 		assert.equal((await gw.ensureSession(chat)).id, row.session_id, '没选就照常复用');
-		p = await call('POST', '/persona/apply', { templateId: 'linxi', fresh: true });
-		assert.equal(p.json.current.name, '林溪');
+		p = await call('POST', '/persona/apply', { templateId: 'susu', fresh: true });
+		assert.equal(p.json.current.name, '苏苏');
 		const a = await gw.ensureSession(chat);
 		assert.equal(created.length, 1, '换人格之前的会话 → 开新的');
 		assert.notEqual(a.id, row.session_id);

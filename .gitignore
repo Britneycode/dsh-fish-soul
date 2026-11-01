@@ -41,3 +41,15 @@ scripts/probe-group-real.mjs
 scripts/probe-group-uid-api.mjs
 scripts/verify-mention-rule.mjs
 scripts/verify-sender-rule.mjs
+.alma-snapshots
+
+# AI 交接文档：只在本机，不进公开仓库（含本机路径 / 半成品状态 / 内部复盘）
+# 想推某个月的复盘：git add -f history/2026-12.md
+AGENTS.md
+PROJECT_INDEX.md
+NOW.md
+MAP.md
+RUNBOOK.md
+DECISIONS.md
+RISKS.md
+history/

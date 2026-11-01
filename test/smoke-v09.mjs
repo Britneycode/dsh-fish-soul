@@ -311,6 +311,14 @@ export async function run(t) {
 		try { p = await call('POST', '/diary/write-now', {}); } finally { delete services.llm; }
 		assert.equal(p.json.ok, false);
 		assert.match(p.json.error, /模型没回/);
+		// 推理模型把答案留在思考里、正文是空的：日记照样能用；空的话说清楚空在哪
+		services.llm = { listProviders: () => [], async *stream() { yield { type: 'reasoning-delta', text: '想想……{"diary":"今天在思考里写完了日记。","topics":[]}' }; yield { type: 'finish', finishReason: 'stop' }; } };
+		try { p = await call('POST', '/diary/write-now', {}); } finally { delete services.llm; }
+		assert.equal(p.json.ok, true, JSON.stringify(p.json));
+		assert.match(p.json.entry.diary, /在思考里写完了/);
+		services.llm = { listProviders: () => [], async *stream() { yield { type: 'reasoning-delta', text: '嗯……' }; yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 8000 } }; yield { type: 'finish', finishReason: 'length' }; } };
+		try { p = await call('POST', '/diary/write-now', {}); } finally { delete services.llm; }
+		assert.match(p.json.error, /只有思考.*输出 8000 token.*结束原因 length/, p.json.error);
 		fake('{"mood":"开心"}');
 		try { p = await call('POST', '/diary/write-now', {}); } finally { delete services.llm; }
 		assert.match(p.json.error, /不是要的格式/);

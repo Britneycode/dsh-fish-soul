@@ -267,7 +267,7 @@ export async function run(t) {
 
 	// 47 群里插话 / 叫名字 / 戳一戳 / 撤回 / 群里的主人命令（独立网关，假渠道）
 	{
-		const qq = { enabled: true, batchMs: 60, followUpCount: 3, followUpSeconds: 120, interject: { enabled: false } };
+		const qq = { enabled: true, allGroups: true, batchMs: 60, followUpCount: 3, followUpSeconds: 120, interject: { enabled: false } };
 		const sent = []; const turns = []; const memo = [];
 		const ctx3 = { get: (n) => services[n], agents, workspaceRegistry, tools: { get: () => ({}) } };
 		const gw = new gwMod.ChatGateway({

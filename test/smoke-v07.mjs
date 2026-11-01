@@ -137,7 +137,7 @@ export async function run(t) {
 		const stickers = new stMod.StickerBox({ db, getConfig: () => stMod.stickerConfig({}) });
 		const seen = [];
 		const slang = { observe: (...a) => seen.push(a) };
-		const qq = { enabled: true, batchMs: 30, followUpCount: 3, followUpSeconds: 120 };
+		const qq = { enabled: true, allGroups: true, batchMs: 30, followUpCount: 3, followUpSeconds: 120 };
 		const sent = []; const turns = []; const chCalls = [];
 		const reg = { create: async (path, title) => ({ path, title, attachSession: async () => {} }), list: () => [{ path: wsDir, title: 'v07', sessionIds: [] }] };
 		const ctx4 = { get: (n) => (n === 'workspaceRegistry' ? reg : services[n]), agents, workspaceRegistry: reg, tools: { get: () => ({}) } };

@@ -187,7 +187,7 @@ process.env.FISH_SOUL_BILI_MOCK = biliURL;
 writeFileSync(join(home, 'fish-soul-config.json'), JSON.stringify({
 	embedding: { enabled: true, baseURL, apiKey: 'sk-test', model: 'm1' },
 	proactive: { targets: { masterPrivateChannelId: 'private:10001', selfGroupChannelIds: [] } },
-	qq: { enabled: true, wsUrl: `ws://127.0.0.1:${wsSrv.address().port}`, accessToken: 'tok-1', batchMs: 200 },
+	qq: { enabled: true, wsUrl: `ws://127.0.0.1:${wsSrv.address().port}`, accessToken: 'tok-1', batchMs: 200, allGroups: true },
 	douyin: { batchMs: 100 }
 }));
 
@@ -558,6 +558,24 @@ assert.deepEqual(resumeOpts2[0].agentOptions, { provider: 'ds', model: 'ds-chat'
 assert.equal(sent2[0][0], 'private:10001');
 assert.equal(sent2[0][1][0].data.text, '开会别迟到哦');
 ok('主动开口：重启后恢复原会话，模型写的那句发出去才返回成功');
+
+// 群门控：默认拒绝。白名单为空且没开 allGroups 的群，@ 它也不放行；列进白名单或开了 allGroups 才放行
+assert.equal(gw2.groupAllowed('123', { groupAllowList: [], allGroups: false }), false, '空名单默认拒绝');
+assert.equal(gw2.groupAllowed('123', { groupAllowList: ['123'], allGroups: false }), true, '名单内的群放行');
+assert.equal(gw2.groupAllowed('123', { groupAllowList: [], allGroups: true }), true, '显式放开才全放行');
+ok('群门控：空名单默认谁都不放行，要放行得列名单或显式打开 allGroups');
+
+// 群门控配置往返：保存 allGroups 后必须回读得回来（否则设置页开关永远是关的，保存也不生效）
+{
+	const w = await call('POST', '/channels/qq-config', { allGroups: true });
+	assert.equal(w.json.ok, true, '保存 allGroups 应成功');
+	const after = (await call('GET', '/channels/state')).json.qq.allGroups;
+	assert.equal(after, true, 'allGroups 保存后必须能从 /channels/state 读回来');
+	// 关掉再读一次，确认不是恒 true
+	await call('POST', '/channels/qq-config', { allGroups: false });
+	assert.equal((await call('GET', '/channels/state')).json.qq.allGroups, false, '关掉后也要回读 false');
+}
+ok('群门控配置往返：保存后能回读，设置页开关不会卡在关');
 
 // 19b 已经开着、但当初没带模型的会话（旧版恢复留下的）：换新会话并带上模型
 {

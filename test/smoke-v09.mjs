@@ -36,6 +36,35 @@ export async function run(t) {
 		r = bh.deAi(`${'今天天气很好。'.repeat(10)}\n\n${'我们去公园吧。'.repeat(10)}`, { maxChars: 100 });
 		assert.ok([...r.text].length <= 100 && /。$/.test(r.text) && r.changes.includes('太长截短'), '太长截到句末');
 
+		// 动作描写 / 新套话 / 破折号 / 自定义（参考 MaiBot、Humanizer-zh）
+		assert.deepEqual(bh.deAi('（轻轻叹了口气）好吧，听你的'), { text: '好吧，听你的', changes: ['动作描写'] });
+		assert.equal(bh.deAi('*揉了揉眼睛* 刚醒').text, '刚醒');
+		assert.equal(bh.deAi('（眼睛亮了起来）真的吗').text, '真的吗');
+		for (const x of ['今天好累（小声）', '哈哈哈（bushi）', '我在家（大概三点到）', '(｡•́︿•̀｡) 好难过', '（我昨天吃了火锅）', '想出去玩随时找我', '让我们看看谁先到', '我们只改了标题——正文没动']) {
+			assert.deepEqual(bh.deAi(x).changes, [], `不误伤：${x}`);
+		}
+		assert.deepEqual(bh.deAi('这个*很*重要'), { text: '这个很重要', changes: ['markdown'] });
+		assert.deepEqual(bh.deAi('好问题！其实我也不知道'), { text: '其实我也不知道', changes: ['客服腔'] });
+		assert.equal(bh.deAi('我理解你的感受，确实挺烦的').text, '确实挺烦的');
+		assert.equal(bh.deAi('让我们来看看这个问题：其实很简单').text, '其实很简单');
+		assert.equal(bh.deAi('以下是我的建议：早点睡').text, '早点睡');
+		assert.equal(bh.deAi('有什么问题欢迎随时找我哦～').text, '');
+		assert.deepEqual(bh.deAi('结果出来了——答案揭晓了——没考上'), { text: '结果出来了，答案揭晓了，没考上', changes: ['破折号'] });
+		assert.deepEqual(bh.deAi('说实话吧，真的绝绝子', { extra: ['说实话吧，', '/绝绝子+/', '/[/'] }), { text: '真的', changes: ['自定义'] }, '字面 + 正则，写错的正则跳过');
+		const oc = bh.behaviorConfig({ outFilter: { extra: '  说实话吧\n\n说实话吧\n宝子们 ' } }).outFilter;
+		assert.deepEqual([oc.split, oc.extra], [true, ['说实话吧', '宝子们']], '拆条默认开；额外说法去空去重');
+
+		// 拆成几条（参考 MaiBot / AstrBot 的分段回复）
+		const sc = (x, v) => bh.splitChat(x, { random: () => v });
+		assert.deepEqual(sc('我没有生气。', 0.9), { text: '我没有生气', changes: [] }, '一句：只去句号');
+		assert.deepEqual(sc('今天去公园了。人好多啊！不过还挺开心的。你呢？', 0.9), { text: '今天去公园了。人好多啊！\n\n不过还挺开心的\n\n你呢？', changes: ['拆成 3 条'] }, '一段最多 3 条');
+		assert.equal(sc('今天去公园了。人好多啊！不过还挺开心的。你呢？', 0.1).text, '今天去公园了。人好多啊！不过还挺开心的。你呢？', '随机并回去');
+		assert.equal(sc('他说「好的。我知道了。」然后就走了。', 0.9).text, '他说「好的。我知道了。」然后就走了', '引号里不拆');
+		assert.equal(sc('[语音] 晚安。好梦。', 0.9).text, '[语音] 晚安。好梦。', '语音段不拆');
+		assert.equal(sc('哈哈哈。。。', 0.9).text, '哈哈哈。。。', '省略号式的句号留着');
+		assert.equal(sc('第一行。\n第二行。', 0.9).text, '第一行。\n第二行。', '多行的段不拆');
+		assert.equal(sc('a。b。c\n\nd。e。f\n\ng。h\n\ni', 0.9).text.split('\n\n').length, 5, '整条最多 5 条');
+
 		const fl = bh.forwardLines({ messages: [
 			{ sender: { nickname: '阿二' }, message: [{ type: 'text', data: { text: '今晚吃啥' } }] },
 			{ type: 'node', data: { nickname: '阿三', content: [{ type: 'image', data: {} }, { type: 'forward', data: { id: 'x' } }] } },
@@ -159,7 +188,7 @@ export async function run(t) {
 		const sid3 = fupsOf('group:9903')[0].id;
 		sent.length = 0; waits.length = 0;
 		await gw.sendReply(sid3, { text: '作为一个AI，我没有生气。\n\n**哼**，不想理你 ![ok](_stickers/ok.png)\n\n希望对你有帮助！', images: [] });
-		assert.deepEqual(sent.map(([, segs]) => segs.filter((s) => s.type === 'text').map((s) => s.data.text).join('')), ['我没有生气。', '哼，不想理你'], '去掉 AI 自称、markdown、客套');
+		assert.deepEqual(sent.map(([, segs]) => segs.filter((s) => s.type === 'text').map((s) => s.data.text).join('')), ['我没有生气', '哼，不想理你'], '去掉 AI 自称、markdown、客套，句尾句号去掉');
 		assert.equal(sent.flatMap(([, segs]) => segs).filter((s) => s.type === 'image').length, 0, '生气：表情包没发');
 		assert.ok(waits[0] >= 3000, '第一条之前多等了一会儿');
 		assert.ok(gw.decisions.some((d) => d.kind === 'filtered' && /去 AI 味：AI 自称、markdown|去 AI 味：markdown、AI 自称/.test(d.reason)));
@@ -170,6 +199,16 @@ export async function run(t) {
 		cfg.behavior.outFilter = { enabled: false };
 		await gw.sendReply(sid3, { text: '我是一个AI语言模型。', images: [] });
 		assert.equal(sent.length, 1, '关掉去 AI 味就原样发');
+		cfg.behavior.outFilter = { enabled: true };
+		mood = bh.NEUTRAL_MOOD; gw.random = () => 0.9;
+		sent.length = 0;
+		await gw.sendReply(sid3, { text: '（歪着头想了想）今天去公园了。人好多啊！你呢？', images: [] });
+		assert.deepEqual(sent.map(([, segs]) => segs.filter((s) => s.type === 'text').map((s) => s.data.text).join('')), ['今天去公园了', '人好多啊！', '你呢？'], '去掉动作描写、拆成三条');
+		assert.ok(gw.decisions.some((d) => d.kind === 'filtered' && /动作描写、拆成 3 条/.test(d.reason)));
+		cfg.behavior.outFilter = { enabled: true, split: false };
+		sent.length = 0;
+		await gw.sendReply(sid3, { text: '今天去公园了。人好多啊！', images: [] });
+		assert.equal(sent.length, 1, '关掉拆条就不拆');
 		cfg.behavior.outFilter = { enabled: true };
 		mood = bh.NEUTRAL_MOOD; gw.random = () => 0.5;
 

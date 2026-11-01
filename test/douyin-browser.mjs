@@ -210,7 +210,13 @@ try {
 
 	// 4 用户关了整个浏览器 = 暂停
 	await userCdp('Browser.close');
-	await sleep(4000);
+	// 浏览器进程退出比 Browser.close 慢（Windows 上常要一两秒），轮询等它真的变成暂停再断言
+	let browserClosed = false;
+	for (let i = 0; i < 40 && !browserClosed; i++) {
+		await sleep(200);
+		const st = host.status();
+		browserClosed = st.state === 'paused' && st.pausedWhy === '你把抖音浏览器关了';
+	}
 	assert.deepEqual([host.status().state, host.status().pausedWhy], ['paused', '你把抖音浏览器关了']);
 	assert.equal(await host.start({ resume: true }), true);
 	ok('关整个浏览器 = 暂停；点启动重新打开');

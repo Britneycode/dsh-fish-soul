@@ -8,7 +8,7 @@ DSH 插件（单角色 `feiyu`）。版本 **0.7.0**。
 
 | 面 | 内容 |
 |---|---|
-| 人格 | 角色卡（PNG / ccv3 / chara），`{{char}}` / `{{user}}` 宏，世界书（constant / 关键词） |
+| 人格 | 设置页「人格」：6 个内置模板一键换上、可视化编辑、导入 / 导出 SillyTavern 角色卡（PNG / JSON）、撤销上次更换，换完下一轮生效；角色卡（PNG / ccv3 / chara），`{{char}}` / `{{user}}` 宏，世界书（constant / 关键词）；卡里的作息（`extensions.fish_soul.routine`）用来排每天的日程、「看事情的方式」（`perspective`）进人格段；模板按气质分、不绑职业；聊久了会「慢慢长」（性格 / 看法的变化要多次、跨天、跨聊天的证据才生效，人格页可看可删）；从群聊 / 好友私聊里学梗、说话风格和「什么场合怎么说」（只学别人的话、不带人名，按学到的次数挑几条参考） |
 | 记忆 | 按人隔离、本轮即时召回（BM25 + 向量 RRF）、艾宾浩斯衰减、可纠正（留旧档）、出处 `evidence`、每人 ≤150 字印象、旧聊天记录导入 |
 | 生活 | 虚拟时钟、每日作息与基调、Dream 整理、关系阶段演进、主动开口与配额 |
 | QQ | 直连 SnowLuma（OneBot 11 正向 WS）：私聊 / 群聊、群合批带署名、只听点名、戳一戳、撤回不回、可选插话、打字节奏、`/鱼 暂停` |
@@ -38,6 +38,7 @@ dsh plugin --profile desktop add ./dsh-fish-soul
 |---|---|
 | `fish-soul-config.json` | 全部设置（含 embedding `apiKey`） |
 | `fish-soul/soul.db` | 单一 SQLite：记忆、人物、日程、会话映射、向量、kv |
+| `fish-soul/persona.json` / `persona.png` | 人格卡（json 优先）；设置页改过的存成 persona.json，旧的进 `persona-backups/`（留 20 份），`persona.prev.json` 用来撤销 |
 | `fish-soul/bili-auth.json` | B站凭据（0600，类 Unix 上） |
 | `fish-soul/douyin-browser/<浏览器>/` | 抖音登录态（专用浏览器 profile） |
 | `fish-soul/workspace/` | 默认专用工作区「鱼」，表情包在 `_stickers/` |
@@ -57,7 +58,10 @@ lib/
   llm.js              按功能路由模型（LlmRouter）
   voice.js            语音收发
   stickers.js         表情包收藏
-  persona.js          角色卡解析
+  slang.js            学说法：梗、说话风格、说话方式
+  persona.js          角色卡解析、规整、保存 / 撤销
+  persona-templates.js 内置人格模板
+  growth.js        她慢慢长出来的变化（证据、生效、退场）
   importer.js         记忆导入
   history-import.js   聊天记录导入（txt / jsonl / json / MaiBot）
   backup.js           备份与导出

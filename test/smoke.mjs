@@ -754,9 +754,11 @@ ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先
 // 26 自己刷视频：关注优先 → 推荐；[划走] 不记、[点赞] 才点；看过的不再看；推荐被风控就看热门
 {
 	const prompts = [];
-	const llm = async (prompt) => { prompts.push(prompt); return /无聊/.test(prompt) ? '[划走]' : /猫咪/.test(prompt) ? '两只猫打架，橘猫赢了，笑死 [点赞]' : '看饿了，想吃夜宵'; };
+	const llm = async (prompt) => { prompts.push(prompt); return /无聊/.test(prompt) ? '[划走]' : /猫咪/.test(prompt) ? '两只猫打架，橘猫赢了，笑死 [点赞] [分享]' : '看饿了，想吃夜宵'; };
+	const shares = []; const notes = [];
 	const b = new BiliBrowser({ db, clock: { now: () => Date.now() }, client: new bl.BiliClient(), getConfig: () => ({ enabled: true, browse: { videosPerSession: 3, like: true } }),
-		callLlm: llm, persona: () => ({ name: '小鱼', brief: '嘴硬' }), watchDelayMs: [0, 0] });
+		callLlm: llm, persona: () => ({ name: '小鱼', brief: '嘴硬' }), watchDelayMs: [0, 0],
+		share: (x) => { shares.push(x); return { ok: true }; }, note: (k, x) => notes.push([k, x.reason]) });
 	let rr = await b.run({});
 	assert.deepEqual(rr.watched.map((w) => w.bvid), ['BV1Ef411c7Xx', 'BV1Ab411c7Zz', 'BV1Cd411c7Yy']);
 	assert.match(prompts[0], /^你是「小鱼」。嘴硬/);
@@ -766,13 +768,18 @@ ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先
 	assert.deepEqual(mine.map((m) => m.content), ['我在B站刷到饭UP 的视频《深夜做饭》：看饿了，想吃夜宵', '我在B站刷到猫UP 的视频《猫咪打架实录》：两只猫打架，橘猫赢了，笑死']);
 	assert.equal(mine[1].channel_id, 'bili:video:BV1Ab411c7Zz');
 	assert.equal(db.prepare('SELECT COUNT(*) n FROM bili_seen WHERE skipped = 1').get().n, 1);
+	// 标了 [分享] 的交给自走层：带链接和感受（一轮最多一条）；动态里记一笔
+	assert.match(prompts[0], /很想发给朋友看的，在末尾加 \[分享\]/);
+	assert.deepEqual(shares, [{ platform: 'B站', title: '猫咪打架实录', author: '猫UP', url: 'https://www.bilibili.com/video/BV1Ab411c7Zz', impression: '两只猫打架，橘猫赢了，笑死' }]);
+	assert.deepEqual(notes.map((n) => n[0]), ['browse', 'share']);
+	assert.match(notes[0][1], /刷B站：看了 3 条，划走 1 条/);
 	bm.rcmdFail = true;
 	rr = await b.run({});
 	assert.deepEqual(rr.watched.map((w) => w.bvid), ['BV1Gh411c7Ww'], '推荐失败改看热门，看过的不再看');
 	rr = await b.run({});
 	assert.equal(rr.watched.length, 0);
 	bm.rcmdFail = false;
-	assert.match(context.text(at(sid1)), /你最近在 B站刷到的[^\n]*\n- 《年度鬼畜》（鬼畜UP）：看饿了，想吃夜宵\n- 《猫咪打架实录》/);
+	assert.match(context.text(at(sid1)), /你最近在 B站刷到的[^\n]*\n- 《年度鬼畜》（鬼畜UP）：看饿了，想吃夜宵（链接 https:\/\/www\.bilibili\.com\/video\/BV1Gh411c7Ww）\n- 《猫咪打架实录》/);
 }
 // 设置页"现在刷一下"走同一套（宿主没模型时只记标题）
 bm.extra = true;
@@ -847,6 +854,9 @@ await (await import('./smoke-v09.mjs')).run({ assert, ok, call, sleep, waitFor, 
 
 // 100–107 人格页：模板 / 编辑 / 导入 / 撤销 / 热加载 / 排日程带人格 / 换人格开新会话；学说话方式（在 smoke-persona.mjs）
 await (await import('./smoke-persona.mjs')).run({ assert, ok, call, context, db, at, home, section, png });
+
+// 110–113 v0.10：B站自己发动态 / 回评论区（在 smoke-social.mjs）
+await (await import('./smoke-social.mjs')).run({ assert, ok, call });
 
 console.log('\n全部通过');
 srv.close(); wsSrv.close(); biliSrv.close(); process.exit(0);

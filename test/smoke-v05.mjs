@@ -280,7 +280,7 @@ export async function run(t) {
 		assert.ok(!db.prepare("SELECT 1 FROM memory WHERE content LIKE '%无聊的会议%'").get(), '划走的不记');
 		const qqb = context.text(at(sid1));
 		assert.match(qqb, /\[你最近在抖音刷到的（想聊再提，别硬塞）\]\n- 《/);
-		assert.match(qqb, /\n- 《山顶日出》：想去爬山了\n/); assert.match(qqb, /\n- 《小猫》（猫博主）：团子也这么睡，可爱死了\n/);
+		assert.match(qqb, /\n- 《山顶日出》：想去爬山了（链接 https:\/\/www\.douyin\.com\/video\/\d+）\n/); assert.match(qqb, /\n- 《小猫》（猫博主）：团子也这么睡，可爱死了（链接 https:\/\/www\.douyin\.com\/video\/\d+）\n/);
 	}
 	ok('抖音刷视频：跳过直播 / 广告 / 看过的；读详情写感受；划走不记、点赞要模型说了才点；感受进 QQ 会话上下文');
 
@@ -309,6 +309,54 @@ export async function run(t) {
 		ddb.close();
 	}
 	ok('自走层：B站 / 抖音轮着刷、共用间隔；抖音没登录就让给 B站');
+
+	// 38b 一样多时换着来（上次刷的排后面）；没刷成把次数还回去；刷到想分享的排成给主人的主动消息
+	{
+		const home5 = mkdtempSync(join(tmpdir(), 'dsh-s-'));
+		const prevHome = process.env.DSH_HOME; process.env.DSH_HOME = home5;
+		const { openDatabase, setKv: setKv5 } = await import('../lib/db.js');
+		const sdb = openDatabase(); process.env.DSH_HOME = prevHome;
+		let t = Date.parse('2030-01-01T06:00:00Z'); // 14:00 UTC+8 idle
+		const sclock = Object.assign(Object.create(VirtualClock.prototype), { scale: 1, now: () => t });
+		const runs = []; const notes = []; const sent = []; let dyResult = { ok: false, error: '抖音还没登录' };
+		const cfg = { masterQqUin: '10001', proactive: { dailyMaxCount: 5, idleTriggerHours: 1e6, targets: { masterPrivateChannelId: '', selfGroupChannelIds: [] } },
+			bili: { enabled: true, browse: { perDay: 3 } }, douyin: { enabled: true, browse: { enabled: true, perDay: 3 } } };
+		const slife = new LifeEngine({
+			db: sdb, clock: sclock, callLlm: async () => null, browseRealGapMs: 0, getConfig: () => cfg,
+			deliver: async (target, reason, meta) => { sent.push({ target, reason, origin: meta.origin }); return true; },
+			browse: async () => { runs.push('bili'); return { ok: true, watched: [] }; },
+			douyinBrowse: async () => { runs.push('douyin'); return dyResult; }, douyinReady: () => true,
+			note: (k, x) => notes.push([k, x.reason])
+		});
+		setKv5(sdb, 'browse.lastKey', 'bili');
+		await slife.tick(); await sleep(5);
+		assert.deepEqual(runs, ['douyin'], '今天都没刷、上次刷的是 B站 → 这次抖音');
+		assert.equal(slife.browseState(sclock.getRoleDateParts().dateStr, 'douyin').count, 0, '没刷成：次数还回去');
+		assert.ok(notes.some((n) => n[0] === 'browse' && /刷抖音没刷成：抖音还没登录/.test(n[1])), '动态里说为什么没刷成');
+		// 排分享：发给主人私聊；同时只排一条；一天最多 2 条
+		const share = { platform: '抖音', title: '橘猫偷吃', author: '猫猫', url: 'https://www.douyin.com/video/7300000000000000001', impression: '太像我家那只了' };
+		assert.equal(slife.queueShare(share).ok, true);
+		assert.match(slife.queueShare(share).error, /上一条分享还没发出去/);
+		const row = sdb.prepare("SELECT * FROM pending WHERE origin = 'share'").get();
+		assert.equal(row.channel_id, 'private:10001');
+		assert.match(row.reason, /抖音刷到一个视频《橘猫偷吃》（猫猫），链接 https:\/\/www\.douyin\.com\/video\/7300000000000000001 。你看完觉得：太像我家那只了/);
+		t += 5 * 60_000; await slife.tick(); await sleep(5);
+		assert.equal(sent.length, 1);
+		assert.deepEqual([sent[0].target, sent[0].origin], ['private:10001', 'share']);
+		assert.match(sent[0].reason, /把链接原样发出去/);
+		assert.equal(sdb.prepare('SELECT proactive_count n FROM day').get().n, 1, '分享占她自己的主动配额');
+		assert.equal(slife.queueShare({ ...share, title: '第二条' }).ok, true);
+		sdb.prepare("UPDATE pending SET status = 'done' WHERE origin = 'share'").run();
+		assert.match(slife.queueShare({ ...share, title: '第三条' }).error, /今天已经分享过 2 条了/);
+		// 过了 4 个虚拟小时还没发出去的分享作废
+		sdb.prepare("UPDATE pending SET status = 'pending', due_at = ? WHERE reason LIKE '%第二条%'").run(t - 5 * 3600_000);
+		t += 61 * 60_000; await slife.tick(); await sleep(5);
+		assert.equal(sdb.prepare("SELECT status FROM pending WHERE reason LIKE '%第二条%'").get().status, 'expired');
+		cfg.proactive.enabled = false;
+		assert.match(slife.queueShare(share).error, /主动开口关着/);
+		sdb.close();
+	}
+	ok('刷视频：一样多时换着刷、没刷成不占次数；刷到想分享的给主人发链接 + 感受（占主动配额、一天 2 条、过时作废）');
 
 	// 39 设置页样式单独一个文件；关掉总开关：停轮询、关浏览器
 	{

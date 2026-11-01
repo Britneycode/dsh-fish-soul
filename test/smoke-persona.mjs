@@ -432,6 +432,24 @@ export async function run(t) {
 		const r2 = new LlmRouter({ ctx: { get: (n) => (n === 'llm' ? { listProviders: () => [], async *stream(o) { asks2.push(o.maxTokens); } } : undefined) }, db, getConfig: () => ({}) });
 		assert.equal(await r2.call('z', { maxTokens: 600 }), null);
 		assert.deepEqual(asks2, [600, 8000], '大额度还是空就算了，不无限重试');
+
+		// DSH 协议：content 是内容块数组；finish { reason: { kind, failure } }；block-end 带整块
+		const seenOpts = [];
+		const mk = (gen, extra = {}) => new LlmRouter({ ctx: { get: (n) => (n === 'llm' ? { listProviders: () => extra.providers ?? [], async *stream(o) { seenOpts.push(o); yield* gen(o); } } : n === 'agentDefaultModel' ? { currentSelection: () => extra.host ?? null } : undefined) }, db, getConfig: () => extra.cfg ?? {} });
+		const r3 = mk(function* () { yield { type: 'block-start', index: 0, blockType: 'text' }; yield { type: 'block-end', index: 0, block: { type: 'text', text: '整块' } }; yield { type: 'finish', reason: { kind: 'stop' } }; });
+		assert.equal(await r3.call('你好'), '整块', '只有 block-end 也能拿到正文');
+		assert.deepEqual(seenOpts.at(-1).messages, [{ role: 'user', content: [{ type: 'text', text: '你好' }] }], 'content 用内容块数组');
+		const r4 = mk(function* () { yield { type: 'finish', reason: { kind: 'error', failure: { message: 'model not found', code: 'NOT_FOUND', status: 404 } } }; });
+		assert.equal(await r4.call('x'), null);
+		assert.match(r4.lastError, /model not found \[NOT_FOUND\]（HTTP 404）/, '宿主带内错误要说出来，不能当空回复');
+		const asks5 = [];
+		const r5 = mk(function* (o) { asks5.push(o.maxTokens); yield { type: 'finish', reason: { kind: 'error', failure: { message: 'empty', code: 'EMPTY_RESPONSE' } } }; });
+		assert.equal(await r5.call('x', { maxTokens: 600 }), null);
+		assert.deepEqual(asks5, [600, 8000], 'EMPTY_RESPONSE 当空回复：放大额度重试');
+		assert.match(r5.lastError, /宿主判定为空回复/);
+		const r6 = mk(function* (o) { if (o.model === 'bad') throw new Error('下线了'); yield { type: 'text-delta', index: 0, text: '默认模型回的' }; },
+			{ providers: [{ id: 'p', name: 'P' }], host: { provider: 'p', model: 'good' }, cfg: { models: { diary: { provider: 'p', model: 'bad' } } } });
+		assert.equal(await r6.call('x', { feature: 'diary' }), '默认模型回的', '按功能选的模型坏了就换 DSH 默认模型');
 	}
 	ok('推理模型返回空：放大额度重试一次并记住');
 }

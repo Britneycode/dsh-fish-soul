@@ -362,13 +362,13 @@ export async function run(t) {
 			p = await call('GET', '/models/state');
 			assert.equal(p.json.ok, true);
 			assert.deepEqual(p.json.providers, [{ id: 'ds', name: 'DeepSeek', models: [{ id: 'ds-chat', name: 'V3' }, { id: 'ds-r1', name: 'R1' }] }]);
-			assert.deepEqual(p.json.features.map((f) => f.id), ['dream', 'extract', 'schedule', 'browse', 'import', 'slang', 'diary', 'mood', 'other']);
-			assert.deepEqual(p.json.features[5].resolved, { provider: 'ds', model: 'ds-chat', from: 'host' });
+			assert.deepEqual(p.json.features.map((f) => f.id), ['dream', 'extract', 'schedule', 'browse', 'social', 'import', 'slang', 'diary', 'mood', 'other']);
+			assert.deepEqual(p.json.features[6].resolved, { provider: 'ds', model: 'ds-chat', from: 'host' });
 			assert.deepEqual(p.json.hostDefault, { provider: 'ds', model: 'ds-chat' });
 			p = await call('POST', '/models/config', { models: { slang: { provider: 'ds', model: 'ds-r1' }, dream: { provider: '', model: 'x' } }, prices: { 'ds-r1': { in: 4, out: '16' }, '': { in: 1 } } });
 			assert.equal(p.json.ok, true);
 			p = await call('GET', '/models/state');
-			assert.deepEqual(p.json.features[5].selection, { provider: 'ds', model: 'ds-r1' });
+			assert.deepEqual(p.json.features[6].selection, { provider: 'ds', model: 'ds-r1' });
 			assert.equal(p.json.features[0].selection, null, '不完整的选择当没选');
 			assert.deepEqual(p.json.prices['ds-r1'], { in: 4, out: 16 });
 			// 学一次群说法：走 slang 功能指定的模型，用量记进来
@@ -413,6 +413,23 @@ export async function run(t) {
 		assert.equal(p.json.ok, true); assert.equal(Buffer.from(p.json.base64, 'base64').subarray(0, 3).toString(), 'ID3');
 		assert.equal(vreq[0][1], 'Bearer sk-voice-abcd1234'); assert.match(vreq[0][2], /"input":"试听一下"/);
 		assert.match(context.text(at(sid)), /开头写 \[语音\]/, 'sometimes：QQ 会话里告诉她可以发语音');
+		// 听 / 说各配一套：设置页两组输入框；没单独填的那侧沿用公用的 key（打码、不回传）
+		p = await call('POST', '/voice/config', { sttBaseURL: 'https://stt.example/v1', sttApiKey: 'sk-stt-wxyz9876', ttsApiKey: 'sk-••••••••0000' });
+		assert.equal(p.json.ok, true);
+		p = await call('GET', '/voice/state');
+		assert.deepEqual([p.json.stt.baseURL, p.json.stt.effectiveBaseURL, p.json.stt.hasOwnKey, p.json.stt.keyFrom, p.json.stt.ready], ['https://stt.example/v1', 'https://stt.example/v1', true, 'own', true]);
+		assert.deepEqual([p.json.tts.baseURL, p.json.tts.hasOwnKey, p.json.tts.keyFrom, p.json.tts.ready], ['', false, 'shared', true], '打码的 key 不覆盖；说那侧沿用公用 key');
+		assert.match(p.json.stt.keyMasked, /9876$/);
+		assert.equal(JSON.stringify(p.json).includes('wxyz9876'), false);
+		vreq.length = 0;
+		mod.testHooks.voiceFetch = async (url, init) => { vreq.push([url, init.headers.authorization, String(init.body)]); return new Response(MP3, { status: 200 }); };
+		p = await call('POST', '/voice/test', { text: '再试一下' });
+		assert.equal(p.json.ok, true);
+		assert.equal(vreq[0][1], 'Bearer sk-voice-abcd1234', '说还是用公用 key');
+		delete mod.testHooks.voiceFetch;
+		await call('POST', '/voice/config', { sttBaseURL: '' });
+		p = await call('GET', '/voice/state');
+		assert.equal(p.json.stt.baseURL, '', '地址清空 = 沿用公用的');
 		await call('POST', '/voice/config', { enabled: false });
 		assert.doesNotMatch(context.text(at(sid)), /开头写 \[语音\]/);
 		delete mod.testHooks.voiceFetch;

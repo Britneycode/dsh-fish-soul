@@ -92,7 +92,7 @@ export async function run(t) {
 	services.llm = {
 		listProviders: () => [],
 		async *stream({ messages }) {
-			const prompt = String(messages[0].content);
+			const prompt = [].concat(messages[0].content).map((b) => b?.text ?? b).join('');
 			llmCalls.push(prompt);
 			if (/从里面提取/.test(prompt)) {
 				yield { type: 'text-delta', text: '好的：' };

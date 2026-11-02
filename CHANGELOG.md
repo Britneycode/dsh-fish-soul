@@ -141,3 +141,9 @@
   - 设置页「QQ 接入」新增「所有群」开关；关着时才显示群白名单输入框，占位文案改为「群号，逗号分隔；空 = 谁都不回」。
   - **既有用户白名单非空时行为不变**，不受影响；只有白名单为空、依赖「全部群」的用户需要填群号或打开「所有群」。
   - 自审修掉两个自己引入的回归：`save()` 漏发 `allGroups`（开关拨了不生效，界面仍显示已开）、`GET /channels/state` 漏回该字段（开关永远显示关闭）。`POST /channels/qq-config` 此前无测试覆盖，补了群门控三分支断言与配置往返测试。
+- 未发布（版本显示 + 自动检查更新）——
+  - **设置页顶部新增「版本」栏**：显示当前版本（读插件自己的 `package.json`）、上次检查时间和来源、有新版时显示新版本号、更新说明（取 GitHub Release 正文）和「复制更新命令」（`dsh plugin --profile desktop add dsh-fish-soul@x.y.z`）。
+  - **自动检查更新**（新文件 `lib/update-check.js`）：启动 30 秒后查一次（上次检查不到 12 小时则等到期再查），之后按「上次检查 + 12 小时 ±10% 抖动」排下一次；先问 npm registry，不通再问 GitHub Releases；结果存 kv `update.last`，重启后不联网也能显示；同一时间只跑一个检查；有新版写一次日志，失败只记 warn。**只提示、不自动安装**，装完重启 DSH 生效。
+  - 新配置 `update.autoCheck`（默认开），设置页可关；新接口 `GET /update/state`、`POST /update/check`、`POST /update/config`（三个都做同源校验）；npm 有新版但 GitHub Release 还没建时，说明区显示发布记录链接兜底。
+  - 启动日志带版本号：`插件启动 vx.y.z：…`。
+  - 新测试 `test/update-check.mjs`（版本比较含预发布、npm 优先 / GitHub 兜底 / 都失败、并发合并、`check()` 返回时 `checking=false`、调度抖动、kv 缓存、路由同源）。

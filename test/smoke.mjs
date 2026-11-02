@@ -430,7 +430,7 @@ const f1 = await waitFor(() => host.followups[0]);
 assert.ok(f1, '好友私聊应转进会话');
 const sid1 = f1.id;
 assert.equal(host.created[0].meta.cwd, wsDir);
-assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'fish_search'] });
+assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'web_search', 'web_fetch', 'fish_search'] }); // #26 联网工具不筛
 assert.equal(f1.msg.source.kind, 'fish-soul/qq');
 assert.match(f1.msg.content[0].text, /我想喝冰美式/);
 assert.match(host.titles[0][1], /QQ·主人（主人）/);

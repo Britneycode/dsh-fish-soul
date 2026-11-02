@@ -200,6 +200,33 @@ export async function run(t) {
 	await call('POST', '/channels/douyin-config', { replyAll: false });
 	ok('抖音「回所有能私信她的人」打开后陌生人也回');
 
+	// 34b 抖音群聊：按说话的人分开认（不是把整个群当成一个人）；没叫她只看，叫了她且打开「群里被叫到时回」才回
+	const gp = (who, id, text) => { dyPush('周末爬山群', text); Object.assign(dy.msgs.get('周末爬山群').at(-1), { senderId: id, senderName: who, convId: '0:2:7300', convType: 2 }); };
+	await call('POST', '/channels/douyin-config', { callNames: ['小鱼'], groupReply: false });
+	gp('阿三', '111', '今天去哪爬山');
+	gp('阿四', '222', '@小鱼 你去不去');
+	await waitFor(() => db.prepare("SELECT 1 FROM memory WHERE content LIKE '%抖音群「周末爬山群」里说（当时没回）：@小鱼 你去不去%'").get(), 6000);
+	const p4 = db.prepare("SELECT * FROM person WHERE douyin_uid = '阿四'").get();
+	assert.ok(p4 && db.prepare("SELECT * FROM person WHERE douyin_uid = '阿三'").get(), '群里每个说话的人单独认');
+	assert.equal(db.prepare("SELECT owner_id FROM memory WHERE content LIKE '%@小鱼 你去不去%'").get().owner_id, `user:${p4.canonical_id}`);
+	assert.equal(db.prepare("SELECT 1 FROM person WHERE douyin_uid = '周末爬山群'").get(), undefined, '群不当成一个人');
+	assert.equal(db.prepare("SELECT 1 FROM memory WHERE content LIKE '%今天去哪爬山%'").get(), undefined, '没叫她的群消息不逐条记');
+	assert.equal(host.followups.some((f) => f.msg.source.channelId === 'douyin-group:周末爬山群'), false, '没打开群里回复只记不回');
+	assert.equal((await call('GET', '/channels/state')).json.douyin.callNames[0], '小鱼');
+	await call('POST', '/channels/douyin-config', { groupReply: true });
+	gp('阿三', '111', '小鱼 一起来嘛');
+	const fg = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'douyin-group:周末爬山群'), 9000);
+	assert.ok(fg, '群里叫了她要回');
+	assert.deepEqual([fg.msg.source.chatType, fg.msg.source.speakers.map((x) => x.nickname)], ['group', ['阿三']]);
+	assert.equal(fg.msg.content[0].text, '阿三：小鱼 一起来嘛');
+	assert.ok(host.titles.some(([sid, t]) => sid === fg.id && t === '抖音群·周末爬山群'));
+	const gBlock = context.text(at(fg.id));
+	assert.match(gBlock, /抖音群聊回复规则/); assert.match(gBlock, /阿三：今天去哪爬山/, '没叫她的话给她当参考');
+	turn(fg.id, '去呀', fg.msg);
+	await waitFor(() => dy.sent.some((x) => x[0] === '周末爬山群' && x[2] === '去呀'), 6000);
+	await call('POST', '/channels/douyin-config', { groupReply: false });
+	ok('抖音群聊：按说话的人分开认，群不当成一个人；没叫她只看，叫了她 + 打开群里回复才回，回到群里');
+
 	// 35 页面自检没过：自动回复先停（只记不回），QQ 上提醒主人一次；恢复后继续回；掉登录也提醒一次
 	const dyNotes = (re) => ob.sends.filter((x) => x.action === 'send_private_msg' && x.params.user_id === 10001 && re.test(x.params.message[0].data.text));
 	dy.canaryOk = false;
@@ -215,7 +242,7 @@ export async function run(t) {
 	assert.equal(host.followups.length, nDy, '自检没过只记不回');
 	dy.canaryOk = true;
 	sc = await call('POST', '/douyin/self-check', {});
-	assert.equal(sc.json.report.ok, true); assert.equal(sc.json.report.list.count, 4);
+	assert.equal(sc.json.report.ok, true); assert.equal(sc.json.report.list.count, 5);
 	assert.equal((await call('GET', '/channels/state')).json.douyin.channel.replyPaused, false);
 	dy.loggedIn = false;
 	await sleep(700);

@@ -106,4 +106,28 @@ client.auth = { cookies: { SESSDATA: 's', bili_jct: 'JCT', DedeUserID: '999', bu
 	console.log('✓ 关键词：词表优先 / 留空她自己提 / 额度与原料都卡住');
 }
 
+// ── 3. 搜索结果是来源之一，不把推荐挤光（审 #38 发现 pool 前全塞搜索） ──
+{
+	const clock = { now: () => Date.now(), getRoleDateParts: () => ({ dateStr: '2030-01-01' }) };
+	const cfg = { enabled: true, browse: { enabled: true, search: true, searchKeywords: ['插件'], searchPerDay: 5 } };
+	const br = new BiliBrowser({
+		db, clock, client, getConfig: () => cfg, log: () => {},
+		callLlm: async () => '', persona: () => ({ name: '鱼' }), watchDelayMs: [0, 0]
+	});
+	br.client.search = async () => Array.from({ length: 8 }, (_, i) => ({ bvid: `BVs${i}`, source: 'search', title: `搜${i}`, owner: 'UP' }));
+	br.client.recommend = async () => Array.from({ length: 12 }, (_, i) => ({ bvid: `BVr${i}`, source: 'recommend', title: `推${i}`, owner: 'UP' }));
+	br.client.followingVideos = async () => [];
+	br.client.popular = async () => [];
+
+	for (const count of [2, 3, 6]) {
+		const items = await br.candidates(count);
+		const bySearch = items.filter((v) => v.source === 'search').length;
+		const byRec = items.filter((v) => v.source === 'recommend').length;
+		assert.equal(items.length, count, `count=${count} 要拿够`);
+		assert.ok(bySearch <= Math.ceil(count / 2), `count=${count} 搜索最多占一半，实际 ${bySearch}`);
+		assert.ok(byRec > 0, `count=${count} 推荐不能是 0 条`);
+	}
+	console.log('✓ 候选：搜索最多占一半，推荐不会被挤光');
+}
+
 console.log('\n站内搜索来源全部通过');

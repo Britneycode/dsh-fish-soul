@@ -1,5 +1,7 @@
 # 发版：main 上 package.json 的版本还没有对应的 tag 时，打 v<版本> 并建 GitHub Release。
 # 正文取 CHANGELOG.md 里「- v<版本>」那一段（到下一个顶格「- 」为止）。本机的 scripts/release.sh 仍然能用，二选一。
+# npm publish 也在这里做：tag 没建过（= 这次是真发版）才发，registry 里已有这个版本时跳过——
+# 0.11.3 那次只建了 Release 没发 npm，latest 落后两版，就是漏在这一步。
 name: release
 on:
   push:
@@ -41,3 +43,40 @@ jobs:
           VER='${{ steps.v.outputs.ver }}'
           TITLE=$(head -1 /tmp/notes.md | sed 's/^# //')
           gh release create "v$VER" --target "$GITHUB_SHA" --title "$TITLE" --notes-file /tmp/notes.md
+      - name: npm publish
+        # tag 刚建过（这次运行是真的在发版）才发 npm；registry 已有这个版本就跳过（幂等，重跑 workflow 不会重复发）
+        if: steps.v.outputs.skip != '1'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VER='${{ steps.v.outputs.ver }}'
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/dsh-fish-soul/$VER")
+          if [ "$CODE" = "200" ]; then
+            echo "registry 里已有 $VER，跳过 publish"
+            exit 0
+          fi
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::缺 NPM_TOKEN secret，npm 没发出去（Git 侧已完成，记得手动补 publish）"
+            exit 1
+          fi
+          npm publish --//registry.npmjs.org/:_authToken="$NPM_TOKEN"
+      - name: 校验四环
+        # 收尾校验：npm latest 要等于本次版本、gitHead 要等于本次提交。等 registry 处理完（最多 ~3 分钟）。
+        if: steps.v.outputs.skip != '1'
+        run: |
+          VER='${{ steps.v.outputs.ver }}'
+          for i in $(seq 1 12); do
+            sleep 15
+            LATEST=$(curl -s "https://registry.npmjs.org/dsh-fish-soul" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))['dist-tags'].latest")
+            [ "$LATEST" = "$VER" ] && break
+          done
+          if [ "$LATEST" != "$VER" ]; then
+            echo "::error::npm latest 还是 $LATEST（等了 3 分钟），四环没对齐"
+            exit 1
+          fi
+          HEAD=$(curl -s "https://registry.npmjs.org/dsh-fish-soul/$VER" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).gitHead")
+          if [ "$HEAD" != "$GITHUB_SHA" ]; then
+            echo "::error::npm 的 gitHead 是 $HEAD，不是本次提交 $GITHUB_SHA"
+            exit 1
+          fi
+          echo "四环对齐：main = tag v$VER = Release = npm $VER ($HEAD)"

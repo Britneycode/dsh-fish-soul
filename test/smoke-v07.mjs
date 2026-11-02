@@ -280,7 +280,7 @@ export async function run(t) {
 		assert.match(guard({ agent: { id: sid }, name: 'web_search' }), /不能上网/);
 		tools.web_search = { name: 'web_search' }; tools.web_fetch = { name: 'web_fetch' };
 		p = await call('GET', '/models/state');
-		assert.deepEqual({ ...p.json.web, providers: undefined }, { enabled: false, perDay: 20, usedToday: 0, available: true, provider: 'host', providers: undefined, hostAvailable: true, hasApiKey: false, apiKeyMasked: '', baseURL: '' });
+		assert.deepEqual({ ...p.json.web, providers: undefined }, { enabled: false, perDay: 20, usedToday: 0, available: true, provider: 'host', providers: undefined, hostAvailable: true, hostState: 'found', hasApiKey: false, apiKeyMasked: '', baseURL: '' });
 		assert.deepEqual(p.json.web.providers.map((x) => x.id), ['host', 'bocha', 'tavily', 'brave', 'searxng']);
 		assert.match(context.text(at(sid)), /现在不能上网查/);
 		p = await call('POST', '/models/config', { web: { enabled: true, perDay: 2 } });

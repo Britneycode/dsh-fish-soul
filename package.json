@@ -62,7 +62,7 @@
     }
   },
   "scripts": {
-    "test": "node test/smoke.mjs && node test/douyin-browser.mjs && node test/startup-gate.mjs && node test/outbox.mjs && node test/import-coverage.mjs && node test/update-check.mjs && node test/issue-fixes.mjs",
+    "test": "node test/smoke.mjs && node test/douyin-browser.mjs && node test/startup-gate.mjs && node test/outbox.mjs && node test/import-coverage.mjs && node test/update-check.mjs && node test/issue-fixes.mjs && node test/import-resume.mjs && node test/maibot-extras.mjs && node test/worldinfo.mjs && node test/memory-bulk.mjs && node test/backup-restore.mjs",
     "eval": "node test/eval/persona-eval.mjs"
   }
 }

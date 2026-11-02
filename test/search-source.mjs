@@ -119,7 +119,8 @@ client.auth = { cookies: { SESSDATA: 's', bili_jct: 'JCT', DedeUserID: '999', bu
 	br.client.followingVideos = async () => [];
 	br.client.popular = async () => [];
 
-	for (const count of [2, 3, 6]) {
+	for (const count of [1, 2, 3, 4, 5, 6]) {
+		db.prepare('DELETE FROM bili_seen').run();
 		const items = await br.candidates(count);
 		const bySearch = items.filter((v) => v.source === 'search').length;
 		const byRec = items.filter((v) => v.source === 'recommend').length;
@@ -127,7 +128,14 @@ client.auth = { cookies: { SESSDATA: 's', bili_jct: 'JCT', DedeUserID: '999', bu
 		assert.ok(bySearch <= Math.ceil(count / 2), `count=${count} 搜索最多占一半，实际 ${bySearch}`);
 		assert.ok(byRec > 0, `count=${count} 推荐不能是 0 条`);
 	}
-	console.log('✓ 候选：搜索最多占一半，推荐不会被挤光');
+
+	// 推荐 / 关注都失败时，搜索剩下的要能补位，不能因为限了一半就让这一轮空跑
+	db.prepare('DELETE FROM bili_seen').run();
+	cfg.browse.searchPerDay = 999; // 前面的用例把当天额度用光了，这里要重开
+	br.client.recommend = async () => { throw new Error('推荐挂了'); };
+	br.client.popular = async () => { throw new Error('热门也挂了'); };
+	assert.equal((await br.candidates(4)).length, 4, '只剩搜索时也要刷满 4 条，别空跑');
+	console.log('✓ 候选：搜索最多占一半，推荐不会被挤光；都失败时搜索补位');
 }
 
 console.log('\n站内搜索来源全部通过');

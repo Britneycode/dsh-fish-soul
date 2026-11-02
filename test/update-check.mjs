@@ -73,6 +73,30 @@ const [a, b] = await Promise.all([up.check(), up.check()]);
 assert.equal(calls.filter((u) => String(u).includes('npmjs')).length, 1);
 assert.equal(a.hasUpdate, false); assert.equal(b.latest, '0.11.2');
 
+// check() 返回时 checking 已经是 false（不然按钮会一直「检查中…」）
+const done = await up.check();
+assert.equal(done.checking, false);
+const pending = up.check();
+assert.equal(up.state().checking, true);
+assert.equal((await pending).checking, false);
+
+// 调度：没查过 → 30 秒；刚查过 → 约 12 小时（±10%）；早该查了 → 30 秒
+{
+	let t = 0;
+	const db2 = new DatabaseSync(':memory:');
+	db2.exec('CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+	const u = new UpdateChecker({ db: db2, getConfig: () => ({}), fetchImpl, current: '0.11.2', now: () => t, random: () => 1 });
+	assert.equal(u.nextDelay(), 30_000);
+	await u.check();
+	assert.equal(u.nextDelay(), 12 * 3600_000 * 1.1);
+	t = 6 * 3600_000;
+	assert.equal(u.nextDelay(), 12 * 3600_000 * 1.1 - 6 * 3600_000);
+	t = 20 * 3600_000;
+	assert.equal(u.nextDelay(), 30_000);
+	const lo = new UpdateChecker({ db: db2, getConfig: () => ({}), fetchImpl, current: '0.11.2', now: () => 0, random: () => 0 });
+	assert.equal(lo.nextDelay(), 12 * 3600_000 * 0.9);
+}
+
 // 自动检查开关
 assert.equal(up.state().autoCheck, true);
 auto = false;
@@ -92,6 +116,8 @@ const run = async (method, path, body, origin = true) => {
 };
 let r = await run('GET', '/update/state');
 assert.equal(r.code, 200); assert.equal(r.payload.current, '0.11.2');
+r = await run('GET', '/update/state', '', false);
+assert.equal(r.code, 403);
 r = await run('POST', '/update/check', '', false);
 assert.equal(r.code, 403);
 r = await run('POST', '/update/config', JSON.stringify({ autoCheck: true }));

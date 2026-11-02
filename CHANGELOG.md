@@ -155,3 +155,11 @@
   - **B站弹幕**（#27，`bili.browse.danmaku`，默认开，只读）：看视频时按时间均匀抽 12 条弹幕（去重、去太短的）放进提示；聊天里别人发的视频不取弹幕，免得拖慢回复。
   - #27 里暂不做的：评论别人的视频（陌生人面前的公开写操作）、抽帧看画面（要下视频 + 多模态，成本高）、QQ 空间（OneBot / SnowLuma 没有接口）、站内搜索（之后可能做成刷视频的一个来源）。
   - 新测试 `test/issue-fixes.mjs`（进 `npm test`）。
+- 未发布（第二步：导入续传、麦麦表情 / 说法、世界书、批量记忆、恢复备份）——
+  - **聊天记录导入断点续传**（`lib/history-import.js`，soul.db 新表 `import_job`）：计划和每段的进度在同一个事务里落盘；导到一半重启 / 崩溃，任务标成「中断」，设置页可「继续」（跳过已完成的段）或「放弃」；同一份文件再次预览时提示「上次导到一半」。新接口 `POST /import/history/resume`、`POST /import/history/discard`。
+  - **较早的聊天按时间段总结**：以前每人只提炼最近 12 段、更早的直接丢；现在更早的部分按时间切成最多 4 个时间段，每段抽样后做一次「这段时间大概聊了什么」的总结，排在最近 12 段前面（超预算时先砍它们）；预览里显示时间段覆盖。
+  - **导入麦麦的表情包、表达方式和黑话**（新文件 `lib/maibot-extras.js`）：认旧版（emoji / expression / jargon + chat_streams）和新版（images 里 image_type=emoji / expressions / jargons + chat_sessions）两种库结构；先预览再导入，表情包进 `_stickers/`，表达方式进「什么场合怎么说」，黑话按群归属、没群的进新的「全局」分组（所有聊天都带）。新接口 `POST /import/maibot-extras/preview|apply`；`/slang/edit` 支持全局分组。
+  - **单独导入 SillyTavern 世界书**（新文件 `lib/worldinfo.js`、`lib/routes-worldinfo.js`）：人格页可导入多本世界书，单本开关 / 删除 / 试一试；关键词支持正则（`/…/i`）、整词匹配、次要关键词四种逻辑、概率、常驻、单条扫描深度；新配置 `lore.scanDepth`（4 条）、`lore.maxEntries`（6 条）、`lore.budgetChars`（1200 字），按优先级（order 大的先）挑、超预算的跳过。角色卡自带的世界书也走同一套匹配。注意：命中条目的排列从「卡里的原顺序」改成「按优先级」。
+  - **记忆批量操作**（新文件 `lib/memory-bulk.js`）：记忆页加搜索、按来源筛选、「批量」模式（勾选或按当前筛选），可删除 / 恢复 / 改重要度 / 改类型 / 标私密；先显示会影响几条再确认，不带任何筛选时拒绝「全部」。新接口 `POST /inspector/bulk`；`/inspector/forget` 支持 `ids[]`，overview 支持 `q / source / visibility / limit≤500` 并返回 `matchedTotal`。
+  - **设置页从备份恢复**（`lib/backup.js`）：备份列表每份可「恢复到这份」，先校验文件，再标成待恢复，**重启 DSH 后生效**（启动时在打开数据库前换上）；换之前把当前库另存一份（留最近 3 份，也可以从列表换回）；重启前可「不恢复了」。新接口 `POST /backup/restore`、`POST /backup/restore-cancel`。
+  - 新测试 `test/import-resume.mjs`、`test/maibot-extras.mjs`、`test/worldinfo.mjs`、`test/memory-bulk.mjs`、`test/backup-restore.mjs`（都进 `npm test`）。

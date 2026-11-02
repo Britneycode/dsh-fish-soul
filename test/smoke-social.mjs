@@ -186,7 +186,7 @@ export async function run(t) {
 
 	// 5. 抖音：发图文（画卡片 → 创作者中心），回作品评论（第一次只记、作者自己的不回、要验证就停）
 	{
-		const { DouyinSocial, noteTitle, commentKey } = await import('../lib/douyin-social.js');
+		const { DouyinSocial, noteTitle, commentKey, pickMusicTheme } = await import('../lib/douyin-social.js');
 		const { readFileSync, existsSync } = await import('node:fs');
 		assert.equal(noteTitle('今天下雨了。好想睡觉'), '今天下雨了');
 		assert.equal(noteTitle('一'.repeat(30)), '一'.repeat(20));
@@ -196,7 +196,7 @@ export async function run(t) {
 		const dcfg = { enabled: true, masterName: '主人抖音', post: { enabled: true, perDay: 1 }, comments: { enabled: false, perHour: 2 } };
 		const dyd = { published: [], replies: [], publishResult: { ok: true }, replyResult: () => ({ ok: true }), works: [{ id: '7001', kind: 'note', title: '晚饭吃了泡面' }], comments: new Map(), opened: 0 };
 		const driver = {
-			renderCard: async (text, foot) => { dyd.card = [text, foot]; return Buffer.from('89504e470d0a1a0a', 'hex'); },
+			renderCard: async (text, foot, theme) => { dyd.card = [text, foot, theme]; return Buffer.from('89504e470d0a1a0a', 'hex'); },
 			publishNote: async (x) => { dyd.published.push({ ...x, png: existsSync(x.file) ? readFileSync(x.file).subarray(0, 4).toString('hex') : '' }); return dyd.publishResult; },
 			listWorks: async () => dyd.works,
 			openWork: async (w) => { dyd.opened++; return { ok: dyd.comments.has(w.id) }; },
@@ -206,21 +206,41 @@ export async function run(t) {
 		const dnotes = [];
 		const notify = [];
 		let dyOut = '下雨天适合躺着\n什么都不想干';
+		let dyMusicOut = '';
 		const dsocial = new DouyinSocial({
-			db, clock, host, driver, getConfig: () => dcfg, callLlm: async (p) => { prompts.push(p); return typeof dyOut === 'function' ? dyOut(p) : dyOut; },
+			db, clock, host, driver, getConfig: () => dcfg, callLlm: async (p) => { prompts.push(p); return /背景音乐/.test(p) ? dyMusicOut : (typeof dyOut === 'function' ? dyOut(p) : dyOut); },
 			persona: () => ({ name: '鱼', brief: '' }), note: (k, x) => dnotes.push([k, x]), notify: (k, t) => notify.push([k, t]),
-			replyGapMs: 0, postRealGapMs: 0, random: () => 0, cardDir: join(home, 'cards')
+			replyGapMs: 0, postRealGapMs: 0, random: () => 0.9, cardDir: join(home, 'cards')
 		});
 		let r = await dsocial.post({ force: true });
 		assert.equal(r.ok, true, r.error);
-		assert.match(prompts.at(-1), /文字卡片/);
+		assert.ok(prompts.some((p) => /文字卡片/.test(p)), '文案 prompt 还在发');
 		assert.equal(dyd.card[0], '下雨天适合躺着\n什么都不想干');
 		assert.match(dyd.card[1], /^\d{4}\.\d{2}\.\d{2}$/);
+		assert.equal(dyd.published[0].music, '', '挑歌 LLM 没输出：不配音乐，发布照常');
 		assert.deepEqual([dyd.published[0].title, dyd.published[0].text, dyd.published[0].png], ['下雨天适合躺着', '下雨天适合躺着\n什么都不想干', '89504e47']);
+		// 挑歌：mood 映射主题、歌名带上；页面没配上（musicPicked false）也照样发布，只是记一笔
+		dyMusicOut = '```json\n{"mood":"blue","music":"若月亮没来","reason":"配丧的"}\n```';
+		dyd.published.length = 0;
+		r = await dsocial.post({ force: true });
+		assert.equal(r.ok, true, r.error);
+		assert.equal(dyd.published[0].music, '若月亮没来');
+		assert.equal(dyd.card[2], 1, 'blue → 浅蓝主题');
+		assert.ok(dnotes.some(([k, x]) => k === 'post' && /配了首《若月亮没来》/.test(x.reason)));
+		dyd.publishResult = { ok: true, musicPicked: false };
+		dyd.published.length = 0;
+		r = await dsocial.post({ force: true });
+		assert.equal(r.ok, true, '配歌失败不影响发布');
+		assert.ok(dnotes.some(([k, x]) => k === 'post' && /没配上/.test(x.reason)));
+		dyd.publishResult = { ok: true };
+		// pickMusicTheme：宽容解析 + 池外歌名丢弃
+		assert.deepEqual(pickMusicTheme('垃圾输出没有 JSON', () => 0.9), { theme: 4, music: '' });
+		assert.equal(pickMusicTheme('{"mood":"pink","music":"不存在的歌"}').music, '');
+		assert.equal(pickMusicTheme('{"mood":"dream","music":"月亮照山川"}').theme, 2);
 		assert.ok(locks.includes('发抖音图文'), '在浏览器锁里发');
-		assert.equal(db.prepare("SELECT COUNT(*) AS n FROM social_post WHERE platform = 'douyin'").get().n, 1);
+		assert.equal(db.prepare("SELECT COUNT(*) AS n FROM social_post WHERE platform = 'douyin'").get().n, 3, 'force 发了 3 次（含配歌两次）');
 		assert.ok(db.prepare("SELECT 1 FROM memory WHERE owner_id = 'self' AND content LIKE '我在抖音发了条图文：%'").get());
-		assert.equal(dsocial.postState(clock.getRoleDateParts().dateStr).count, 1, '和 B站 分开计数');
+		assert.equal(dsocial.postState(clock.getRoleDateParts().dateStr).count, 3, '和 B站 分开计数');
 		// 创作者中心没登录：提醒主人；要验证：6 小时内不再试
 		dyd.publishResult = { ok: false, code: 'NOT_LOGGED_IN', error: '创作者中心没登录' };
 		r = await dsocial.post({ force: true });

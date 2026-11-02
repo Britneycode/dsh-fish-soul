@@ -61,17 +61,20 @@ jobs:
           fi
           npm publish --//registry.npmjs.org/:_authToken="$NPM_TOKEN"
       - name: 校验四环
-        # 收尾校验：npm latest 要等于本次版本、gitHead 要等于本次提交。等 registry 处理完（最多 ~3 分钟）。
+        # 收尾校验：npm latest 要等于本次版本、gitHead 要等于本次提交。registry 同步有快有慢
+        # （0.12.0 约 2 分钟，0.13.1 超过 3 分钟才挂 latest），等 10 分钟；期间每轮打出当前值，别让人干瞪眼。
         if: steps.v.outputs.skip != '1'
         run: |
           VER='${{ steps.v.outputs.ver }}'
-          for i in $(seq 1 12); do
-            sleep 15
-            LATEST=$(curl -s "https://registry.npmjs.org/dsh-fish-soul" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))['dist-tags'].latest")
+          LATEST=$(curl -s "https://registry.npmjs.org/dsh-fish-soul" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))['dist-tags'].latest")
+          for i in $(seq 1 20); do
             [ "$LATEST" = "$VER" ] && break
+            echo "registry latest 还是 $LATEST，第 $i 次等待 30s…"
+            sleep 30
+            LATEST=$(curl -s "https://registry.npmjs.org/dsh-fish-soul" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))['dist-tags'].latest")
           done
           if [ "$LATEST" != "$VER" ]; then
-            echo "::error::npm latest 还是 $LATEST（等了 3 分钟），四环没对齐"
+            echo "::error::npm latest 还是 $LATEST（等了 10 分钟），四环没对齐"
             exit 1
           fi
           HEAD=$(curl -s "https://registry.npmjs.org/dsh-fish-soul/$VER" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).gitHead")

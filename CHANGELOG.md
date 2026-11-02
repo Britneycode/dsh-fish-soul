@@ -183,3 +183,9 @@
   - **打开插件设置页一片空白**（0.11.3 引入）：「版本」条（`UpdateBar`）把普通函数 `Group` / `Row` 当成 React 组件 `h(Group, …)` 用。宿主的 React 调函数组件时第二个参数传的是 legacy context（`{}`），被当成子元素塞进去，React 报「Objects are not valid as a React child」，整个设置页卸载成空白。改成直接调用 `Group(…)` / `Row(…)`。
   - 设置页加了出错兜底（`Boundary`）：引导、版本条、每个标签页单独兜着，某一块出错只显示一行提示，其它照常。
   - 新测试 `test/client-lint.mjs`：静态检查 client*.js 里没有把这些普通函数当组件用。
+- v0.12.2（抖音刷视频进不了推荐页）——2026-11-02 发。
+  - **刷抖音其实一直在跑，但每轮都空手**：`FEED_URL = https://www.douyin.com/?recommend=1`，抖音桌面版对导航请求一律 302 到 `/jingxuan` 精选页。插件抓的 `feed-active-video` 只在推荐页有，落在精选页后 `scroll` 每轮都是「这轮没刷到新视频」。
+  - 推荐页**存在**，但只能靠点击左侧栏「推荐」tab 进（前端路由跳转，不走服务端 302）；`el.click()` 对抖音无效，得用 `Input.dispatchMouseEvent` 发真实鼠标事件。
+  - `scroll` 开头加 `ensureRecommend`：读不到当前视频就找「推荐」按钮、用真实鼠标点进去；进不去就 warn 停下来，不再空刷一轮。
+  - 判定走 `activeVideo()`（喂 ACTIVE_VIDEO_JS 的 mock 与真实推荐页都过）；精选页 DOM 是另一套 `data-aweme-id` / `.discover-video-card-item`。
+  - 真实浏览器实测：从 `/jingxuan` 点进推荐页后 `feed-active-video` 1、`video-desc` 2、`video` 3。

@@ -1,0 +1,43 @@
+# 发版：main 上 package.json 的版本还没有对应的 tag 时，打 v<版本> 并建 GitHub Release。
+# 正文取 CHANGELOG.md 里「- v<版本>」那一段（到下一个顶格「- 」为止）。本机的 scripts/release.sh 仍然能用，二选一。
+name: release
+on:
+  push:
+    branches: [main]
+    paths: [package.json, .github/workflows/release.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 版本号
+        id: v
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$VER" >/dev/null; then echo "skip=1" >> "$GITHUB_OUTPUT"; fi
+          grep -q "版本 \*\*$VER\*\*" README.md || { echo "README 里的版本不是 $VER"; exit 1; }
+      - name: 正文
+        if: steps.v.outputs.skip != '1'
+        run: |
+          VER='${{ steps.v.outputs.ver }}'
+          awk -v head="- v$VER" '
+            index($0, head) == 1 { on = 1; sub(/^- /, "# "); sub(/——$/, ""); print; next }
+            on && /^- / { exit }
+            on { sub(/^  /, ""); print }
+          ' CHANGELOG.md > /tmp/notes.md
+          test -s /tmp/notes.md || { echo "CHANGELOG 里没找到 - v$VER"; exit 1; }
+          cat /tmp/notes.md
+      - name: 打 tag + 建 Release
+        if: steps.v.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER='${{ steps.v.outputs.ver }}'
+          TITLE=$(head -1 /tmp/notes.md | sed 's/^# //')
+          gh release create "v$VER" --target "$GITHUB_SHA" --title "$TITLE" --notes-file /tmp/notes.md

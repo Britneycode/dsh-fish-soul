@@ -499,8 +499,8 @@ assert.deepEqual(g.params.message[0], { type: 'reply', data: { id: '702' } });
 ok('群：只听点名 + 接着听；多人合批带署名、【】被替换；remember 按署名归属；回复引用点名那条');
 
 // 17 护栏：QQ 会话里只能用记忆工具
-assert.match(guard({ agent: { id: sid1 }, name: 'shell' }), /不能用/);
-assert.match(guard({ agent: { id: sid1 }, name: 'run_code' }), /不能用/);
+assert.match(guard({ agent: { id: sid1 }, name: 'shell' }), /不能用 shell/);
+assert.match(guard({ agent: { id: sid1 }, name: 'run_code' }), /不能运行代码/);
 assert.equal(guard({ agent: { id: sid1 }, name: 'remember' }), undefined);
 assert.equal(guard({ agent: { id: 'main-session' }, name: 'shell' }), undefined);
 ok('工具护栏：QQ 会话只放行记忆工具，不影响其他会话');

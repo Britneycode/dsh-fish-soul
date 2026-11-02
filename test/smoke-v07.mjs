@@ -280,7 +280,7 @@ export async function run(t) {
 		assert.match(guard({ agent: { id: sid }, name: 'web_search' }), /不能上网/);
 		tools.web_search = { name: 'web_search' }; tools.web_fetch = { name: 'web_fetch' };
 		p = await call('GET', '/models/state');
-		assert.deepEqual({ ...p.json.web, providers: undefined }, { enabled: false, perDay: 20, usedToday: 0, available: true, provider: 'host', providers: undefined, hostAvailable: true, hostState: 'found', hasApiKey: false, apiKeyMasked: '', baseURL: '' });
+		assert.deepEqual({ ...p.json.web, providers: undefined }, { enabled: false, perDay: 20, usedToday: 0, available: true, provider: 'host', providers: undefined, hostAvailable: true, hostState: 'found', hasApiKey: false, apiKeyMasked: '', baseURL: '', sessionAllow: 'memory' });
 		assert.deepEqual(p.json.web.providers.map((x) => x.id), ['host', 'bocha', 'tavily', 'brave', 'searxng']);
 		assert.match(context.text(at(sid)), /现在不能上网查/);
 		p = await call('POST', '/models/config', { web: { enabled: true, perDay: 2 } });
@@ -379,6 +379,44 @@ export async function run(t) {
 		mod.testHooks.webFetch = null;
 	}
 	ok('上网查 · 自己的 key：博查 / Tavily / Brave / SearXNG 都能搜；key 掩码、按服务分开存；测一下不算次数；fish_search 只在聊天会话里、跟开关和次数走');
+
+	// 54b #37：聊天会话工具放行档位（memory / master / all）
+	{
+		const gwProto = gwMod.ChatGateway.prototype;
+		// 默认 memory：非记忆非联网工具被拦，提示里指路设置页
+		assert.match(guard({ agent: { id: sid }, name: 'some_plugin_tool' }), /不能用 some_plugin_tool/);
+		assert.match(guard({ agent: { id: sid }, name: 'some_plugin_tool' }), /设置页/);
+		// 档位解析：脏值回落 memory
+		const fake = { getConfig: () => ({ tools: { sessionAllow: 'oops' } }), log: () => {} };
+		assert.equal(gwProto.sessionAllowMode.call(fake), 'memory', '脏值回落 memory');
+		// master 档：主人的私聊会话放开、别人的会话照旧拦；run_code 始终拦
+		p = await call('POST', '/models/config', { sessionAllow: 'master' });
+		assert.equal(p.json.web.sessionAllow, 'master', '设置页能读到档位');
+		assert.equal(guard({ agent: { id: sid }, name: 'some_plugin_tool' }), undefined, '主人私聊放开了');
+		assert.match(guard({ agent: { id: sid }, name: 'run_code' }), /不能运行代码/);
+		const other = db.prepare("SELECT session_id FROM chat_session WHERE channel_id = 'private:20002' AND status = 'active'").get();
+		if (other) assert.match(guard({ agent: { id: other.session_id }, name: 'some_plugin_tool' }), /不能用/, '别人的私聊还是拦的');
+		// all 档：所有会话放开；run_code 仍然拦
+		p = await call('POST', '/models/config', { sessionAllow: 'all' });
+		assert.equal(p.json.web.sessionAllow, 'all');
+		const stranger = db.prepare("SELECT session_id FROM chat_session WHERE channel_id = 'group:888' AND status = 'active'").get();
+		if (stranger) assert.equal(guard({ agent: { id: stranger.session_id }, name: 'some_plugin_tool' }), undefined, 'all 档群会话也放开');
+		assert.match(guard({ agent: { id: sid }, name: 'run_code' }), /不能运行代码/);
+		// 新建会话：放开档位下不 restrict（setupAgent 收到 channelId 时）
+		const calls = [];
+		const fakeGw = Object.assign(Object.create(gwProto), { ctx: { tools: {} }, log: () => {}, getConfig: () => ({ masterQqUin: '10001', tools: { sessionAllow: 'master' } }) });
+		await fakeGw.setupAgent({ tools: { restrict: (f) => calls.push(f) } }, 'private:10001');
+		assert.equal(calls.length, 0, '主人私聊不 restrict');
+		await fakeGw.setupAgent({ tools: { restrict: (f) => calls.push(f) } }, 'group:888');
+		assert.equal(calls.length, 1, '别的会话照旧 restrict');
+		await fakeGw.setupAgent({ tools: { restrict: (f) => calls.push(f) } });
+		assert.equal(calls.length, 2, '没给 channelId（老调用方式）照旧 restrict');
+		// 收尾：回到默认 memory
+		p = await call('POST', '/models/config', { sessionAllow: 'memory' });
+		assert.equal(p.json.web.sessionAllow, 'memory');
+		assert.match(guard({ agent: { id: sid }, name: 'some_plugin_tool' }), /不能用/, '回到默认');
+	}
+	ok('#37 工具放行档位：默认只记忆+上网；master 只放开主人的私聊；all 全放开；run_code 始终拦；放开后新会话不再 restrict');
 
 	// 55 路由：模型 / 用量 / 单价、语音、表情包、学说法、首次引导
 	{

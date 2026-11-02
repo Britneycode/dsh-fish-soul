@@ -59,8 +59,8 @@ export async function run(t) {
 			{ keys: ['猫'], secondary: ['狗'], selective: true, logic: 2, order: 3, content: 'none' },
 			{ keys: ['猫'], secondary: ['名字', '颜色'], selective: true, logic: 1, order: 2, content: 'notall' }
 		];
-		assert.deepEqual(matchLore(lore, '猫的名字').map((e) => e.content), ['any', 'none', 'notall']);
-		assert.deepEqual(matchLore(lore, '猫的名字和颜色，还有狗').map((e) => e.content), ['any', 'all']);
+		assert.deepEqual(matchLore(lore, '猫的名字').map((e) => e.content), ['none', 'notall', 'any'], '按优先级（order 大的先）');
+		assert.deepEqual(matchLore(lore, '猫的名字和颜色，还有狗').map((e) => e.content), ['all', 'any']);
 		assert.deepEqual(matchLore(lore, '狗').map((e) => e.content), []);
 	}
 	ok('记忆考试 · 纯函数：时间标签、检索词带上文、防跑偏识别、阶段语气、生日、遗忘曲线、好感淡化、聊天日志、世界书次要关键词');

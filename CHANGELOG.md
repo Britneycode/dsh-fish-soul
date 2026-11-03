@@ -222,5 +222,8 @@
   - **首轮屎山清理**：删 `sharpSource()` 死函数、去掉 20 个无外部调用方的 export、收敛重复 helper（jaccard / maskKey / sniffImage / pad2 / personId 各留一份，bilibili 公钥 env fallback 移进函数体——`test/smoke.mjs:83` 依赖它换测试公钥）。net -55 行。
   - **测试临时目录不再泄漏**：16 个测试文件 `mkdtempSync` 后从不清理，配合 Alma 子进程 TMPDIR 会把磁盘撑到 16G / 3300+ 目录。新增 `test/_tmp.mjs`（退出逐文件删 + 启动补删 >5min 的同前缀老目录），16 个测试与 `test/eval/` 下 3 个脚本换用。连跑两轮临时目录 140 个 → 2 个。
   - **人格卡改 per-agent 注入**：`setup(agentCtx)` 里挂，不再注册全局 `systemPrompt` 段——#40 那类「技术问答会话被塞鱼的人格」的问题从根上收掉。
+- v0.13.6（「正在聊的也马上换」开关记住选择）——2026-11-03 发。
+  - 设置页「人格 → 正在聊的也马上换」原来只是组件里的临时 state（初值写死开）：切走再回来开关就弹回开，看起来"关不掉"；而且既然每次都是"开"，顺手点保存就会带着 `fresh: true` 把正在聊的会话清掉（#44）。现在选择存在服务端 kv（`persona.freshDefault`），`GET /persona/state` 带回、切开关即 `POST /persona/fresh` 持久化，关掉就一直是关；没存过的老用户默认**关**——宁可沿用旧会话，不误清。
+
 - v0.13.5（想聊 / 待办可删除）——2026-11-03 发。
   - 设置页「记忆检视 → 待办」「习惯 → 日记 → 想聊」每条加删除按钮（#42）：做完了的事不再一直挂着。待办走已有的 `POST /inspector/forget`（`targetType: pending`，删 = 标 `dropped`），想聊新增 `POST /diary/topic-remove` 路由，按人 + 话题删单条；删完的话题第二天不再进聊天上下文。

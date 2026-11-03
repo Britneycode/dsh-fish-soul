@@ -1,9 +1,9 @@
 // v0.7 的冒烟测试（按功能选模型 + 用量、语音 STT / TTS、收藏表情包、学群里的说法、上网查、首次引导），
 // 由 smoke.mjs 在同一个插件实例上最后调用；共用的假宿主 / 假服务从参数传进来。
-import { existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import { tmpHome } from './_tmp.mjs';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 const MP3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(64, 1)]);
@@ -123,7 +123,7 @@ export async function run(t) {
 	ok('学群里的说法：只学 QQ 群 / 私聊（私聊能关）、攒够才学、提炼梗和风格、提到的梗先给她看、主人改的不被覆盖');
 
 	// 53 独立网关：听语音（转文字）→ 回 [语音] 段（合成）/ 合成不了发文字（记原因）；抖音 / B站里主人要的语音转到 QQ；[收藏表情:名字] 存表情、这行不发
-	const wsDir = mkdtempSync(join(tmpdir(), 'fish-v07-ws-'));
+	const wsDir = tmpHome('fish-v07-ws-');
 	let collectedFile = '';
 	{
 		const vcfg = { enabled: true, apiKey: 'sk-v', speak: 'mirror' };

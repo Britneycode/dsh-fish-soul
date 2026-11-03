@@ -1,9 +1,9 @@
 // 人格页的冒烟测试：内置模板、规整 / 保存 / 撤销、热加载（人格段、瞬态块、点名）、
 // 导入 PNG 卡、排日程带上人格、换人格后正在聊的开新会话；学说话方式（「什么场合怎么说」）。
 // 由 smoke.mjs 最后调用，共用假宿主。
-import { mkdtempSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpHome } from './_tmp.mjs';
 
 export async function run(t) {
 	const { assert, ok, call, context, db, at, home, section, png } = t;
@@ -20,7 +20,7 @@ export async function run(t) {
 		assert.equal(PERSONA_TEMPLATES[0].id, 'feiyu', '第一张是通用的肥鱼');
 		assert.equal(new Set(PERSONA_TEMPLATES.map((x) => x.id)).size, PERSONA_TEMPLATES.length);
 		for (const tpl of PERSONA_TEMPLATES) {
-			const dir = mkdtempSync(join(tmpdir(), 'fish-persona-'));
+			const dir = tmpHome('fish-persona-');
 			const card = pm.normalizeCard(personaTemplate(tpl.id));
 			writeFileSync(join(dir, 'persona.json'), JSON.stringify(card));
 			const ps = pm.loadPersona(dir);
@@ -37,14 +37,14 @@ export async function run(t) {
 			assert.ok(examples.length >= 3 && examples.every((b) => /\{\{user\}\}: /.test(b) && /\{\{char\}\}: /.test(b)), `${tpl.id}：说话示例格式`);
 			assert.ok(!/作为|AI|助手|综上/.test(JSON.stringify(tpl.card)), `${tpl.id}：模板自己别带 AI 味`);
 		}
-		const yu = pm.loadPersona((() => { const d = mkdtempSync(join(tmpdir(), 'fish-persona-')); writeFileSync(join(d, 'persona.json'), JSON.stringify(personaTemplate('zhi'))); return d; })());
+		const yu = pm.loadPersona((() => { const d = tmpHome('fish-persona-'); writeFileSync(join(d, 'persona.json'), JSON.stringify(personaTemplate('zhi'))); return d; })());
 		assert.match(pm.matchLore(yu.lore, '你家周一最近还啃水草吗').map((e) => e.content).join(), /金鱼/);
 		assert.equal(pm.matchLore(yu.lore, '今天天气不错').length, 0, '没聊到就不带');
 		// 不同心情下怎么说话：每张都写了五种；读进来、规整都留着；字符串一行一条也收，不认识的心情丢掉
 		for (const tpl of PERSONA_TEMPLATES) assert.deepEqual(Object.keys(tpl.card.data.extensions.fish_soul.moods), pm.MOOD_KEYS, `${tpl.id}：心情`);
 		assert.match(yu.moods.生气, /句号结尾/);
 		// 通用肥鱼：生活细节一律不写死（没有宠物名、人名），问到宠物 / 爱好 / 对象都带「没写死」的说法
-		const fy = pm.loadPersona((() => { const d = mkdtempSync(join(tmpdir(), 'fish-persona-')); writeFileSync(join(d, 'persona.json'), JSON.stringify(personaTemplate('feiyu'))); return d; })());
+		const fy = pm.loadPersona((() => { const d = tmpHome('fish-persona-'); writeFileSync(join(d, 'persona.json'), JSON.stringify(personaTemplate('feiyu'))); return d; })());
 		for (const q of ['你养宠物吗', '你平时有啥爱好', '你有对象吗', '你做什么工作的', '你在哪个城市']) assert.match(pm.matchLore(fy.lore, q).map((e) => e.content).join(), /没写死/, q);
 		assert.match(fy.staticText, /说过的就算数/);
 		// 城市只说个大概，但每张卡的「大概」不一样（不然六个人都说南方）
@@ -78,7 +78,7 @@ export async function run(t) {
 
 	// 102 保存 / 撤销：之前没有 persona.json ⇒ 撤销 = 删掉；有 ⇒ 备份一份、撤销 = 换回去
 	{
-		const dir = mkdtempSync(join(tmpdir(), 'fish-persona-'));
+		const dir = tmpHome('fish-persona-');
 		assert.equal(pm.canUndoPersona(dir), false);
 		pm.savePersonaCard(dir, pm.normalizeCard({ name: '甲' }));
 		assert.equal(pm.loadPersona(dir).name, '甲');
@@ -88,7 +88,7 @@ export async function run(t) {
 		assert.equal(pm.loadPersona(dir).name, '甲');
 		assert.equal(pm.canUndoPersona(dir), false, '只撤一层');
 		assert.throws(() => pm.undoPersona(dir), /没有可以撤销/);
-		const dir2 = mkdtempSync(join(tmpdir(), 'fish-persona-'));
+		const dir2 = tmpHome('fish-persona-');
 		pm.savePersonaCard(dir2, pm.normalizeCard({ name: '丙' }));
 		pm.undoPersona(dir2);
 		assert.equal(existsSync(join(dir2, 'persona.json')), false);
@@ -318,7 +318,7 @@ export async function run(t) {
 			const per = d.extensions.fish_soul.perspective;
 			assert.ok(per.length >= 2 && per.length <= 3, `${tpl.id}：看事情的方式 2～3 条`);
 			assert.ok(d.character_book.entries.some((e) => e.keys.includes('工作') && /没写死/.test(e.content)), `${tpl.id}：问到工作有说法`);
-			const dir = mkdtempSync(join(tmpdir(), 'fish-persona-'));
+			const dir = tmpHome('fish-persona-');
 			writeFileSync(join(dir, 'persona.json'), JSON.stringify(pm.normalizeCard(personaTemplate(tpl.id))));
 			const ps = pm.loadPersona(dir);
 			assert.deepEqual(ps.perspective, per);

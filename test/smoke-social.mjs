@@ -1,7 +1,7 @@
 // 自己发动态 / 作品、回评论区（v0.10，social.js + douyin-social.js）。由 smoke.mjs 调用。
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
+import { tmpHome } from './_tmp.mjs';
 
 export async function run(t) {
 	const { assert, ok, call } = t;
@@ -11,7 +11,7 @@ export async function run(t) {
 	const { VirtualClock } = await import('../lib/clock.js');
 	const { openDatabase, getKv, setKv } = await import('../lib/db.js');
 
-	const home = mkdtempSync(join(tmpdir(), 'dsh-social-'));
+	const home = tmpHome('dsh-social-');
 	const prevHome = process.env.DSH_HOME; process.env.DSH_HOME = home;
 	const db = openDatabase(); process.env.DSH_HOME = prevHome;
 	db.prepare("INSERT INTO person (canonical_id, display_name, bili_uid, first_seen_at, last_seen_at) VALUES ('p1', '阿二', '888', 0, 0)").run();

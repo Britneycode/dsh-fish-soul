@@ -3,10 +3,10 @@
  *   FISH_EVAL_BASE_URL=… FISH_EVAL_API_KEY=… FISH_EVAL_MODEL=… node test/eval/inject-eval.mjs [--n 2]
  * A 聊天里直接注入（照网关的格式拼用户消息）；B 持久注入：学说法 / 聊完自动记 会不会把指令存下来、之后每轮带上。
  */
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpHome } from '../_tmp.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : d; };
@@ -27,7 +27,7 @@ if (!DRY && (!BASE || !KEY || !MODEL)) {
 }
 
 // ── 假宿主：只要人格段、瞬态块、互动登记 ──
-const home = mkdtempSync(join(tmpdir(), 'fish-eval-'));
+const home = tmpHome('fish-eval-');
 process.env.DSH_HOME = home;
 mkdirSync(join(home, 'fish-soul'), { recursive: true });
 // 人格卡：FISH_EVAL_PERSONA 指向自己的 persona.json / persona.png，或者写 template:<id> 评内置模板（feiyu / zhi / manman / xiaoman / atang / jichuan / susu），否则用 test/eval/persona.sample.json

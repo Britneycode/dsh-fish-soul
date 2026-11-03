@@ -1,13 +1,13 @@
 // 本地冒烟测试：模拟 DSH 宿主 ctx，验证会话隔离、零滞后召回、配置合并、导入、待办队列、向量索引。
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
 import { createHash, generateKeyPairSync, privateDecrypt, constants as cryptoConstants } from 'node:crypto';
+import { tmpHome } from './_tmp.mjs';
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-'));
+const home = tmpHome('dsh-');
 process.env.DSH_HOME = home;
 mkdirSync(join(home, 'fish-soul'), { recursive: true });
 
@@ -689,7 +689,7 @@ ok('没带模型的旧会话：换新会话并带上模型，不再每轮报 {{m
 
 // 20 主动配额：自发每天 ≤ 上限、两条间隔 ≥ 60 虚拟分钟；用户交代的提醒不占配额、按时发
 {
-	const home2 = mkdtempSync(join(tmpdir(), 'dsh-q-'));
+	const home2 = tmpHome('dsh-q-');
 	const prevHome = process.env.DSH_HOME; process.env.DSH_HOME = home2;
 	const { openDatabase } = await import('../lib/db.js');
 	const qdb = openDatabase(); process.env.DSH_HOME = prevHome;
@@ -903,7 +903,7 @@ ok('QQ 分享的 B站卡片：抠出 BV 号，附上视频简介 / 字幕 / 热�
 
 // 28 自走层：空闲时段才刷，每天 ≤ perDay，两轮间隔 ≥ 90 虚拟分钟
 {
-	const home3 = mkdtempSync(join(tmpdir(), 'dsh-b-'));
+	const home3 = tmpHome('dsh-b-');
 	const prevHome = process.env.DSH_HOME; process.env.DSH_HOME = home3;
 	const { openDatabase } = await import('../lib/db.js');
 	const bdb = openDatabase(); process.env.DSH_HOME = prevHome;

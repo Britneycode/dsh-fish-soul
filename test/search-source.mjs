@@ -1,10 +1,10 @@
 // 站内搜索来源：BiliClient.search() 的解析 + BiliBrowser.candidates() 里当来源（受开关和每日额度约束）。
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-search-'));
+import { join } from 'node:path';
+import { tmpHome } from './_tmp.mjs';
+
+const home = tmpHome('dsh-search-');
 process.env.DSH_HOME = home;
 const { openDatabase } = await import('../lib/db.js');
 const { BiliClient } = await import('../lib/channels/bilibili.js');

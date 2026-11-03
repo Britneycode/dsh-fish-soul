@@ -1,10 +1,10 @@
 // #26 / #27：配置文件防丢、聊完自动记不重复、联网工具不被筛掉、B站 @我的 / 收藏 / 弹幕。
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpHome } from './_tmp.mjs';
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-issues-'));
+const home = tmpHome('dsh-issues-');
 process.env.DSH_HOME = home;
 const { readConfigFile, saveConfigFile } = await import('../lib/index.js');
 const { openDatabase, getKv, setKv } = await import('../lib/db.js');

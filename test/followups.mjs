@@ -1,11 +1,11 @@
 // PR #41 拆出来的三小块：表情包随机抽取 / 站内搜索提词避免重复 / @ 读视频每轮上限。
 // 这三块之前只有临时探针验过，没有回归保护 —— 补进 npm test。
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpHome } from './_tmp.mjs';
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-followups-'));
+const home = tmpHome('dsh-followups-');
 process.env.DSH_HOME = home;
 const { openDatabase, getKv, setKv } = await import('../lib/db.js');
 const { ChatGateway } = await import('../lib/gateway.js');

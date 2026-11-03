@@ -3,15 +3,15 @@
 import https from 'node:https';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpHome } from './_tmp.mjs';
 
 const ok = (name) => console.log('✓', name);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const skip = (why) => { console.log(`- 跳过抖音浏览器测试：${why}`); process.exit(0); };
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-dyb-'));
+const home = tmpHome('dsh-dyb-');
 process.env.DSH_HOME = home;
 const { detectBrowsers } = await import('../lib/browsers.js');
 const found = (await detectBrowsers().catch(() => [])).filter((b) => b.path);

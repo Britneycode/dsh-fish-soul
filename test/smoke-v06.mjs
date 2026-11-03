@@ -1,9 +1,9 @@
 // v0.6 的冒烟测试（聊天记录导入、记忆纠正 / 人物画像、群里插话、戳一戳 / 撤回、暂停、动态、备份导出），
 // 由 smoke.mjs 在同一个插件实例上最后调用；共用的假宿主 / 假服务从参数传进来。
-import { existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { tmpHome } from './_tmp.mjs';
 
 export async function run(t) {
 	const { assert, ok, call, sleep, waitFor, context, db, host, ob, services, agents, workspaceRegistry, inbox, at } = t;
@@ -64,7 +64,7 @@ export async function run(t) {
 
 	// 42 麦麦数据库：只读、只取 QQ 平台、person_info 的印象直接变记忆
 	{
-		const dir = mkdtempSync(join(tmpdir(), 'dsh-mai-'));
+		const dir = tmpHome('dsh-mai-');
 		const path = join(dir, 'MaiBot.db');
 		const m = new DatabaseSync(path);
 		m.exec(`CREATE TABLE mai_messages (timestamp REAL, processed_plain_text TEXT, user_id TEXT, user_nickname TEXT, user_cardname TEXT,

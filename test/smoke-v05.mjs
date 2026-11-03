@@ -1,8 +1,8 @@
 // v0.5 的冒烟测试（B站 Cookie 续期 + 抖音私信 / 刷视频），由 smoke.mjs 在同一个插件实例上调用。
 // 拆成单独文件只是为了让 smoke.mjs 别太长；共用的假宿主 / 假服务从参数传进来。
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpHome } from './_tmp.mjs';
 
 export async function run(t) {
 	const { assert, ok, call, sleep, waitFor, turn, at, context, route, db, dy, dyBrowser, dyPush, host, ob, bl, bm, authFile, home, sid1, LifeEngine, VirtualClock } = t;
@@ -313,7 +313,7 @@ export async function run(t) {
 
 	// 38 自走层：B站 / 抖音轮着刷（今天刷得少的先），共用 90 虚拟分钟间隔；抖音没登录就让给 B站
 	{
-		const home4 = mkdtempSync(join(tmpdir(), 'dsh-d-'));
+		const home4 = tmpHome('dsh-d-');
 		const prevHome = process.env.DSH_HOME; process.env.DSH_HOME = home4;
 		const { openDatabase } = await import('../lib/db.js');
 		const ddb = openDatabase(); process.env.DSH_HOME = prevHome;
@@ -339,7 +339,7 @@ export async function run(t) {
 
 	// 38b 一样多时换着来（上次刷的排后面）；没刷成把次数还回去；刷到想分享的排成给主人的主动消息
 	{
-		const home5 = mkdtempSync(join(tmpdir(), 'dsh-s-'));
+		const home5 = tmpHome('dsh-s-');
 		const prevHome = process.env.DSH_HOME; process.env.DSH_HOME = home5;
 		const { openDatabase, setKv: setKv5 } = await import('../lib/db.js');
 		const sdb = openDatabase(); process.env.DSH_HOME = prevHome;

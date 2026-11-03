@@ -10,9 +10,9 @@
  *    整理用插件自己的 maxTokens（1200），空回复记下来再用 8000 重跑一次。
  * C：6 个模板各问「做什么工作 / 在哪 / 最近忙啥 / 朋友借钱」，看会不会编单位名、看法有没有自然带出来。
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
+import { tmpHome } from '../_tmp.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : d; };
@@ -21,7 +21,7 @@ const BASE = String(process.env.FISH_EVAL_BASE_URL ?? '').replace(/\/+$/, '');
 const KEY = String(process.env.FISH_EVAL_API_KEY ?? '');
 const MODEL = String(process.env.FISH_EVAL_MODEL ?? '');
 if (!BASE || !MODEL) { console.error('要 FISH_EVAL_BASE_URL / FISH_EVAL_MODEL'); process.exit(1); }
-process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'fish-growth-eval-'));
+process.env.DSH_HOME = tmpHome('fish-growth-eval-');
 
 const { openDatabase } = await import('../../lib/db.js');
 const sm = await import('../../lib/soul-memory.js');
@@ -99,7 +99,7 @@ if (ONLY.has('C')) {
 	const pool = [];
 	for (const t of PERSONA_TEMPLATES) {
 		const card = pm.normalizeCard(personaTemplate(t.id));
-		const dir = mkdtempSync(join(tmpdir(), 'fish-tpl-'));
+		const dir = tmpHome('fish-tpl-');
 		(await import('node:fs')).writeFileSync(join(dir, 'persona.json'), JSON.stringify(card));
 		const ps = pm.loadPersona(dir);
 		for (const q of QS) pool.push(async () => {

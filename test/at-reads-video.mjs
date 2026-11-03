@@ -1,10 +1,10 @@
 // 评论区 @ 她时，可选的「先读一下视频」：开了才去拿简介 + 字幕，关着不多发一次请求。
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
-const home = mkdtempSync(join(tmpdir(), 'dsh-atread-'));
+import { join } from 'node:path';
+import { tmpHome } from './_tmp.mjs';
+
+const home = tmpHome('dsh-atread-');
 process.env.DSH_HOME = home;
 const { openDatabase } = await import('../lib/db.js');
 const { BiliSocial } = await import('../lib/social.js');

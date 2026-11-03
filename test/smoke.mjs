@@ -201,20 +201,63 @@ const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'),
 writeFileSync(join(home, 'fish-soul', 'persona.png'), png);
 
 // ── 假宿主 ──
-const tools = {}; let section = null; let context = null; const handlers = {}; let route = null; let guard = null;
+const tools = {}; const handlers = {}; let route = null; let guard = null;
 const host = { created: [], resumed: [], followups: [], restricts: [], attached: [], titles: [], live: new Map() };
+
+/** agentId → { sections, contexts }：per-agent 的 systemPrompt 注册。
+ *  真实宿主里 `agent.ctx` 上的注册只对这个 agent 生效（rc.6 已用 probe-per-agent.mjs 验过），门面照这个语义做。 */
+const agentPrompts = new Map();
+/** 插件根 ctx 上的注册：per-agent 重构后**必须为空**，有东西就说明又漏成全局了。 */
+const rootPromptRegs = [];
+function promptEntry(agentId) {
+	const key = String(agentId);
+	let e = agentPrompts.get(key);
+	if (!e) { e = { sections: [], contexts: [] }; agentPrompts.set(key, e); }
+	return e;
+}
+/** setup(agentCtx)：systemPrompt 注册落到这个 agent 自己名下，dispose 时摘掉（和宿主一致）。 */
+function makeAgentCtx(agentId, restrict) {
+	const entry = promptEntry(agentId);
+	return {
+		effect: (fn) => { fn(); return () => {}; },
+		tools: { restrict },
+		systemPrompt: {
+			section: (s) => {
+				entry.sections.push(s);
+				return () => { entry.sections = entry.sections.filter((x) => x !== s); };
+			},
+			context: (c) => {
+				entry.contexts.push(c);
+				return () => { entry.contexts = entry.contexts.filter((x) => x !== c); };
+			}
+		}
+	};
+}
+/** 测试门面：按 arg.agent.id 取那个会话自己的 provider；没有 = 宿主自己的会话，空串。
+ *  section.text() 不带 id 时取**人格卡本身**（同一个 persona 文本对哪个 agent 都一样），
+ *  只给 smoke-persona 换人格热的断言用；per-agent 隔离的断言一律带 id。 */
+const section = {
+	text: (arg) => (arg === undefined
+		? agentPrompts.get([...agentPrompts.keys()][0])?.sections[0]?.text(arg) ?? ''
+		: agentPrompts.get(String(arg?.agent?.id))?.sections[0]?.text(arg) ?? '')
+};
+const context = { text: (arg) => agentPrompts.get(String(arg?.agent?.id))?.contexts[0]?.text(arg) ?? '' };
+
 function makeAgent(id) {
-	return { id, session: { id }, async followup(msg) { host.followups.push({ id, msg }); } };
+	// 真实宿主的 Agent 带自己的 scope ctx：别的插件建出来的会话，我们靠它补挂人格段
+	return { id, session: { id }, ctx: makeAgentCtx(id, () => {}), async followup(msg) { host.followups.push({ id, msg }); } };
 }
 const agents = {
 	async create(opts) {
-		await opts.setup?.({ tools: { restrict: (f) => { host.restricts.push([opts.sessionId, f]); return () => {}; } } }, {});
-		const agent = makeAgent(opts.sessionId); host.live.set(opts.sessionId, agent); host.created.push(opts);
+		const agentId = opts.sessionId;
+		await opts.setup?.(makeAgentCtx(agentId, (f) => { host.restricts.push([agentId, f]); }), {});
+		const agent = makeAgent(agentId); host.live.set(agentId, agent); host.created.push(opts);
 		return { agent, dispose: async () => {} };
 	},
 	async resume(opts) {
-		await opts.setup?.({ tools: { restrict: (f) => { host.restricts.push([opts.resumeSessionId, f]); return () => {}; } } }, {});
-		const agent = makeAgent(opts.resumeSessionId); host.live.set(opts.resumeSessionId, agent); host.resumed.push(opts.resumeSessionId);
+		const agentId = opts.resumeSessionId;
+		await opts.setup?.(makeAgentCtx(agentId, (f) => { host.restricts.push([agentId, f]); }), {});
+		const agent = makeAgent(agentId); host.live.set(agentId, agent); host.resumed.push(agentId);
 		return { agent, dispose: async () => {} };
 	},
 	get: (id) => host.live.get(id)
@@ -234,7 +277,11 @@ const ctx = {
 	get: (name) => services[name],
 	agents, workspaceRegistry,
 	tools: { register: (t) => { tools[t.name] = t; return () => {}; }, get: (n) => tools[n], guard: (g) => { guard = g; return () => {}; } },
-	systemPrompt: { section: (s) => { section = s; return () => {}; }, context: (c) => { context = c; return () => {}; } },
+	// 插件根 ctx：per-agent 重构后这里不该再注册任何 prompt 段（注册了就记下来，下面 #41 断言会查）
+	systemPrompt: {
+		section: (s) => { rootPromptRegs.push(s); return () => {}; },
+		context: (c) => { rootPromptRegs.push(c); return () => {}; }
+	},
 	on: (ev, h) => { handlers[ev] = h; return () => {}; },
 	webServer: { register: (r) => { route = r; return () => {}; } }
 };
@@ -303,34 +350,45 @@ mod.testHooks.douyin = {
 };
 await mod.apply(ctx, { masterQqUin: '10001', embedding: { enabled: true, baseURL: '', apiKey: '', model: '' } });
 
-// 别的插件转进普通会话的消息：payload = { agent, message }，source 里带 QQ 号
+// 别的插件转进普通会话的消息：payload = { agent, message }，source 里带 QQ 号。
+// 真实宿主的 payload.agent 带自己的 scope ctx（我们靠它补挂人格段），门面照实给一个。
+const inboxAgent = (id) => ({ id, ctx: makeAgentCtx(id, () => {}) });
 const inbox = (qq, text, group) => handlers['agent/inbox/inserted']({
-	agent: { id: group ? `g${group}` : `p${qq}` },
+	agent: inboxAgent(group ? `g${group}` : `p${qq}`),
 	message: { role: 'user', content: [{ type: 'text', text }], source: { kind: 'other-plugin', userId: qq, nickname: `n${qq}`, ...(group ? { groupId: group } : {}) } }
 });
 const at = (id) => ({ agent: { id } });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (name) => console.log('✓', name);
 
-// 1 人格
-assert.match(section.text(), /小鱼 很喜欢 对方/); assert.match(section.text(), /住在杭州/); assert.doesNotMatch(section.text(), /\{\{/);
-ok('PNG 角色卡：宏替换 + constant 世界书进静态段');
+// 1 人格 → 挪到第 9 节（per-agent：要先建出会话才有段）。这里只查插件有没有偷偷注册全局段。
+assert.deepEqual(rootPromptRegs, [], '#41 per-agent：插件根 ctx 不该注册任何 prompt 段（漏了就成了全局注入）');
+ok('#41 人格卡 / 瞬态块不再注册在插件全局 ctx 上');
 
-// 1b #40：别的 DSH 会话（跟鱼无关的技术对话）拿不到人格和瞬态块
+// 1b #41：人格卡和瞬态块只挂在「我们自己的 agent」的 scope 上，别的会话 hunk 看不见
 {
 	// 匿名 DSH 会话：inbox 里没带 QQ 号 → noteInteraction 登记成 channel 'dsh'、无说话人
 	handlers['agent/inbox/inserted']({
 		agent: { id: 'main-session' },
 		message: { role: 'user', content: [{ type: 'text', text: '帮我看看这段代码' }], source: { kind: 'user' } }
 	});
-	assert.equal(section.text(at('main-session')), '', '陌生 DSH 会话：静态人格段不给');
-	assert.equal(context.text(at('main-session')), '', '陌生 DSH 会话：瞬态块不给');
-	// 鱼的会话（QQ 群 777，认得出说话人）照常拿得到；完全没给会话 id 也按鱼的会话处理，别把鱼搞哑
+	assert.equal(section.text(at('main-session')), '', '宿主自己的会话：静态人格段不给');
+	assert.equal(context.text(at('main-session')), '', '宿主自己的会话：瞬态块不给');
+	// 从没建过会话的 id 也一样（没有 agentCtx 就没有 provider，不靠回调返回空串兜）
+	assert.equal(section.text(at('nobody')), '');
+	assert.equal(context.text(at('nobody')), '');
+	// 别的插件把 QQ 消息转进它自己建的会话：认得出身份 → 用 payload.agent.ctx 补挂人格（仍只对那个 agent）
 	inbox('20002', '我下周三考高数', 777);
-	assert.match(section.text(at('g777')), /小鱼/);
-	assert.doesNotMatch(context.text(at('g777')), /^$/);
-	assert.match(section.text(), /小鱼/);
-	ok('#40 systemPrompt 只注鱼的会话：陌生 DSH 会话拿不到人格 / 瞬态块，鱼的会话照常');
+	assert.match(section.text(at('g777')), /小鱼/, '转进来的 QQ 群会话应该补挂上人格卡');
+	assert.doesNotMatch(context.text(at('g777')), /^$/, '转进来的 QQ 群会话应该补挂上瞬态块');
+	// 同一条会话再来消息不重复注册（否则段会叠成两份）
+	const once = agentPrompts.get('g777').sections.length;
+	inbox('20002', '高数真的难', 777);
+	assert.equal(agentPrompts.get('g777').sections.length, once, '同一条会话不该重复注册人格段');
+	// 认不出身份的会话（用户自己在 DSH 里聊）不该被补挂
+	assert.equal(agentPrompts.get('main-session'), undefined, '匿名 DSH 会话不该有 provider');
+	assert.equal(section.text(at('main-session')), '');
+	ok('#41 宿主自己的会话拿不到人格 / 瞬态块：我们只注册在自己 agent 的 scope 里');
 }
 
 // 2 配置合并 + 工具 schema
@@ -447,6 +505,17 @@ const f1 = await waitFor(() => host.followups[0]);
 assert.ok(f1, '好友私聊应转进会话');
 const sid1 = f1.id;
 assert.equal(host.created[0].meta.cwd, wsDir);
+// #41 per-agent：人格卡 + 此刻状态挂在**这个 agent 自己**的 scope 上（setup 里注的），不是全局
+{
+	const own = agentPrompts.get(String(sid1));
+	assert.ok(own !== undefined, '人格段应该挂在这条会话自己的 agent 上');
+	assert.match(section.text(at(sid1)), /小鱼 很喜欢 对方/, '人格卡（PNG 角色卡 + 宏替换）');
+	assert.match(section.text(at(sid1)), /住在杭州/, 'constant 世界书进静态段');
+	assert.doesNotMatch(section.text(at(sid1)), /\{\{/, '宏都替换掉了');
+	assert.doesNotMatch(context.text(at(sid1)), /^$/, '瞬态块也挂上了');
+	assert.equal(section.text(at('main-session')), '', '同一个世界里的宿主会话仍然拿不到');
+	ok('#41 人格卡 / 瞬态块 per-agent 挂在自家会话上，宿主会话照旧干净');
+}
 assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'web_search', 'web_fetch', 'fish_search'] }); // #26 联网工具不筛
 assert.equal(f1.msg.source.kind, 'fish-soul/qq');
 assert.match(f1.msg.content[0].text, /我想喝冰美式/);

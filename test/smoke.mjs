@@ -208,12 +208,12 @@ function makeAgent(id) {
 }
 const agents = {
 	async create(opts) {
-		await opts.setup?.({ tools: { restrict: (f) => { host.restricts.push([opts.sessionId, f]); return () => {}; } } }, {});
+		await opts.setup?.({ effect: (fn) => fn(), systemPrompt: { section: (s) => { section = s; return () => {}; }, context: (c) => { context = c; return () => {}; } }, tools: { restrict: (f) => { host.restricts.push([opts.sessionId, f]); return () => {}; } } }, {});
 		const agent = makeAgent(opts.sessionId); host.live.set(opts.sessionId, agent); host.created.push(opts);
 		return { agent, dispose: async () => {} };
 	},
 	async resume(opts) {
-		await opts.setup?.({ tools: { restrict: (f) => { host.restricts.push([opts.resumeSessionId, f]); return () => {}; } } }, {});
+		await opts.setup?.({ effect: (fn) => fn(), systemPrompt: { section: (s) => { section = s; return () => {}; }, context: (c) => { context = c; return () => {}; } }, tools: { restrict: (f) => { host.restricts.push([opts.resumeSessionId, f]); return () => {}; } } }, {});
 		const agent = makeAgent(opts.resumeSessionId); host.live.set(opts.resumeSessionId, agent); host.resumed.push(opts.resumeSessionId);
 		return { agent, dispose: async () => {} };
 	},
@@ -312,9 +312,24 @@ const at = (id) => ({ agent: { id } });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (name) => console.log('✓', name);
 
-// 1 人格
-assert.match(section.text(), /小鱼 很喜欢 对方/); assert.match(section.text(), /住在杭州/); assert.doesNotMatch(section.text(), /\{\{/);
-ok('PNG 角色卡：宏替换 + constant 世界书进静态段');
+// 预热：人格卡 / 此刻状态现在挂在 per-agent 的 systemPrompt 上（不挂全局，免得污染别的会话），
+// 所以要先建出一个会话，下面 section / context 才有值。用一个单独的号，建完把记录清掉，不影响后面的断言。
+const waitFor0 = async (fn, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(50); } return fn(); };
+const warmConn = await waitFor0(() => ob.conns[0]);
+warmConn.push({ post_type: 'message', message_type: 'private', sub_type: 'friend', user_id: 10099, message_id: 900, sender: { nickname: '预热' }, message: [{ type: 'text', data: { text: '在吗' } }] });
+await waitFor0(() => section !== null && context !== null);
+assert.ok(section !== null, '人格段应该挂在 agent 的 systemPrompt 上');
+assert.ok(context !== null, '此刻状态应该挂在 agent 的 systemPrompt.context 上');
+host.created.length = 0; host.resumed.length = 0; host.followups.length = 0; host.restricts.length = 0; host.titles.length = 0;
+// 删除预热的会话记录，别让后面的"会话数 / 迁移数"断言多出一条
+{
+	const { DatabaseSync } = await import('node:sqlite');
+	const d = new DatabaseSync(join(home, 'fish-soul', 'soul.db'));
+	d.prepare("DELETE FROM chat_session WHERE channel_id LIKE '%10099%'").run();
+	d.close();
+}
+
+// 1 人格 → 挪到「会话网关」那节断言（人格卡挂在 per-agent 的 systemPrompt 上，要等会话建出来）
 
 // 2 配置合并 + 工具 schema
 assert.equal(tools.remember.parameters.additionalProperties, false);
@@ -430,6 +445,10 @@ const f1 = await waitFor(() => host.followups[0]);
 assert.ok(f1, '好友私聊应转进会话');
 const sid1 = f1.id;
 assert.equal(host.created[0].meta.cwd, wsDir);
+// 人格卡 + 此刻状态挂在**这个 agent 自己**的 systemPrompt 上（不挂全局，免得污染别的会话）
+assert.ok(section !== null, '人格段应该挂在新建 agent 的 systemPrompt 上');
+assert.match(section.text(), /小鱼 很喜欢 对方/); assert.match(section.text(), /住在杭州/); assert.doesNotMatch(section.text(), /\{\{/);
+ok('PNG 角色卡：宏替换 + constant 世界书进静态段（per-agent 注入）');
 assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'web_search', 'web_fetch', 'fish_search'] }); // #26 联网工具不筛
 assert.equal(f1.msg.source.kind, 'fish-soul/qq');
 assert.match(f1.msg.content[0].text, /我想喝冰美式/);

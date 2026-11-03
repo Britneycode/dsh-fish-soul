@@ -214,3 +214,11 @@
   - **@ 读视频每轮上限**（#41 拆分）：`bili.comments.atReadVideo` 开着时，一轮轮询最多读 3 个视频（每条 2 次接口调用），防止把每小时上限拉满时一口气打 2N 次；剩下的下一轮再读，回复照常。B站 评论 `type`（1 = 视频 / 11 = 动态）补了常量。
   - **分支保护 + 测试 CI**：新增 `.github/workflows/test.yml`——push / PR 到 main 都跑 `npm test`（ubuntu + Node 22）。repo ruleset `protect-main`：删 main / force push 被拦，PR 必须过 `npm-test` 才能合（admin 可绕过、不强制 review，单人项目不自锁）。
   - 新测试 `test/followups.mjs`（进 `npm test`）：上面三块的回归保护。
+
+- v0.13.4（长期记忆记得住 + 屎山清理）——2026-11-03 发。
+  - **遗忘半衰期 7 天 → 30 天**：`decayFactor` 里重要度 <3 的记忆原来 7 天就淡一半，一个月后基本搜索不到了——「住四楼」「阿岑会修收音机」这类日常事实全是 importance 2，聊过两周就答不上来。改 30 天后 45 天仍保留约 35%，与「认识半年的朋友记得住基本情况」的预期一致。重要度 ≥3 依旧不淡，被想起过的照常延长，改口/纠错逻辑不变。
+  - **提取时保留时间和条件限定词**：`ChatDigester` 的 prompt 补一条——「那周上午十点前别催我」不许压成「上午十点前别催我」。以前模型做摘要时爱丢「那周」「暂时」「等演出结束后」这类限定，时间约定题全挂。
+  - **大肥鱼记忆评测基线**（公开示例卷 108 题，非正式私有卷）：改前 87/108（80.6%），改后 96/108（88.9%）；45 天档 16/27 → 22/27；「忘记」类错误 16 → 7。评测脚本与报告在 `.benchmark/`（gitignore，不入包）。
+  - **首轮屎山清理**：删 `sharpSource()` 死函数、去掉 20 个无外部调用方的 export、收敛重复 helper（jaccard / maskKey / sniffImage / pad2 / personId 各留一份，bilibili 公钥 env fallback 移进函数体——`test/smoke.mjs:83` 依赖它换测试公钥）。net -55 行。
+  - **测试临时目录不再泄漏**：16 个测试文件 `mkdtempSync` 后从不清理，配合 Alma 子进程 TMPDIR 会把磁盘撑到 16G / 3300+ 目录。新增 `test/_tmp.mjs`（退出逐文件删 + 启动补删 >5min 的同前缀老目录），16 个测试与 `test/eval/` 下 3 个脚本换用。连跑两轮临时目录 140 个 → 2 个。
+  - **人格卡改 per-agent 注入**：`setup(agentCtx)` 里挂，不再注册全局 `systemPrompt` 段——#40 那类「技术问答会话被塞鱼的人格」的问题从根上收掉。

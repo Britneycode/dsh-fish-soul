@@ -178,8 +178,23 @@ export async function run(t) {
 		assert.equal((await gw.ensureSession(chat)).id, a.id, '新会话之后照常复用');
 		assert.equal(created.length, 1);
 		setKv(db, 'persona.freshAfter', 0);
+
+		// #44 开关本身要跟着人走：state 带回当前选择，POST /persona/fresh 存 kv，没存过默认关
+		p = await call('GET', '/persona/state');
+		assert.equal(p.json.freshDefault, false, '没存过默认关（顺手保存不清会话）');
+		p = await call('POST', '/persona/fresh', { enabled: true });
+		assert.equal(p.json.freshDefault, true, '开 → 存下来');
+		p = await call('GET', '/persona/state');
+		assert.equal(p.json.freshDefault, true, '关页面再进还是开（#44）');
+		p = await call('POST', '/persona/fresh', { enabled: false });
+		assert.equal(p.json.freshDefault, false, '关 → 存下来');
+		p = await call('GET', '/persona/state');
+		assert.equal(p.json.freshDefault, false, '再进还是关（#44）');
+		p = await call('POST', '/persona/fresh', {});
+		assert.equal(p.json.freshDefault, false, '空体当关，不报错');
+		setKv(db, 'persona.freshDefault', null);
 	}
-	ok('换人格时选了「正在聊的也换」：旧会话下一条起换新，记忆不动');
+	ok('换人格时选了「正在聊的也换」：旧会话下一条起换新，记忆不动；开关本身也记住了 (#44)');
 
 	// 106 学说话方式：只学别人的话（出处要指回别人的原话）、不带人名、又学到一次 +1；按次数加权挑几条；私聊也学（能关）
 	{

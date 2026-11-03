@@ -53,3 +53,6 @@ RUNBOOK.md
 DECISIONS.md
 RISKS.md
 history/
+
+# 本地基准测试产物，不进仓库
+.benchmark/

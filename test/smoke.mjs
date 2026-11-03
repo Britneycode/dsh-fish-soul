@@ -316,6 +316,23 @@ const ok = (name) => console.log('✓', name);
 assert.match(section.text(), /小鱼 很喜欢 对方/); assert.match(section.text(), /住在杭州/); assert.doesNotMatch(section.text(), /\{\{/);
 ok('PNG 角色卡：宏替换 + constant 世界书进静态段');
 
+// 1b #40：别的 DSH 会话（跟鱼无关的技术对话）拿不到人格和瞬态块
+{
+	// 匿名 DSH 会话：inbox 里没带 QQ 号 → noteInteraction 登记成 channel 'dsh'、无说话人
+	handlers['agent/inbox/inserted']({
+		agent: { id: 'main-session' },
+		message: { role: 'user', content: [{ type: 'text', text: '帮我看看这段代码' }], source: { kind: 'user' } }
+	});
+	assert.equal(section.text(at('main-session')), '', '陌生 DSH 会话：静态人格段不给');
+	assert.equal(context.text(at('main-session')), '', '陌生 DSH 会话：瞬态块不给');
+	// 鱼的会话（QQ 群 777，认得出说话人）照常拿得到；完全没给会话 id 也按鱼的会话处理，别把鱼搞哑
+	inbox('20002', '我下周三考高数', 777);
+	assert.match(section.text(at('g777')), /小鱼/);
+	assert.doesNotMatch(context.text(at('g777')), /^$/);
+	assert.match(section.text(), /小鱼/);
+	ok('#40 systemPrompt 只注鱼的会话：陌生 DSH 会话拿不到人格 / 瞬态块，鱼的会话照常');
+}
+
 // 2 配置合并 + 工具 schema
 assert.equal(tools.remember.parameters.additionalProperties, false);
 ok('工具参数为标准 JSON Schema');

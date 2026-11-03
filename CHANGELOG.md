@@ -214,3 +214,9 @@
   - **@ 读视频每轮上限**（#41 拆分）：`bili.comments.atReadVideo` 开着时，一轮轮询最多读 3 个视频（每条 2 次接口调用），防止把每小时上限拉满时一口气打 2N 次；剩下的下一轮再读，回复照常。B站 评论 `type`（1 = 视频 / 11 = 动态）补了常量。
   - **分支保护 + 测试 CI**：新增 `.github/workflows/test.yml`——push / PR 到 main 都跑 `npm test`（ubuntu + Node 22）。repo ruleset `protect-main`：删 main / force push 被拦，PR 必须过 `npm-test` 才能合（admin 可绕过、不强制 review，单人项目不自锁）。
   - 新测试 `test/followups.mjs`（进 `npm test`）：上面三块的回归保护。
+
+- 未发布（人格按会话挂载，接 #41 里留下的 per-agent 坑位）——2026-11-03。
+  - **人格与「此刻状态」不再靠全局注册 + 事后过滤，而是挂到每个会话自己的 agent 上**：网关建会话时把宿主给的 `agentCtx` 交给插件，在 `agentCtx.systemPrompt` 上注册人格段（`fish-soul-persona`, order 89000）和瞬态块（`fish-soul`, order 900）；agent 释放时宿主自动回收，插件不用管生命周期。
+  - 默认行为不变：没配 agent 级注入时（老路径、测试桩、宿主不给 `agentCtx.systemPrompt`），仍然走 v0.13.2 的全局过滤方案。全局兜底加了「让位」判断——已经按 agent 挂过的会话，全局段返回空串，避免同一段注两遍；鱼的 DSH 原生会话（没有 agent 段可挂）继续由全局兜底服务。
+  - 失败自动降级：挂 agent 段抛错只记一条 warn 并返回 false，调用方保留全局过滤，建会话不受影响。
+  - 新测试 `test/per-agent-sections.mjs`（进 `npm test`）：两段 order / text、宿主缺 `systemPrompt` 时安静退回、全局兜底的三种会话、`setupAgent` 把 `agentCtx` + `agent` 交出去、`agentPrompt` 抛错只 warn。

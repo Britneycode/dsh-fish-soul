@@ -328,6 +328,20 @@ export async function run(t) {
 		assert.equal(p.json.diary.topics.items[0].ownerId, owner);
 		inbox('20002', '晚上好');
 		assert.match(context.text(at('p20002')), /\[昨晚日记里想跟 .+ 聊的\] 问问他高数复习到哪了/);
+
+		// #42：想聊的 / 待办，做完了要能手动删掉（面板上加了删除入口，这里测路由）
+		p = await call('POST', '/diary/topic-remove', { who: name, topic: '问问他高数复习到哪了' });
+		assert.equal(p.json.ok, true, JSON.stringify(p.json));
+		assert.equal((await call('GET', '/behavior/state')).json.diary.topics.items.length, 0, '删完就没有了');
+		inbox('20002', '晚上好');
+		assert.doesNotMatch(context.text(at('p20002')), /昨晚日记里想跟/, '删掉的话题不再进上下文');
+		assert.equal((await call('POST', '/diary/topic-remove', { who: name, topic: '问问他高数复习到哪了' })).json.ok, false, '重复删要说不在了');
+		const pend = db.prepare("SELECT id, reason FROM pending WHERE status = 'pending' LIMIT 1").get();
+		if (pend) {
+			p = await call('POST', '/inspector/forget', { targetType: 'pending', id: pend.id });
+			assert.equal(p.json.ok, true, JSON.stringify(p.json));
+			assert.equal(db.prepare('SELECT status FROM pending WHERE id = ?').get(pend.id).status, 'dropped', '待办删掉 = dropped');
+		}
 		assert.equal((await call('GET', '/activity')).json.decisions.find((d) => d.kind === 'diary')?.title, '日记');
 		// 到点才写、一天一篇
 		const { diary } = mod.testHooks.soul;

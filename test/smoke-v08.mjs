@@ -35,10 +35,10 @@ export async function run(t) {
 		assert.equal(new Date(sm.nextBirthday('1/2', Date.UTC(2026, 1, 1)) + 8 * 3600_000).getUTCFullYear(), 2027, '今年过了就是明年');
 		assert.equal(sm.nextBirthday('不知道', now), null);
 		assert.equal(sm.decayFactor({ importance: 3, updated_at: now - 100 * DAY }, now), 1, '重要的不淡');
-		assert.ok(Math.abs(sm.decayFactor({ importance: 1, updated_at: now - 7 * DAY }, now) - 0.5) < 0.01, '半衰期 7 天');
-		assert.ok(Math.abs(sm.decayFactor({ importance: 1, updated_at: now - 14 * DAY, recall_count: 2 }, now) - 0.5) < 0.01, '想起两次半衰期翻倍');
-		assert.ok(sm.decayFactor({ importance: 1, updated_at: now - 7 * DAY, last_recalled_at: now - DAY }, now) > 0.9, '最近想起过就从那时算');
-		assert.ok(Math.abs(sm.decayFactor({ importance: 1, updated_at: now - 14 * DAY, emotion: -2 }, now) - 0.5) < 0.01, '情绪强烈的记得久');
+		assert.ok(Math.abs(sm.decayFactor({ importance: 1, updated_at: now - 30 * DAY }, now) - 0.5) < 0.01, '半衰期 30 天');
+		assert.ok(Math.abs(sm.decayFactor({ importance: 1, updated_at: now - 60 * DAY, recall_count: 2 }, now) - 0.5) < 0.01, '想起两次半衰期翻倍');
+		assert.ok(sm.decayFactor({ importance: 1, updated_at: now - 30 * DAY, last_recalled_at: now - DAY }, now) > 0.9, '最近想起过就从那时算');
+		assert.ok(Math.abs(sm.decayFactor({ importance: 1, updated_at: now - 60 * DAY, emotion: -2 }, now) - 0.5) < 0.01, '情绪强烈的记得久');
 		assert.deepEqual(sm.digestConfig(undefined), { enabled: true, idleMinutes: 10, maxLines: 40 });
 		assert.equal(sm.effectiveAffinity({ relation_stage: 'friend', affinity: 60, affinity_at: now - 34 * DAY }, now), 50, '两周不联系后每天淡 0.5');
 		assert.equal(sm.effectiveAffinity({ canonical_id: 'master', relation_stage: 'close', affinity: 90, affinity_at: now - 300 * DAY }, now), 90, '主人不淡');

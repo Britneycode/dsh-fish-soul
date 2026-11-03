@@ -1,0 +1,18 @@
+# 测试：每次 push 到 main、每个 PR 都跑 npm test。
+# 主套件（smoke + 各专项）在 ubuntu 上能跑；douyin-browser 那套要真 Chromium，ubuntu 上没有就自动跳过（测试文件自己处理）。
+# 名字 "test" 会被分支保护规则引用为 status check；改这个名字要同步改 ruleset。
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  npm-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test

@@ -70,6 +70,26 @@ test('_stickers 超过 40 张还是随机抽 40（新逻辑没动它）', () => 
 	assert.equal(seen.size, 50, '多抽几次能把 50 张都覆盖到');
 });
 
+test('sendAny 开、总数 >64 时表情包不被挤出清单', () => {
+	const ws = join(home, 'ws-sticker-keep');
+	put(join(ws, '_stickers'), 'sad.png');
+	for (let i = 0; i < 70; i++) put(join(ws, 'pics'), `p${String(i).padStart(2, '0')}.png`, 1_700_000_000 + i);
+	const list = listImages(ws, { images: { sendAny: true } });
+	assert.equal(list.length, 64, '总共还是 64 张');
+	assert.ok(list.includes('_stickers/sad.png'), '表情包必须在，不能被新图挤出去');
+});
+
+test('文件名带空格/括号的不进清单（markdown 发不出去）', () => {
+	const ws = join(home, 'ws-badnames');
+	put(ws, 'my photo.png');
+	put(ws, 'a(1).png');
+	put(ws, 'ok.png');
+	const list = listImages(ws, { images: { sendAny: true } });
+	assert.ok(!list.includes('my photo.png'), '带空格的不收');
+	assert.ok(!list.includes('a(1).png'), '带括号的不收');
+	assert.ok(list.includes('ok.png'), '正常名字照收');
+});
+
 test('工作区不存在或扫不动：回退成 _stickers 清单，不抛', () => {
 	assert.deepEqual(listImages(join(home, 'nope'), { images: { sendAny: true } }), [], '目录不存在：空清单');
 	const notDir = join(home, 'not-a-dir');

@@ -1,7 +1,7 @@
 // QQ 附件：txt/md 直读进提示词、看不了的格式落盘报路径、路径越界拒绝（node:test）
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { tmpHome } from './_tmp.mjs';
@@ -130,4 +130,35 @@ test('网关：saveBinary 开着时 pdf 落盘到插件数据目录', () => {
 	const dest = join(home, 'fish-soul', 'files', 'm2-a.pdf');
 	assert.ok(existsSync(dest), '落在 $DSH_HOME/fish-soul/files 下');
 	assert.ok(m.text.includes(dest), '提示词里给了绝对路径');
+});
+
+test('符号链接/junction 越界：白名单里的链接指向外部时拒绝读取', () => {
+	const outsideDir = join(home, 'outside-secret');
+	mkdirSync(outsideDir, { recursive: true });
+	write(outsideDir, 'secret.txt', 'TOP-SECRET');
+	// 在白名单目录里建一个指向外部的 junction
+	const linkDir = join(workspace, 'link');
+	try { symlinkSync(outsideDir, linkDir, 'junction'); } catch { return; } // Windows 可能需要权限，跳过
+	const p = join(linkDir, 'secret.txt');
+	if (!existsSync(p)) return; // 链接没建成功就跳过
+	const r = applyAttachments('【文件：secret.txt】', [file('secret.txt', p, 10)], opts());
+	assert.equal(r.text, '【文件：secret.txt】', '占位原样留着');
+	assert.doesNotMatch(r.text, /TOP-SECRET/, '没读到外部文件');
+});
+
+test('GBK/非法 UTF-8：读不进去，保留占位', () => {
+	// GBK 编码的"你好"（0xC4 0xE3 0xBA 0xC3）
+	const buf = Buffer.from([0xC4, 0xE3, 0xBA, 0xC3]);
+	const p = join(workspace, 'gbk.txt');
+	writeFileSync(p, buf);
+	const r = applyAttachments('【文件：gbk.txt】', [file('gbk.txt', p, 4)], opts());
+	assert.equal(r.text, '【文件：gbk.txt】', '非法 UTF-8 保留占位');
+	assert.doesNotMatch(r.text, /\uFFFD/, '没有乱码替换字符');
+});
+
+test('二进制太大：超过 32MB 保留占位', () => {
+	const p = write(workspace, 'big.bin', 'x');
+	const r = applyAttachments('【文件：big.bin】', [file('big.bin', p, 33 * 1024 * 1024)], opts({ saveBinary: true }));
+	assert.equal(r.text, '【文件：big.bin】', '超限保留占位');
+	assert.equal(r.saved.length, 0, '没落盘');
 });

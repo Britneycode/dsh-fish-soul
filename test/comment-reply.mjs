@@ -1,4 +1,4 @@
-﻿// 楼中楼：从视频评论里挑一条回一句（默认关、每天上限、[不回] 不发、失败不记额度、不回自己的评论）。
+// 楼中楼：从视频评论里挑一条回一句（默认关、每天上限、[不回] 不发、失败不记额度、不回自己的评论）。
 import assert from 'node:assert/strict';
 
 import { tmpHome } from './_tmp.mjs';
@@ -160,6 +160,18 @@ const watched = (b) => b.watch({ bvid: 'BVtest1', source: 'recommend' }, false, 
 	await watched(b);
 	assert.equal(asked, 6, '默认读 6 条热评');
 	client.hotComments = orig;
+}
+
+{
+	reset();
+	const b = makeBrowser({ reply: true });
+	await watched(b);
+	assert.equal(sent.length, 1, '回了一条');
+	const last = b.recentReply();
+	assert.ok(last, '留痕写进去了');
+	assert.equal(last.bvid, 'BVtest1', '留痕带 bvid');
+	assert.equal(last.name, '小满', '留痕带被回的人');
+	assert.ok(String(last.text).length > 0, '留痕带原话');
 }
 
 console.log('楼中楼测试全部通过');

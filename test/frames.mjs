@@ -15,7 +15,7 @@ const { buildContent, buildFfmpegArgs } = await import('../lib/llm.js').then(asy
 const db = openDatabase();
 const IMG = { data: Buffer.from('fake-jpeg').toString('base64'), mediaType: 'image/jpeg', name: 'BVtest1-frames.jpg' };
 
-function makeBrowser({ frames = true, framesPerDay = 1, duration = 600, framesImpl } = {}) {
+function makeBrowser({ frames = true, framesPerDay = 1, framesPerDayChat = 10, duration = 600, framesImpl, linkReply = '他穿着酒红卫衣，桌上摆一排宝可梦。' } = {}) {
 	const calls = { llm: [], frames: 0 };
 	const client = {
 		async view(bvid) {
@@ -35,10 +35,13 @@ function makeBrowser({ frames = true, framesPerDay = 1, duration = 600, framesIm
 		getConfig: () => ({
 			browse: {
 				enabled: true, perDay: 3, videosPerSession: 1, like: false, share: false, favorite: false,
-				danmaku: false, comment: false, search: false, frames, framesPerDay
+				danmaku: false, comment: false, search: false, frames, framesPerDay, framesPerDayChat, maxLinks: 3, subtitleChars: 100, descChars: 50, hotCommentChars: 20
 			}
 		}),
-		callLlm: async (prompt, opts) => { calls.llm.push({ prompt, opts }); return '他跑了三个月，膝盖先受不了了。'; },
+		callLlm: async (prompt, opts) => {
+			calls.llm.push({ prompt, opts });
+			return opts?.images ? linkReply : '他跑了三个月，膝盖先受不了了。';
+		},
 		persona: () => ({ name: '贪吃鱼', brief: '' }),
 		frames: async (v) => {
 			calls.frames += 1;
@@ -155,6 +158,40 @@ const reset = () => { db.prepare('DELETE FROM kv').run(); db.prepare('DELETE FRO
 	// 8d. 没有图：原样返回，不碰附件库
 	router.ctx = { get: () => ({ admitPromptContent: async () => { throw new Error('不该被调用'); } }) };
 	assert.deepEqual(await router.promptParts('只有字'), [{ type: 'text', text: '只有字' }]);
+}
+
+// ── 9. 你发链接时抽帧：额度独立，画面读成一句话进聊天上下文 ──
+{
+	reset();
+	const { browser, calls } = makeBrowser({ framesPerDay: 1, framesPerDayChat: 2 });
+	// 先让她自己刷掉唯一一次"自己刷"的额度
+	await browser.watch({ bvid: 'BVtest1', source: 'recommend' }, false, false, false);
+	assert.equal(browser.framedToday(), 1);
+	assert.equal(calls.frames, 1);
+
+	// 分享链接：照样能抽（不吃自己刷的额度）
+	const notes = await browser.describe({ bvids: ['BVtest9'] });
+	assert.equal(calls.frames, 2, '分享那条也要抽');
+	assert.equal(browser.framedToday(), 1, '自己刷的额度不动');
+	assert.equal(browser.framedTodayChat(), 1, '分享单独记账');
+	assert.ok(notes[0].includes('画面：'), '画面要写进她那句话里');
+
+	// 分享额度用完后不再抽，但仍然给文字
+	const again = await browser.describe({ bvids: ['BVtest10'] });
+	assert.equal(calls.frames, 3, '第二次分享还能抽一次');
+	const third = await browser.describe({ bvids: ['BVtest11'] });
+	assert.equal(calls.frames, 3, '额度满了就不抽');
+	assert.ok(third[0].includes('【视频 BVtest11'), '仍然有文字');
+	assert.ok(!third[0].includes('画面：'), '没有画面那句');
+}
+
+// ── 10. 读画面失败：退回只有文字，不影响回复 ──
+{
+	reset();
+	const { browser, calls } = makeBrowser({ linkReply: '没看清' });
+	const notes = await browser.describe({ bvids: ['BVtest12'] });
+	assert.ok(notes[0].includes('【视频 BVtest12'));
+	assert.ok(!notes[0].includes('画面：'), '看不清就不写画面');
 }
 
 console.log('抽帧测试全部通过');

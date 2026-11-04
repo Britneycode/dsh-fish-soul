@@ -345,7 +345,7 @@ export async function run(t) {
 		p = await call('GET', '/channels/state');
 		const b = p.json.bili;
 		assert.deepEqual(b.post, { enabled: true, perDay: 5 }, '每天最多 5 条');
-		assert.deepEqual(b.comments, { enabled: true, perHour: 4, atMe: false, atReadVideo: false });
+		assert.deepEqual(b.comments, { enabled: true, perHour: 4, atMe: false, atReadVideo: false, replyChars: 40 });
 		assert.ok(b.social && b.social.post && Array.isArray(b.social.comments.recent));
 		p = await call('POST', '/channels/bili-config', { post: { enabled: false }, comments: { enabled: false } });
 		assert.equal(p.json.ok, true);

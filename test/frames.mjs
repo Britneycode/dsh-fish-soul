@@ -129,4 +129,32 @@ const reset = () => { db.prepare('DELETE FROM kv').run(); db.prepare('DELETE FRO
 	assert.ok(s.includes('referer https://www.bilibili.com/'), 'B站 CDN 要 referer');
 }
 
+// ── 8. 图片要先过宿主附件库（裸 base64 会被通道静默丢掉） ──
+{
+	const { LlmRouter } = await import('../lib/llm.js');
+	const router = Object.create(LlmRouter.prototype);
+	const warns = [];
+	router.log = (level, msg) => warns.push(msg);
+
+	// 8a. 附件库正常：换成 attachment 引用
+	router.ctx = { get: (name) => (name === 'attachments' ? { admitPromptContent: async (parts) => parts.map((p) => (p.type === 'image' ? { type: 'image', attachment: { id: 'att-1' } } : p)) } : undefined) };
+	const ok = await router.promptParts('看图', [IMG], 'browse');
+	assert.deepEqual(ok[0], { type: 'text', text: '看图' });
+	assert.deepEqual(ok[1], { type: 'image', attachment: { id: 'att-1' } });
+
+	// 8b. 附件库拒收：退回纯文字，不抛
+	router.ctx = { get: () => ({ admitPromptContent: async () => { throw new Error('IMAGE_TOO_LARGE'); } }) };
+	const fallback = await router.promptParts('看图', [IMG], 'browse');
+	assert.deepEqual(fallback, [{ type: 'text', text: '看图' }]);
+	assert.ok(warns.some((w) => w.includes('IMAGE_TOO_LARGE')), '要留一条 warn');
+
+	// 8c. 没有附件库：同样退回纯文字
+	router.ctx = { get: () => undefined };
+	assert.deepEqual(await router.promptParts('看图', [IMG]), [{ type: 'text', text: '看图' }]);
+
+	// 8d. 没有图：原样返回，不碰附件库
+	router.ctx = { get: () => ({ admitPromptContent: async () => { throw new Error('不该被调用'); } }) };
+	assert.deepEqual(await router.promptParts('只有字'), [{ type: 'text', text: '只有字' }]);
+}
+
 console.log('抽帧测试全部通过');

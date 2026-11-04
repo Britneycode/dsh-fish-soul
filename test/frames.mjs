@@ -1,5 +1,6 @@
-// 抽帧看画面（批 2）：开关、时长门槛、每日额度、失败不误伤、图片块形状。
+﻿// 抽帧看画面（批 2）：开关、时长门槛、每日额度、失败不误伤、图片块形状。
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import { tmpHome } from './_tmp.mjs';
 
@@ -192,6 +193,14 @@ const reset = () => { db.prepare('DELETE FROM kv').run(); db.prepare('DELETE FRO
 	const notes = await browser.describe({ bvids: ['BVtest12'] });
 	assert.ok(notes[0].includes('【视频 BVtest12'));
 	assert.ok(!notes[0].includes('画面：'), '看不清就不写画面');
+}
+
+// -- 11. 放大额度 / 换模型的两次重试都不能丢图（否则模型只看到"附了张截图"却没有图） --
+{
+	const src = fs.readFileSync(new URL("../lib/llm.js", import.meta.url), "utf8");
+	assert.ok(src.includes("thinkFallback, images, _target: target"), "放大额度重试要带 images");
+	assert.ok(/async fallback\(prompt, \{[^}]*images = \[\]/.test(src), "fallback 要收 images");
+	assert.ok(src.includes("images, _target: { ...host"), "换模型重试要带 images");
 }
 
 console.log('抽帧测试全部通过');

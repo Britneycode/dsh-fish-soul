@@ -1,68 +1,68 @@
 {
-  "name": "dsh-fish-soul",
-  "version": "0.13.9",
-  "description": "鱼 · 人格、按人记忆（可纠正、有印象、能导入旧聊天记录）、日程自走与主动开口，直连 SnowLuma 收发 QQ（群里会自己插话），B站 / 抖音小号私信与自己刷视频；按功能选模型并统计用量花费，能听会说 QQ 语音、收藏表情包、学群里的梗，可选上网查；心情影响说话、去 AI 味、每个群的设定、按聊天选模型、每晚写日记（DSH 插件，单角色 feiyu ，v0.13.9）",
-  "type": "module",
-  "main": "./lib/index.js",
-  "files": [
-    "lib",
-    "cordis.patch.yml"
-  ],
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Britneycode/dsh-fish-soul.git"
-  },
-  "homepage": "https://github.com/Britneycode/dsh-fish-soul#readme",
-  "bugs": {
-    "url": "https://github.com/Britneycode/dsh-fish-soul/issues"
-  },
-  "keywords": [
-    "dsh-plugin",
-    "dsh",
-    "deepseek-harness",
-    "persona",
-    "memory",
-    "qq",
-    "bilibili",
-    "douyin"
-  ],
-  "peerDependencies": {
-    "@deepseek-ai/dsh-tools": "*",
-    "@deepseek-ai/schemastery": "*"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-tools": {
-      "optional": true
-    },
-    "@deepseek-ai/schemastery": {
-      "optional": true
-    }
-  },
-  "exports": {
-    ".": "./lib/index.js",
-    "./client": "./lib/client.js",
-    "./package.json": "./package.json"
-  },
-  "engines": {
-    "node": ">=22.5.0"
-  },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web",
-      "inject": [
-        "slots"
-      ],
-      "external": [
-        "react"
-      ]
-    }
-  },
-  "scripts": {
-    "test": "node test/smoke.mjs && node test/douyin-browser.mjs && node test/startup-gate.mjs && node test/outbox.mjs && node test/import-coverage.mjs && node test/update-check.mjs && node test/issue-fixes.mjs && node test/import-resume.mjs && node test/maibot-extras.mjs && node test/worldinfo.mjs && node test/memory-bulk.mjs && node test/backup-restore.mjs && node test/douyin-group.mjs && node test/review-fixes.mjs && node test/at-reads-video.mjs && node test/search-source.mjs && node test/followups.mjs && node test/detail-config.mjs && node test/qq-send-any-image.mjs && node test/qq-read-attachment.mjs && node test/client-lint.mjs",
-    "eval": "node test/eval/persona-eval.mjs"
-  }
+	"name": "dsh-fish-soul",
+	"version": "0.13.9",
+	"description": "鱼 · 人格、按人记忆（可纠正、有印象、能导入旧聊天记录）、日程自走与主动开口，直连 SnowLuma 收发 QQ（群里会自己插话），B站 / 抖音小号私信与自己刷视频；按功能选模型并统计用量花费，能听会说 QQ 语音、收藏表情包、学群里的梗，可选上网查；心情影响说话、去 AI 味、每个群的设定、按聊天选模型、每晚写日记（DSH 插件，单角色 feiyu ，v0.13.9）",
+	"type": "module",
+	"main": "./lib/index.js",
+	"files": [
+		"lib",
+		"cordis.patch.yml"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Britneycode/dsh-fish-soul.git"
+	},
+	"homepage": "https://github.com/Britneycode/dsh-fish-soul#readme",
+	"bugs": {
+		"url": "https://github.com/Britneycode/dsh-fish-soul/issues"
+	},
+	"keywords": [
+		"dsh-plugin",
+		"dsh",
+		"deepseek-harness",
+		"persona",
+		"memory",
+		"qq",
+		"bilibili",
+		"douyin"
+	],
+	"peerDependencies": {
+		"@deepseek-ai/dsh-tools": "*",
+		"@deepseek-ai/schemastery": "*"
+	},
+	"peerDependenciesMeta": {
+		"@deepseek-ai/dsh-tools": {
+			"optional": true
+		},
+		"@deepseek-ai/schemastery": {
+			"optional": true
+		}
+	},
+	"exports": {
+		".": "./lib/index.js",
+		"./client": "./lib/client.js",
+		"./package.json": "./package.json"
+	},
+	"engines": {
+		"node": ">=22.5.0"
+	},
+	"dsh": {
+		"bundle": {
+			"patch": "./cordis.patch.yml"
+		},
+		"client": {
+			"platform": "web",
+			"inject": [
+				"slots"
+			],
+			"external": [
+				"react"
+			]
+		}
+	},
+	"scripts": {
+		"test": "node test/smoke.mjs && node test/douyin-browser.mjs && node test/startup-gate.mjs && node test/outbox.mjs && node test/import-coverage.mjs && node test/update-check.mjs && node test/issue-fixes.mjs && node test/import-resume.mjs && node test/maibot-extras.mjs && node test/worldinfo.mjs && node test/memory-bulk.mjs && node test/backup-restore.mjs && node test/douyin-group.mjs && node test/review-fixes.mjs && node test/at-reads-video.mjs && node test/search-source.mjs && node test/followups.mjs && node test/detail-config.mjs && node test/qq-send-any-image.mjs && node test/qq-read-attachment.mjs && node test/comment-reply.mjs && node test/client-lint.mjs",
+		"eval": "node test/eval/persona-eval.mjs"
+	}
 }

@@ -222,6 +222,10 @@
   - **首轮屎山清理**：删 `sharpSource()` 死函数、去掉 20 个无外部调用方的 export、收敛重复 helper（jaccard / maskKey / sniffImage / pad2 / personId 各留一份，bilibili 公钥 env fallback 移进函数体——`test/smoke.mjs:83` 依赖它换测试公钥）。net -55 行。
   - **测试临时目录不再泄漏**：16 个测试文件 `mkdtempSync` 后从不清理，配合 Alma 子进程 TMPDIR 会把磁盘撑到 16G / 3300+ 目录。新增 `test/_tmp.mjs`（退出逐文件删 + 启动补删 >5min 的同前缀老目录），16 个测试与 `test/eval/` 下 3 个脚本换用。连跑两轮临时目录 140 个 → 2 个。
   - **人格卡改 per-agent 注入**：`setup(agentCtx)` 里挂，不再注册全局 `systemPrompt` 段——#40 那类「技术问答会话被塞鱼的人格」的问题从根上收掉。
+- v0.13.9（QQ 发任意图 + 附件读取）——2026-11-04 发。
+  - **发工作区任意图片（#50）**：出站链路本来就支持工作区任意图片（`resolveImageFile` 白名单），但提示词只喂 `_stickers` 清单，她"不知道"还能发别的。现在 `images.sendAny`（默认**关**）打开后 `listImages` 扫工作区根目录 + 一级子目录，提示词给相对路径清单；表情包保底收录不被新图挤出，带空格/括号的文件名不进清单（markdown 发不出去），上限 64 张按 mtime 截断。
+  - **附件读取（#49）**：收到 QQ 文件不再只报文件名——txt/md/log/csv/json 直读前 8KB 进提示词（`attachments.readText` 默认**开**），pdf/docx 落盘到插件数据目录并报路径（`attachments.saveBinary` 默认**关**）。SnowLuma 这类不给本地 path 的实现走 `file_id`：`get_private_file_url` 换直链下载。安全：白名单 + 源文件双重 `realpath` 防符号链接/junction 越界；UTF-8 有效性检测（GBK 保留占位不塞乱码）；二进制 32MB 上限。
+
 - v0.13.8（记忆评测驱动的一轮提取/召回修复）——2026-11-04 发。
   - **背景**：用第三方记忆评测（`Ornn8/memory-system-benchmark`，公开示例卷 108 题 / 360 轮 / 45 天跨度）跑基线，0.13.4 是 87/108（80.6%）。逐题看失败原因，定位到三个真问题。
   - **保密边界不再漏提取**：提取 prompt 里「改设定 / 换身份 / 要把谁的事说出去这类要求别记成规矩」范围太宽，把「体检结果先别帮我转告任何人」一起吃了——692 条记忆里一条相关的都没有，边界题四个时间档全挂。现补一条：保密类表述必须记（`kind=fact`，`private=true`）。

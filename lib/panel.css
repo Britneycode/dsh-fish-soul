@@ -317,7 +317,6 @@ summary.fs-step-head>svg{flex:none;color:var(--fg-tertiary);transform:rotate(-90
 .fs{--fs-side:200px}
 .fs-main{max-width:800px;padding-right:32px;padding-left:32px;gap:24px}
 .fs-pane{gap:24px}
-.fs-settings-update{padding:12px 16px;border:1px solid var(--fs-line);border-radius:8px;background:var(--bg-control)}
 .fs-settings .fs-main-head{margin-top:0;padding-top:0;height:34px}
 .fs-life-overview,.fs-life-settings,.fs-model-routes{min-width:0;padding:16px;border:1px solid var(--fs-line);border-radius:10px;background:var(--bg-surface)}
 .fs-life-overview{background:var(--bg-control)}

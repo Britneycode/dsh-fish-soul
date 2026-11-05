@@ -36,14 +36,13 @@ assert.match(css, /\.fs-row-meta\{[^}]*font-variant-numeric:tabular-nums/);
 assert.doesNotMatch(main, /desc && !tip \? h\("span", \{ className: "fs-row-desc"/);
 console.log('  ✓ 插件主题：深浅模式、细边框、数字排版与进度条');
 
-// 主面板以导航项打开版本页；设置页仍在顶部展示版本设置。
-assert.match(main, /standalone \? \[\.\.\.baseTabs, \["version", "版本更新"\]\] : baseTabs/);
-assert.match(main, /tab === "version" \? h\(UpdateBar, \{ notify, onUpdateState: setUpdateAvailable \}\)/);
-assert.match(main, /h\(GroupedTabs, \{ items: tabs, value: tab, onChange: goTab, hasUpdate: standalone && updateAvailable \}\)/);
-assert.match(main, /standalone \? null : h\("div", \{ className: "fs-settings-update" \}/);
-assert(main.indexOf('className: "fs-settings-update"') < main.indexOf('className: "fs-main-head"'));
+// 主面板与设置页都以系统分组下的独立页签打开版本更新，不再有顶部更新栏。
+assert.match(main, /\["interface", "界面"\], \["version", "版本更新"\]\]/);
+assert.match(main, /tab === "version" \? h\(Boundary, \{ name: "版本" \}, h\(UpdateBar, \{ notify, onUpdateState: setUpdateAvailable \}\)\)/);
+assert.match(main, /h\(GroupedTabs, \{ items: tabs, value: tab, onChange: goTab, hasUpdate: updateAvailable \}\)/);
+assert.doesNotMatch(main, /fs-settings-update/);
 assert.doesNotMatch(main, /fs-ver-panel/);
-console.log('  ✓ 版本入口：主面板导航页、设置页顶部显示');
+console.log('  ✓ 版本入口：主面板与设置页同为系统分组独立页签');
 
 // 引导进度只计算实际已完成项；短标题不会改变接口或未知步骤。
 assert.match(main, /steps\.filter\(\(x\) => x\.done\)\.length/);
@@ -53,11 +52,11 @@ assert.match(main, /api\("POST", "\/onboarding\/dismiss"/);
 assert.match(css, /\.fs-onboarding \.fs-item-main\{white-space:normal/);
 console.log('  ✓ 首次引导：真实进度、兼容未知步骤与窄屏换行');
 
-// 主页面导航单行吸顶，版本提示来自实际状态；设置页仍使用原有布局。
+// 主页面导航单行吸顶，版本提示来自实际状态；设置页与主页共用同一导航。
 assert.match(css, /\.fs-standalone \.fs-side\{[^}]*position:sticky;top:0/);
 assert.match(css, /\.fs-standalone \.fs-nav\{[^}]*flex-direction:row;flex-wrap:nowrap;[^}]*overflow-x:auto/);
 assert.match(main, /nav\.scrollLeft/);
-assert.match(main, /standalone && updateAvailable/);
+assert.match(main, /hasUpdate: updateAvailable/);
 assert.match(main, /onUpdateState: setUpdateAvailable/);
 assert.match(css, /\.fs\.fs-standalone \.fs-side,\.fs\.fs-settings \.fs-side\{[^}]*position:sticky;top:0/);
 assert.match(main, /label: "记忆", ids: \["retrieval", "inspector"\]/);

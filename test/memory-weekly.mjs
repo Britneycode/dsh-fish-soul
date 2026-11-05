@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const home=mkdtempSync(join(tmpdir(),'fish-weekly-'));process.env.DSH_HOME=home;
+const {openDatabase}=await import('../lib/db.js');
+const {insertMemory}=await import('../lib/soul-memory.js');
+const {WeeklyCompressor,weekStart}=await import('../lib/weekly.js');
+const {bulkMemory}=await import('../lib/memory-bulk.js');
+const {importMemories}=await import('../lib/importer.js');
+const {handleSoulRoute}=await import('../lib/routes-soul.js');
+const db=openDatabase();
+try {
+ const now=Date.parse('2026-11-16T02:00:00Z'), clock={now:()=>now}, start=weekStart(now);
+ assert.equal(new Date(start).toISOString(),'2026-11-15T16:00:00.000Z');
+ const add=(content,extra={})=>insertMemory(db,null,{ownerId:'user:a',channel:'private',channelId:'private:a',kind:'episode',content,...extra},start-1000);
+ const a=add('私密源一',{private:true}), b=add('私密源二',{private:true}), c=add('公开源',{private:false});
+ add('本周记录',{private:true}); db.prepare('UPDATE memory SET created_at=? WHERE id=(SELECT max(id) FROM memory)').run(start+1);
+ let calls=0, prompts=[], config={};
+ const worker={enqueueRealtime(){}};
+ const svc=new WeeklyCompressor({db,clock,worker,getConfig:()=>config,callLlm:async p=>{calls++;prompts.push(p);return '本周发生了一些事情';}});
+ assert.equal(svc.state().enabled,false);assert.equal(svc.state().pending,3);
+ const r=await svc.runOne();assert.equal(r.ok,true);assert.equal(r.count,2);
+ const summary=db.prepare('SELECT * FROM memory WHERE id=?').get(r.id);
+ assert.equal(summary.kind,'weekly');assert.equal(summary.visibility,'private');assert(!prompts[0].includes('公开源'));
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM weekly_source WHERE summary_id=?').get(r.id).n,2);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM memory WHERE id IN (?,?) AND status='active'").get(a,b).n,2);
+ const second=await svc.runOne();assert.equal(second.count,1);assert.equal(db.prepare('SELECT visibility FROM memory WHERE id=?').get(second.id).visibility,'normal');assert.equal((await svc.runOne()).empty,true);
+ // Related source changed after summary: mark derived content stale and remove vector.
+ db.prepare("INSERT INTO vec(memory_id,model_id,dim,generation_id,blob) VALUES(?, 'test',1,1,x'00')").run(r.id);
+ db.prepare("UPDATE memory SET visibility='normal',updated_at=? WHERE id=?").run(now,a);
+ assert.equal(db.prepare('SELECT status FROM memory WHERE id=?').get(r.id).status,'outdated');
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM vec WHERE memory_id=?').get(r.id).n,0);
+ assert.throws(()=>db.prepare("UPDATE memory SET status='active',valid_to=NULL WHERE id=?").run(r.id));
+ assert.equal(bulkMemory({db,clock,worker,ids:[r.id],action:'restore'}).changed,0);
+ assert.equal((await svc.runOne()).empty,true,'用户删除或源变更后不能自动重建旧摘要');
+ assert.equal(bulkMemory({db,clock,worker,ids:[second.id],action:'visibility',value:'private'}).changed,0);
+ assert.throws(()=>db.prepare("UPDATE memory SET visibility='private' WHERE id=?").run(second.id));
+ const imported=importMemories({db,clock,worker,items:[{ownerId:'user:imported',content:'导入私密',kind:'fact',visibility:'private',about:'user:b'},{ownerId:'user:imported',content:'无来源周记',kind:'weekly'}]});
+ assert.equal(imported.inserted,1);assert.equal(imported.skipped,1);const im=db.prepare("SELECT visibility,about FROM memory WHERE content='导入私密'").get();assert.equal(im.visibility,'private');assert.equal(im.about,'user:b');
+ const d=add('生成时发生变化');let finish;
+ const race=new WeeklyCompressor({db,clock,worker,getConfig:()=>config,callLlm:()=>new Promise(resolve=>{finish=resolve})});
+ const running=race.runOne(); assert.equal((await race.runOne()).ok,false);
+ db.prepare("UPDATE memory SET content='更改后' WHERE id=?").run(d);finish('旧摘要');
+ assert.equal((await running).ok,false);assert.equal(db.prepare('SELECT COUNT(*) n FROM weekly_source WHERE source_id=?').get(d).n,0);
+ let blockedCalls=0;const blocked=new WeeklyCompressor({db,clock,worker,getConfig:()=>config,beforeRun:async()=>({ok:false}),callLlm:async()=>{blockedCalls++;return '不应调用'}});assert.equal((await blocked.runOne()).ok,false);assert.equal(blockedCalls,0);
+ const failed=new WeeklyCompressor({db,clock,worker,getConfig:()=>config,callLlm:async()=>null});assert.equal((await failed.runOne()).ok,false);assert.equal(db.prepare('SELECT status FROM memory WHERE id=?').get(d).status,'active');
+ let sent; const deps={db,clock,worker,weekly:svc,getConfig:()=>({memory:config}),saveConfig:p=>{config={...config,...p.memory}}};
+ const route=async(method,path,body={},same=true)=>{sent=null;await handleSoulRoute({method,path,url:new URL('http://localhost'+path),req:{},res:{},send:(status,obj)=>sent={status,...obj},readBody:async()=>JSON.stringify(body),sameOrigin:()=>same,deps});return sent};
+ assert.equal((await route('POST','/memory/weekly/config',{enabled:true},false)).status,403);
+ assert.equal((await route('POST','/memory/weekly/config',{enabled:'true'})).ok,false);
+ assert.equal((await route('POST','/memory/weekly/config',{enabled:true})).enabled,true);
+ assert.equal((await route('GET',`/memory/weekly/sources?summaryId=${r.id}`.split('?')[0])).ok,false); // URL parameter handled below
+ const sources=await handleSoulRoute({method:'GET',path:'/memory/weekly/sources',url:new URL(`http://localhost/memory/weekly/sources?summaryId=${r.id}`),req:{},res:{},send:(status,obj)=>sent={status,...obj},readBody:async()=>'',sameOrigin:()=>true,deps});
+ assert(sources);assert.equal(sent.sources.length,2);
+ assert.equal((await route('POST','/inspector/memory-edit',{id:second.id,content:'改'})).ok,false);
+ console.log('✓ 周记分周分隐私范围、保留原文和来源、失效保护、并发及失败安全、路由权限');
+} finally {db.close();rmSync(home,{recursive:true,force:true});}

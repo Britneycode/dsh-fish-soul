@@ -107,13 +107,13 @@ textarea.fs-input{height:auto;min-height:56px;padding:5px 10px;resize:vertical;l
 select.fs-input{appearance:none;-webkit-appearance:none;padding-right:32px;cursor:pointer;text-overflow:ellipsis}
 .fs-affix.select>svg{position:absolute;top:8px;right:12px;color:var(--fg-tertiary);pointer-events:none}
 
-/* Switch */
-.fs-switch{position:relative;flex:0 0 auto;width:36px;height:20px;padding:2px;border:0;border-radius:999px;background:var(--fs-line-strong);cursor:pointer}
-.fs-switch[aria-checked=true]{background:var(--accent)}
+/* Switch：对齐宿主原生小开关（28x16 深色轨道 + 浅色圆头） */
+.fs-switch{position:relative;flex:0 0 auto;width:28px;height:16px;padding:1px;border:1px solid var(--fs-line-strong);border-radius:999px;background:var(--bg-control);cursor:pointer}
+.fs-switch[aria-checked=true]{background:var(--fg-primary);border-color:var(--fg-primary)}
 .fs-switch:disabled{cursor:default;opacity:.5}
-.fs-switch-thumb{display:block;width:16px;height:16px;border-radius:50%;background:var(--fg-on-accent);transition:transform 120ms ease}
-.fs-switch[aria-checked=false] .fs-switch-thumb{background:var(--fg-secondary)}
-.fs-switch[aria-checked=true] .fs-switch-thumb{transform:translateX(16px)}
+.fs-switch-thumb{display:block;width:12px;height:12px;border-radius:50%;background:var(--fg-primary);transition:transform 120ms ease}
+.fs-switch[aria-checked=false] .fs-switch-thumb{background:var(--fg-tertiary)}
+.fs-switch[aria-checked=true] .fs-switch-thumb{background:var(--bg-control);transform:translateX(12px)}
 
 /* 官方控件只补充插件布局与危险态，视觉主体来自宿主。 */
 .fs-native-btn{flex:none}

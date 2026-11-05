@@ -74,7 +74,7 @@ html[data-ds-theme-source] body:not([data-ds-dark-theme]) :is(.fs,.fs-page-shell
 .fs-group>:last-child{border-bottom:0}
 .fs-group-head+.fs-row,.fs-group-head+.fs-list,.fs-group-head+.fs-steps{border-top:1px solid var(--fs-line)}
 .fs-row-title{flex:1 1 auto;min-width:0;max-width:50%;display:flex;flex-direction:column;gap:1px}
-.fs-row-label.has-tip{cursor:help;text-decoration:underline dotted var(--fs-line-strong);text-underline-offset:4px;text-decoration-thickness:1px}
+.fs-row-label.has-tip{cursor:help}
 .fs-group-note-title{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px}
 .fs-row-desc{font-size:12px;line-height:18px;color:var(--fg-tertiary)}
 .fs-row-meta{font:11px/16px var(--fs-mono);font-variant-numeric:tabular-nums;color:var(--fg-tertiary);overflow-wrap:anywhere}
@@ -121,7 +121,7 @@ select.fs-input{appearance:none;-webkit-appearance:none;padding-right:32px;curso
 /* 白字主按钮使用稍深的蓝，确保浅色宿主中仍有足够对比度。 */
 .fs .fs-native-btn.fs-native-primary:not(:disabled){background:#4663f3;color:#fff}
 @media (hover:hover){.fs .fs-native-btn.fs-native-primary:hover:not(:disabled){background:#3b57e7}}
-.fs-native-switch[aria-checked=true]{background:var(--accent)}
+
 
 /* Button（sm）：outline / primary / ghost / danger */
 .fs-btn{display:inline-flex;flex:none;align-items:center;justify-content:center;gap:4px;height:28px;padding:0 10px;border:0;border-radius:6px;background:transparent;box-shadow:inset 0 0 0 1px var(--fs-line-strong);color:var(--fg-primary);font-size:12px;line-height:18px;white-space:nowrap;cursor:pointer}
@@ -412,3 +412,30 @@ summary.fs-step-head>svg{flex:none;color:var(--fg-tertiary);transform:rotate(-90
   .fs-group-tab{padding:0 8px}
   .fs-subnav-row{min-height:42px}
 }
+
+/* Harness FontSizeRow geometry/tokens; an editable input preserves plugin form semantics. */
+.fs-number{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:72px;height:36px;min-width:0;border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-module-platform,var(--bg-control))}
+.fs-number .fs-native-input-wrap.num,.fs-number .fs-input.num{width:100%;height:100%;flex:1 1 auto}
+.fs-number .fs-native-input-wrap.num>.fs-native-input,.fs-number .fs-input.num{width:100%;height:36px;padding:0;border:0;border-radius:inherit;background:transparent}
+.fs-number .fs-native-input-wrap.num input,.fs-number .fs-input.num{text-align:center;font-size:14px;line-height:22px}
+/* Long values need room beside the arrows rather than running underneath them. */
+@media (hover:hover){.fs-number.long-value:hover .fs-native-input-wrap.num input,.fs-number.long-value:hover .fs-input.num{text-align:left;padding-left:10px;padding-right:27px}}
+.fs-number.long-value:focus-within .fs-native-input-wrap.num input,.fs-number.long-value:focus-within .fs-input.num{text-align:left;padding-left:10px;padding-right:27px}
+@media (hover:none){.fs-number.long-value .fs-native-input-wrap.num input,.fs-number.long-value .fs-input.num{text-align:left;padding-left:10px;padding-right:27px}}
+.fs-number input::-webkit-inner-spin-button,.fs-number input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.fs-number input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.fs-number-steps{position:absolute;right:8px;display:flex;flex-direction:column;gap:2px;opacity:0}
+@media (hover:hover){.fs-number:hover .fs-number-steps{opacity:1}}
+.fs-number:focus-within .fs-number-steps{opacity:1}
+@media (hover:none){.fs-number-steps{opacity:1}}
+.fs-number-steps button{display:inline-flex;align-items:center;justify-content:center;width:17px;height:12px;padding:0;border:0;border-radius:var(--dsw-radius-xs,4px);background:color-mix(in srgb,var(--dsw-alias-bg-layer-1,var(--bg-surface)) 75%,transparent);color:var(--dsw-alias-label-primary,var(--fg-primary));cursor:pointer}
+@media (hover:hover){.fs-number-steps button:hover:not(:disabled){background:var(--dsw-alias-bg-layer-1,var(--bg-surface))}}
+.fs-number-steps button:disabled{color:var(--dsw-alias-label-caption,var(--fg-tertiary));cursor:default}
+/* Harness LanguageRow selector with a width constraint for model names. */
+.fs-select-anchor{display:inline-flex;flex:0 1 240px;width:240px;min-width:0}
+.fs-select-trigger{display:inline-flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-width:0;height:36px;padding:0 14px;border:0;border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-module-platform,var(--bg-control));color:var(--dsw-alias-label-primary,var(--fg-primary));font-size:14px;line-height:22px;text-align:left;cursor:pointer}
+.fs-select-trigger>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fs-select-trigger>svg{flex:none}
+@media (hover:hover){.fs-select-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,var(--bg-hover))}}
+.fs-select-trigger:disabled{opacity:.5;cursor:default}
+@container (max-width:720px){.fs-row.stack .fs-select-anchor{flex:1 1 100%;width:100%}}

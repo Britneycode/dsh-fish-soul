@@ -47,13 +47,10 @@ html[data-ds-theme-source] body:not([data-ds-dark-theme]) :is(.fs,.fs-page-shell
 .fs-tab[aria-selected=true]{border-color:var(--fs-line);background:var(--bg-control);color:var(--fg-primary);font-weight:500}
 .fs-tab[aria-selected=true] .fs-tab-key{border-color:var(--fs-line-strong);color:var(--fg-primary)}
 @media (hover:hover){.fs-tab:hover{background:var(--bg-hover);color:var(--fg-primary)}}
-.fs-side-foot{margin-top:auto;padding-top:8px;border-top:1px solid var(--fs-line)}
-.fs-ver{display:flex;align-items:center;gap:6px;width:100%;height:26px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--fg-tertiary);cursor:pointer}
-@media (hover:hover){.fs-ver:hover{background:var(--bg-hover);color:var(--fg-secondary)}}
 .fs.nav-collapsed .fs-side{padding:8px 6px}
 .fs.nav-collapsed .fs-side-head{justify-content:center;padding:0}
 .fs.nav-collapsed .fs-tab-label{display:none}
-.fs.nav-collapsed .fs-tab,.fs.nav-collapsed .fs-ver{justify-content:center;padding:0}
+.fs.nav-collapsed .fs-tab{justify-content:center;padding:0}
 
 /* 主任务流 */
 .fs-main{display:flex;flex-direction:column;gap:20px;min-width:0;width:100%;max-width:760px;justify-self:center;padding:14px 24px 24px}
@@ -88,6 +85,13 @@ html[data-ds-theme-source] body:not([data-ds-dark-theme]) :is(.fs,.fs-page-shell
 .fs-row.stack .fs-ctl{justify-content:flex-start}
 .fs-unit{font-family:var(--fs-mono);font-variant-numeric:tabular-nums;font-size:12px;line-height:18px;color:var(--fg-secondary);white-space:normal;overflow-wrap:anywhere}
 
+/* 首次引导：沿用宿主的细边框与低对比背景，窄屏标题允许换行。 */
+.fs-onboarding{padding:10px 12px;border:1px solid var(--fs-line);border-radius:8px;background:var(--bg-control)}
+.fs-onboarding .fs-group-head{min-height:28px;padding-bottom:5px}
+.fs-onboarding .fs-item{min-height:38px;gap:8px}
+.fs-onboarding .fs-item-main{white-space:normal;overflow-wrap:anywhere}
+.fs-onboarding .fs-item-meta{gap:4px}
+
 /* 输入框：settings-form 的 input */
 .fs-input{flex:0 1 240px;width:240px;min-width:0;height:28px;padding:0 10px;border:1px solid var(--fs-line-strong);border-radius:6px;background:var(--bg-control);font-size:13px;line-height:20px;color:var(--fg-primary)}
 .fs-input::placeholder{color:var(--fg-tertiary);opacity:.7}
@@ -111,8 +115,16 @@ select.fs-input{appearance:none;-webkit-appearance:none;padding-right:32px;curso
 .fs-switch[aria-checked=false] .fs-switch-thumb{background:var(--fg-secondary)}
 .fs-switch[aria-checked=true] .fs-switch-thumb{transform:translateX(16px)}
 
+/* 官方控件只补充插件布局与危险态，视觉主体来自宿主。 */
+.fs-native-btn{flex:none}
+.fs-native-btn.fs-native-danger{color:var(--status-error)}
+/* 白字主按钮使用稍深的蓝，确保浅色宿主中仍有足够对比度。 */
+.fs .fs-native-btn.fs-native-primary:not(:disabled){background:#4663f3;color:#fff}
+@media (hover:hover){.fs .fs-native-btn.fs-native-primary:hover:not(:disabled){background:#3b57e7}}
+.fs-native-switch[aria-checked=true]{background:var(--accent)}
+
 /* Button（sm）：outline / primary / ghost / danger */
-.fs-btn{display:inline-flex;flex:none;align-items:center;justify-content:center;gap:4px;height:26px;padding:0 10px;border:0;border-radius:6px;background:transparent;box-shadow:inset 0 0 0 1px var(--fs-line-strong);color:var(--fg-primary);font-size:12px;line-height:18px;white-space:nowrap;cursor:pointer}
+.fs-btn{display:inline-flex;flex:none;align-items:center;justify-content:center;gap:4px;height:28px;padding:0 10px;border:0;border-radius:6px;background:transparent;box-shadow:inset 0 0 0 1px var(--fs-line-strong);color:var(--fg-primary);font-size:12px;line-height:18px;white-space:nowrap;cursor:pointer}
 .fs-btn.primary{box-shadow:none;background:var(--accent);color:var(--fg-on-accent)}
 .fs-btn.ghost{box-shadow:none;color:var(--fg-secondary)}
 .fs-btn.danger{color:var(--status-error)}
@@ -278,7 +290,7 @@ summary.fs-step-head>svg{flex:none;color:var(--fg-tertiary);transform:rotate(-90
 
 /* 窄容器：侧栏变顶部横条，详情面板落到下方 */
 @container (max-width:720px){
-  .fs,.fs.has-detail,.fs.nav-collapsed{grid-template-columns:minmax(0,1fr)}
+  .fs,.fs.has-detail,.fs.nav-collapsed{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
   .fs-side{position:sticky;top:0;z-index:4;padding:6px;border-right:0;border-bottom:1px solid var(--fs-line);border-radius:12px 12px 0 0}
   .fs-side-inner{position:static;flex-direction:row;align-items:center;gap:6px;min-height:0}
   .fs-main-head{position:static;height:28px;margin-top:0;padding-top:0;padding-bottom:10px}
@@ -289,8 +301,6 @@ summary.fs-step-head>svg{flex:none;color:var(--fg-tertiary);transform:rotate(-90
   .fs-tab-key{display:none}
   .fs.nav-collapsed .fs-tab-label{display:inline}
   .fs.nav-collapsed .fs-tab{padding:0 8px}
-  .fs-side-foot{flex:none;margin:0;padding:0;border:0}
-  .fs-ver .fs-tab-label{display:none}
   .fs-main{padding:12px 14px 18px}
   .fs-group-head{height:auto;min-height:24px;flex-wrap:wrap;gap:2px 8px}
   .fs-group-head>:first-child{flex:none}
@@ -302,3 +312,104 @@ summary.fs-step-head>svg{flex:none;color:var(--fg-tertiary);transform:rotate(-90
   .fs-dock .fs-input{flex:1 1 auto;width:auto}
 }
 @media (prefers-reduced-motion:reduce){summary.fs-step-head>svg{transition:none}}
+
+/* 页面层次：把长表单分成清晰、安静的工作区。 */
+.fs{--fs-side:200px}
+.fs-main{max-width:800px;padding-right:32px;padding-left:32px;gap:24px}
+.fs-pane{gap:24px}
+.fs-settings-update{padding:12px 16px;border:1px solid var(--fs-line);border-radius:8px;background:var(--bg-control)}
+.fs-settings .fs-main-head{margin-top:0;padding-top:0;height:34px}
+.fs-life-overview,.fs-life-settings,.fs-model-routes{min-width:0;padding:16px;border:1px solid var(--fs-line);border-radius:10px;background:var(--bg-surface)}
+.fs-life-overview{background:var(--bg-control)}
+.fs-now{display:flex;align-items:flex-start;gap:12px;padding:0 0 16px}
+.fs-now-activity{display:flex;align-items:flex-start;gap:8px;min-width:0;flex:1 1 260px}
+.fs-now-activity .fs-dot{margin-top:5px}
+.fs-now-title{min-width:0;font-size:14px;line-height:21px;font-weight:500;overflow-wrap:anywhere}
+.fs-now-meta{flex:none;margin-left:auto;display:flex;align-items:center;gap:8px}
+.fs-schedule{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px;border:0;border-radius:0;overflow:visible}
+.fs-slot{gap:4px;min-height:66px;padding:9px 10px;border:1px solid var(--fs-line);border-radius:6px;background:var(--bg-surface)}
+.fs-slot:first-child{border-left:1px solid var(--fs-line)}
+.fs-slot>span{white-space:normal;overflow-wrap:anywhere}
+.fs-slot>span:last-child{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.fs-slot[aria-current=true]{background:var(--bg-sidebar);border-color:var(--fs-line-strong);box-shadow:none}
+.fs-model-routes .fs-group-head{height:auto;min-height:32px;gap:8px 16px;flex-wrap:wrap}
+.fs-model-routes .fs-group-head>:nth-child(2){min-width:0;max-width:100%;font-weight:400;text-align:right;overflow-wrap:anywhere}
+.fs-model-routes .fs-row{min-height:42px}
+
+@container (max-width:720px){
+  .fs-main{padding:12px 14px 20px;gap:20px}
+  .fs-life-overview,.fs-life-settings,.fs-model-routes{padding:12px}
+  .fs-now-meta{margin-left:0}
+}
+/* 小高度窗口可滚动侧栏导航。 */
+.fs-side-inner{min-height:min(464px,calc(100vh - 48px));max-height:calc(100vh - 48px);overflow-y:auto;scrollbar-width:thin}
+@container (max-width:720px){.fs-side-inner{min-height:0;max-height:none;overflow:visible}}
+
+/* 官方原语适配：只补齐工作台布局，不接管组件事件。 */
+.fs-native-input-wrap{display:inline-flex;flex:0 1 240px;width:240px;min-width:0}
+.fs-native-input-wrap>.fs-native-input{width:100%;min-width:0;height:28px;padding:0 10px;border:1px solid var(--fs-line-strong);border-radius:6px;background:var(--bg-control)}
+.fs-native-input-wrap>.fs-native-input:focus-within{border-color:var(--accent)}
+.fs-native-input-wrap>.fs-native-input>input{width:100%;min-width:0;font-size:13px;line-height:20px;color:var(--fg-primary)}
+.fs-native-input-wrap>.fs-native-input>input::placeholder{color:var(--fg-tertiary);opacity:.7}
+.fs-native-input-wrap.num{flex:none;width:64px}
+.fs-native-input-wrap.num>.fs-native-input{padding:0 8px}
+.fs-native-input-wrap.num input,.fs-native-input-wrap input[inputmode=numeric]{font-family:var(--fs-mono);font-variant-numeric:tabular-nums}
+.fs-native-input-wrap.num input{text-align:center}
+.fs-native-input-wrap.wide,.fs-row.stack .fs-native-input-wrap:not(.num){flex:1 1 auto;width:100%}
+.fs-affix .fs-native-input-wrap{flex:1 1 auto;width:100%}
+.fs-affix .fs-native-input-wrap>.fs-native-input{padding-right:36px}
+.fs-dock .fs-native-input-wrap{flex:1 1 auto;width:auto}
+.fs-dock .fs-native-input-wrap>.fs-native-input{border-color:transparent;background:transparent}
+.fs-native-icon{width:24px;height:24px;padding:0}
+.fs-native-tag-wrap{display:inline-flex;min-width:0}
+.fs-native-tag{gap:4px;font-family:var(--fs-mono);font-variant-numeric:tabular-nums}
+.fs-native-tag>button{display:inline-flex;padding:0;border:0;background:none;color:inherit;cursor:pointer}
+.fs-native-check.label-hidden>span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@container (max-width:720px){.fs-native-input-wrap:not(.num){flex:1 1 100%;width:100%}.fs-dock .fs-native-input-wrap{flex:1 1 auto;width:auto}}
+
+.fs-onboarding-dot{display:inline-flex;flex:none}
+.fs-native-tag .fs-icon-btn,.fs-tag .fs-icon-btn{width:16px;height:16px;min-width:16px;padding:0}
+
+/* 主页面：单层横向导航，与宿主侧栏分工；设置页布局保持不变。 */
+.fs.fs-standalone,.fs.fs-standalone.has-detail{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+.fs-standalone .fs-side{position:sticky;top:0;z-index:4;align-self:start;min-width:0;padding:7px 12px;border-right:0;border-bottom:1px solid var(--fs-line);border-radius:12px 12px 0 0;background:var(--bg-surface)}
+.fs-standalone .fs-side-inner{position:static;display:flex;flex-direction:row;align-items:center;gap:14px;min-height:0;max-height:none;overflow:visible}
+.fs-standalone .fs-side-head{height:32px;margin:0;padding:0 4px;flex:none}
+.fs-standalone .fs-nav{flex:1 1 auto;min-width:0;display:flex;flex-direction:row;flex-wrap:nowrap;gap:3px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.fs-standalone .fs-nav::-webkit-scrollbar{display:none}
+.fs-standalone .fs-tab{flex:none;height:32px;padding:0 10px;gap:6px}
+.fs-standalone .fs-tab-key{display:none}
+.fs-standalone .fs-main-head{position:static;height:34px;margin-top:0;padding-top:0;padding-bottom:10px}
+.fs-update-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--status-warn)}
+@container (max-width:720px){
+  .fs-standalone .fs-side{padding:6px}
+  .fs-standalone .fs-side-inner{gap:6px}
+  .fs-standalone .fs-side-head{padding:0 2px}
+  .fs-standalone .fs-tab{padding:0 8px}
+}
+
+/* 两级导航：分类和对应页面一起吸顶，内容独立滚动。 */
+.fs.fs-standalone,.fs.fs-settings,.fs.fs-standalone.has-detail,.fs.fs-settings.has-detail{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+.fs.fs-standalone .fs-side,.fs.fs-settings .fs-side{position:sticky;top:0;z-index:4;align-self:start;min-width:0;padding:0 16px;border-right:0;border-bottom:1px solid var(--fs-line);border-radius:12px 12px 0 0;background:var(--bg-surface)}
+.fs.fs-standalone .fs-side-inner,.fs.fs-settings .fs-side-inner{position:static;display:block;min-height:0;max-height:none;overflow:visible}
+.fs-group-row{display:flex;align-items:center;gap:18px;min-width:0;height:48px;border-bottom:1px solid var(--fs-line)}
+.fs-group-row .fs-brand{flex:none;padding:0 2px;font-size:14px}
+.fs-group-nav{display:flex;align-self:stretch;align-items:stretch;gap:8px;flex:1 1 auto;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.fs-group-nav::-webkit-scrollbar{display:none}
+.fs-group-tab{display:inline-flex;position:relative;flex:none;align-items:center;gap:6px;height:100%;padding:0 8px;border:0;background:transparent;color:var(--fg-secondary);font:inherit;white-space:nowrap;cursor:pointer}
+.fs-group-tab[aria-pressed=true]{color:var(--fg-primary);font-weight:600}
+.fs-group-tab[aria-pressed=true]::after{content:"";position:absolute;right:8px;bottom:0;left:8px;height:2px;border-radius:2px;background:var(--fg-primary)}
+@media (hover:hover){.fs-group-tab:hover{color:var(--fg-primary)}}
+.fs-subnav-row{display:flex;align-items:center;min-width:0;min-height:44px}
+.fs.fs-standalone .fs-nav,.fs.fs-settings .fs-nav{flex:1 1 auto;min-width:0;display:flex;flex-direction:row;flex-wrap:nowrap;gap:6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.fs.fs-standalone .fs-nav::-webkit-scrollbar,.fs.fs-settings .fs-nav::-webkit-scrollbar{display:none}
+.fs.fs-standalone .fs-tab,.fs.fs-settings .fs-tab{flex:none;height:28px;padding:0 10px;gap:6px;border-radius:999px}
+.fs.fs-standalone .fs-tab-key,.fs.fs-settings .fs-tab-key{display:none}
+.fs.fs-standalone .fs-main-head,.fs.fs-settings .fs-main-head{position:static;height:34px;margin-top:0;padding-top:0;padding-bottom:10px}
+@container (max-width:720px){
+  .fs.fs-standalone .fs-side,.fs.fs-settings .fs-side{padding:0 12px}
+  .fs-group-row{height:44px;gap:8px}
+  .fs-group-nav{gap:2px}
+  .fs-group-tab{padding:0 8px}
+  .fs-subnav-row{min-height:42px}
+}

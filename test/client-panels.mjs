@@ -63,3 +63,44 @@ function runtime() {
  assert(!r.entries.has('sidebar.panellist:dsh-fish-soul')); assert(r.entries.has('main:dsh-fish-soul')); r.dispose();
 }
 console.log('✓ 主面板与侧栏：声明顺序、旧宿主降级、卸载及重新注册');
+
+// 官方共享组件优先；模块缺失时退回原控件，不丢失事件和禁用状态。
+{
+ const instrumented = source.replace('exports.apply = apply;', 'exports.__controls = { Button, Switch, Dot, Icon, IconButton, Seg, Tag, Pill, Check, Input, Num }; exports.apply = apply;');
+ let capture;
+ vm.runInNewContext(instrumented, { window: { __ModuleLoader__: { load: ({ factory: f }) => { capture = f; } } }, console });
+ const native = { Button: function NativeButton() {}, Switch: function NativeSwitch() {}, StateDot: function NativeStateDot() {}, Input: function NativeInput() {}, Pill: function NativePill() {}, Tag: function NativeTag() {}, Checkbox: function NativeCheckbox() {}, IconCloseOutlineRegular: function NativeClose() {} };
+ const make = (provided) => capture((name) => name === 'react' ? react : provided ? native : (() => { throw Error('missing optional module'); })());
+ let clicked = 0, switched = null;
+ const buttonProps = { variant: 'primary', onClick: () => clicked++, disabled: true };
+ const switchProps = { checked: false, label: '自动检查更新', onChange: (v) => { switched = v; } };
+ const official = make(true).__controls;
+ const b = official.Button(buttonProps, '保存');
+ assert.equal(b.type, native.Button); assert.equal(b.props.variant, 'primary'); assert.equal(b.props.size, 'sm'); assert.equal(b.props.disabled, true); b.props.onClick(); assert.equal(clicked, 1);
+ const s = official.Switch(switchProps); assert.equal(s.type, native.Switch); assert.equal(s.props.label, switchProps.label); s.props.onChange(true); assert.equal(switched, true);
+ assert.equal(official.Dot('done').type, native.StateDot);
+ const fallback = make(false).__controls;
+ assert.equal(fallback.Dot('done').type, 'span');
+ const fb = fallback.Button(buttonProps, '保存'); assert.equal(fb.type, 'button'); assert.equal(fb.props.disabled, true); fb.props.onClick(); assert.equal(clicked, 2);
+ const fs = fallback.Switch(switchProps); assert.equal(fs.type, 'button'); assert.equal(fs.props.role, 'switch'); switched = null; fs.props.onClick(); assert.equal(switched, true);
+ let inputValue = null, blurred = 0, checked = null, chosen = null;
+ const inputProps = { value: 'abc', placeholder: '地址', style: { width: '160px' }, onChange: e => { inputValue = e.target.value; }, onBlur: () => blurred++ };
+ const input = official.Input(inputProps); assert.equal(input.type, 'span'); assert.equal(input.props.style.width, '160px');
+ const inner = input.children[0]; assert.equal(inner.type, native.Input); assert.equal(inner.props.value, 'abc'); inner.props.onChange({target:{value:'next'}}); inner.props.onBlur(); assert.equal(inputValue, 'next'); assert.equal(blurred, 1);
+ const num = official.Num({value: 5, min: 0, max: 20}); assert.equal(num.children[0].props.type, 'number'); assert.equal(num.children[0].props.min, 0); assert.equal(num.children[0].props.max, 20); assert.match(num.props.className, /num/);
+ const fi = fallback.Input(inputProps); assert.equal(fi.type, 'input'); fi.props.onChange({target:{value:'fallback'}}); assert.equal(inputValue, 'fallback');
+ const checkProps = {checked:false, label:'选中 #1', hideLabel:true, title:'选择', onChange:v => {checked = v;}};
+ const check = official.Check(checkProps); assert.equal(check.type, native.Checkbox); assert.equal(check.props.label, checkProps.label); check.props.onChange(true); assert.equal(checked,true);
+ const fc = fallback.Check(checkProps); assert.equal(fc.type,'label'); checked = null; fc.children[0].props.onChange({target:{checked:true}}); assert.equal(checked,true); assert.equal(fc.children[1].children[0],checkProps.label);
+ const pill = official.Pill({active:true, 'aria-pressed':true, onClick:()=>chosen='pill', children:'朋友'}); assert.equal(pill.type,native.Pill); assert.equal(pill.props.active,true); pill.props.onClick(); assert.equal(chosen,'pill');
+ assert.equal(fallback.Pill({children:'朋友'}).type,'button');
+ const seg = official.Seg({options:[{value:'a',label:'甲'},{value:'b',label:'乙'}], value:'a', label:'模式', onChange:v=>chosen=v});
+ assert.equal(seg.props.role,'radiogroup'); const choices = seg.children[1]; assert.equal(choices[0].type,native.Pill); assert.equal(choices[0].props['aria-checked'],true); choices[1].props.onClick(); assert.equal(chosen,'b');
+ const fseg = fallback.Seg({options:[{value:'a',label:'甲'}],value:'a',onChange:()=>{},label:'模式'}); assert.equal(fseg.children[1][0].type,'button');
+ const tag = official.Tag('警告','warning',{title:'详情'}); assert.equal(tag.props.title,'详情'); assert.equal(tag.children[0].type,native.Tag); assert.equal(tag.children[0].props.tone,'warning'); assert.equal(fallback.Tag('警告').type,'span');
+ assert.equal(official.Icon('close').type,native.IconCloseOutlineRegular); assert.equal(official.Icon('eye').type,'svg'); assert.equal(fallback.Icon('close').type,'svg');
+ assert.equal(official.IconButton('close','关闭',()=>{}).type,native.Button); assert.equal(fallback.IconButton('close','关闭',()=>{}).type,'button');
+ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+ assert(pkg.dsh.client.external.includes('@deepseek-ai/dsh-client-ui-primitives'));
+ console.log('✓ 官方控件与缺失模块回退：状态、事件、语义及声明');
+}

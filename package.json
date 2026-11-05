@@ -57,7 +57,8 @@
         "slots"
       ],
       "external": [
-        "react"
+        "react",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ]
     }
   },

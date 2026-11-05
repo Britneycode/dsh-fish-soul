@@ -408,11 +408,11 @@ assert.match(block, /\[相关记忆\][\s\S]*下周三要考高数/);
 assert.equal(block.split('（你记得的事。').length, 2, '记忆段的提示只带一次：对得上的说出具体的事');
 ok('群聊按人隔离 + 本轮消息即时召回（无一轮滞后）');
 
-// 4 认不出发送者不再当主人
+// 4 桌面端（dsh channel）认作主人：remember / recall 能用（#57）
 handlers['agent/inbox/inserted']({ agent: { id: 'x1' }, message: { role: 'user', content: [{ type: 'text', text: '你还记得我吗' }], source: { kind: 'user' } } });
-r = await tools.remember.execute({ content: '陌生信息', kind: 'fact' }, at('x1'));
-assert.match(r, /没识别出/);
-ok('未识别发送者：不读写任何人记忆');
+r = await tools.remember.execute({ content: '主人桌面端信息', kind: 'fact' }, at('x1'));
+assert.match(r, /已记住/, '桌面端默认认作主人，remember 能用');
+ok('桌面端默认认作主人：remember / recall 不被拦');
 
 // 5 forget 归属校验
 inbox('30003', '帮我删掉那条', 777);
@@ -430,7 +430,7 @@ failNext = 1;
 await sleep(5000);
 const { DatabaseSync } = await import('node:sqlite');
 const db = new DatabaseSync(join(home, 'fish-soul', 'soul.db'));
-assert.equal(db.prepare('SELECT COUNT(*) n FROM vec').get().n, 1, '首次失败后应重试成功');
+assert.ok(db.prepare('SELECT COUNT(*) n FROM vec').get().n >= 1, '首次失败后应重试成功');
 assert.equal(db.prepare('SELECT dim FROM vec_meta').get().dim, 8);
 ok('向量：无需测试连接即自举 + 失败退避重试');
 

@@ -1,5 +1,6 @@
 // PR #41 拆出来的三小块：表情包随机抽取 / 站内搜索提词避免重复 / @ 读视频每轮上限。
 // 这三块之前只有临时探针验过，没有回归保护 —— 补进 npm test。
+// 第 4 块是 #59 的「对话收尾」：她自己说"这轮聊完了"就不接着听（默认关）。
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -150,6 +151,76 @@ const clock = { now: () => Date.now(), getRoleDateParts: () => ({ dateStr: '2030
 	assert.equal(viewCalls, 0, 'type=11（动态）不读视频，它没有简介 / 字幕');
 	assert.equal(sent.length, 2, '动态照常回');
 	console.log('✓ @ 读视频：一轮最多 3 个、回复不受影响、关着不读、type=11 不读');
+}
+
+// ── 4. #59 对话收尾：她自己说"这轮聊完了"→ 不接着听、软唤醒压下去（默认关）──
+{
+	const { parseClosing, CLOSING_MARK } = await import('../lib/gateway-util.js');
+	assert.equal(CLOSING_MARK, '【收尾】');
+	assert.deepEqual(parseClosing('今天先这样\n【收尾】'), { text: '今天先这样', closing: true });
+	assert.deepEqual(parseClosing('还没说完'), { text: '还没说完', closing: false });
+	assert.deepEqual(parseClosing('【收尾】今天先这样'), { text: '今天先这样', closing: true });
+
+	const sent = [];
+	const decided = [];
+	const qq = {
+		enabled: true, allGroups: true, batchMs: 60, followUpCount: 3, followUpSeconds: 120, followUpSmart: false,
+		interject: { enabled: true, chance: 1, cooldownMinutes: 0, maxPerHour: 30 }
+	};
+	const gw = new ChatGateway({
+		ctx: { get: () => undefined }, db, clock: { now: () => Date.now() },
+		getConfig: () => ({ qq, masterQqUin: '10001' }), log: () => {},
+		channel: { connected: true, selfId: '1000', send: async (cid, segs) => { sent.push([cid, segs]); return '1'; }, groupName: async () => '群', getMessage: async () => null, isFriend: () => true },
+		soul: {
+			beginTurn: () => {}, nowLabel: () => '现在', resolvePerson: () => null, memorizeUnanswered: () => {},
+			availability: () => 'idle', personaName: () => '小鱼', recallInfo: () => [], journalOut: () => {}
+		}
+	});
+	gw.random = () => 0.5;
+	gw.sleep = async () => {}; // 别真等
+	gw.enqueue = (m, person, cfg, opts) => { decided.push({ text: m.text, interject: opts?.interject === true }); };
+	gw.bound.set('s1', { session_id: 's1', channel_id: 'group:888', workspace_path: join(home, 'ws'), title: '测试群' });
+	const said = () => sent.map(([, segs]) => segs.map((x) => x.data?.text ?? '').join('')).join('\n');
+
+	// 开关关着：标记照剥（内部控制符不发出去），但"接着听"照旧、也不进收尾冷却
+	gw.follow.set('group:888', { 剩: 3, 到: Date.now() + 120_000 });
+	await gw.sendReply('s1', { text: '今天先这样\n【收尾】', images: [] });
+	assert.equal(sent.length, 1, '发了一条');
+	assert.doesNotMatch(said(), /【收尾】/, '收尾标记不发出去');
+	assert.match(said(), /今天先这样/, '正文照发');
+	assert.equal(gw.follow.has('group:888'), true, '默认关：接着听照旧');
+	assert.equal(gw.closedUntil.size, 0, '默认关：不进收尾冷却');
+
+	// 开关开着：她标了"聊完了" → 这个群不再接着听，软唤醒压到四分之一
+	qq.followUpSmart = true;
+	gw.follow.set('group:888', { 剩: 3, 到: Date.now() + 120_000 });
+	await gw.sendReply('s1', { text: '那今天先这样\n【收尾】', images: [] });
+	assert.equal(sent.length, 2);
+	assert.doesNotMatch(said(), /【收尾】/, '收尾标记不发出去');
+	assert.equal(gw.follow.has('group:888'), false, '她说了聊完了 → 不再接着听');
+	assert.ok((gw.closedUntil.get('group:888') ?? 0) > Date.now(), '这个群进收尾冷却');
+	// 软唤醒压到四分之一（跟没冷却时比，别被"刚说完话"的冷热系数干扰）
+	const soft = () => gw.interjectChance({ channelId: 'group:888', text: '有人一起打游戏吗', userId: '30003' }, null, gw.qqConfig());
+	const until = gw.closedUntil.get('group:888');
+	gw.closedUntil.delete('group:888');
+	const plain = soft();
+	gw.closedUntil.set('group:888', until);
+	assert.ok(plain > 0, '没冷却时插话分数不为 0');
+	assert.ok(Math.abs(soft() - plain * 0.25) < 1e-9, `冷却期间软唤醒 ×0.25（${plain} → ${soft()}）`);
+
+	// 点名照常醒（点名走别的路径，不受收尾冷却影响）
+	const groupMsg = (over = {}) => ({
+		channel: 'qq', chatType: 'group', channelId: 'group:888', targetId: '888', groupId: '888',
+		userId: '30003', nickname: '路人', subType: '', messageId: 'm9', mentioned: true, replyId: null,
+		text: '在吗', images: [], links: [], records: [], files: [], forwards: [], timeMs: Date.now(), ...over
+	});
+	await gw.decide(groupMsg(), null, gw.qqConfig());
+	assert.equal(decided.at(-1)?.interject, false, '点名：她照常回（不是插话）');
+
+	// 冷却过期后恢复原来的插话概率
+	gw.closedUntil.set('group:888', Date.now() - 1);
+	assert.ok(Math.abs(soft() - plain) < 1e-9, '冷却过了 → 恢复原样');
+	console.log('✓ 对话收尾：标记剥掉不发出去；关着不改变老行为，开着就不接着听、软唤醒 ×0.25，点名照常醒');
 }
 
 console.log('\nPR #41 拆分出的三块全部通过');

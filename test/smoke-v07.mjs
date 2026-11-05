@@ -1,6 +1,6 @@
 // v0.7 的冒烟测试（按功能选模型 + 用量、语音 STT / TTS、收藏表情包、学群里的说法、上网查、首次引导），
 // 由 smoke.mjs 在同一个插件实例上最后调用；共用的假宿主 / 假服务从参数传进来。
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { tmpHome } from './_tmp.mjs';
@@ -523,6 +523,50 @@ export async function run(t) {
 		assert.equal((await call('POST', '/stickers/delete', { file: 'nope.png', workspacePath: collectedFile.ws })).json.ok, false);
 		assert.equal((await call('POST', '/stickers/delete', { file: collectedFile.file, workspacePath: collectedFile.ws })).json.ok, true);
 		assert.equal(existsSync(join(collectedFile.ws, '_stickers', collectedFile.file)), false);
+
+		// 主人自己放进当前工作区 _stickers 的图：不写 kv 也进面板，能读、能改名、能删
+		const curWs = p.json.workspacePath;
+		assert.ok(curWs !== '', '当前工作区');
+		mkdirSync(join(curWs, '_stickers'), { recursive: true });
+		writeFileSync(join(curWs, '_stickers', '主人放的.png'), PNG);
+		p = await call('GET', '/stickers/state');
+		const orphan = p.json.items.find((x) => x.file === '主人放的.png');
+		assert.ok(orphan, '主人放进 _stickers 的图要出现在面板里');
+		assert.equal(orphan.tracked, false); assert.equal(orphan.exists, true); assert.equal(orphan.from, '主人放的');
+		assert.equal((await raw(`/stickers/file?file=${encodeURIComponent('主人放的.png')}&ws=${encodeURIComponent(curWs)}`)).status, 200, '主人放的也能读图');
+		// 不认的工作区不给读：不能靠 ws 参数指个目录就把文件读出来
+		const strangerWs = tmpHome('fish-v07-stranger-');
+		mkdirSync(join(strangerWs, '_stickers'), { recursive: true });
+		writeFileSync(join(strangerWs, '_stickers', '不该读.png'), PNG);
+		assert.equal((await raw(`/stickers/file?file=${encodeURIComponent('不该读.png')}&ws=${encodeURIComponent(strangerWs)}`)).status, 404, '陌生工作区不给读图');
+		// 不认的工作区也不给改 / 删：不能靠 ws 参数指个目录就把文件动了
+		assert.equal((await call('POST', '/stickers/rename', { file: '不该读.png', workspacePath: strangerWs, name: '改名了' })).json.ok, false, '陌生工作区不给改名');
+		assert.equal((await call('POST', '/stickers/delete', { file: '不该读.png', workspacePath: strangerWs })).json.ok, false, '陌生工作区不给删');
+		assert.equal(existsSync(join(strangerWs, '_stickers', '不该读.png')), true, '拒绝时原文件不动');
+		p = await call('POST', '/stickers/rename', { file: '主人放的.png', workspacePath: curWs, name: '改个名' });
+		assert.equal(p.json.ok, true, p.json.error);
+		assert.equal(existsSync(join(curWs, '_stickers', '改个名.png')), true);
+		assert.equal(existsSync(join(curWs, '_stickers', '主人放的.png')), false);
+		// 撞名：明确拒绝，不自动加序号
+		writeFileSync(join(curWs, '_stickers', '占位.png'), PNG);
+		p = await call('POST', '/stickers/rename', { file: '改个名.png', workspacePath: curWs, name: '占位' });
+		assert.equal(p.json.ok, false); assert.match(p.json.error, /同名/);
+		assert.equal(existsSync(join(curWs, '_stickers', '改个名.png')), true, '拒绝时原文件不动');
+		// 导入：主人的图，不占每天收藏的额度
+		const day = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
+		const usedBefore = getKv(db, `stickers.day.${day}`, 0);
+		p = await call('POST', '/stickers/import', { name: '导入的', mediaType: 'image/png', base64: PNG.toString('base64') });
+		assert.equal(p.json.ok, true, p.json.error);
+		assert.equal(existsSync(join(curWs, '_stickers', '导入的.png')), true);
+		assert.equal(getKv(db, `stickers.day.${day}`, 0), usedBefore, '导入不占每天收藏的额度');
+		// 不是图片的：拒绝
+		p = await call('POST', '/stickers/import', { name: '假的', mediaType: 'image/png', base64: Buffer.from('这不是图片').toString('base64') });
+		assert.equal(p.json.ok, false);
+		assert.equal(existsSync(join(curWs, '_stickers', '假的.png')), false);
+		// 删：主人放的也能删
+		p = await call('POST', '/stickers/delete', { file: '改个名.png', workspacePath: curWs });
+		assert.equal(p.json.ok, true);
+		assert.equal(existsSync(join(curWs, '_stickers', '改个名.png')), false);
 		p = await call('POST', '/stickers/config', { collect: false, perDay: 3 });
 		assert.deepEqual(p.json.config, { collect: false, perDay: 3 });
 		assert.equal((await call('GET', '/channels/state')).json.qq.stickers.collect, false);

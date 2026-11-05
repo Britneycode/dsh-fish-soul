@@ -227,6 +227,7 @@ a.fs-btn{text-decoration:none}
 .fs-sticker{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 4px 4px;border:1px solid var(--fs-line);border-radius:6px;background:var(--bg-sidebar)}
 .fs-sticker img{width:64px;height:64px;object-fit:contain}
 .fs-sticker figcaption{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.fs-sticker figcaption .fs-input{flex:none;width:100%;height:24px;padding:0 4px;font-size:12px;text-align:center}
 .fs-sticker .fs-icon-btn{position:absolute;top:2px;right:2px;opacity:0}
 .fs-sticker:hover .fs-icon-btn,.fs-sticker:focus-within .fs-icon-btn{opacity:1}
 /* 人格页：模板卡片、说话示例气泡、世界书编辑 */

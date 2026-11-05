@@ -29,7 +29,7 @@ jobs:
         run: |
           VER='${{ steps.v.outputs.ver }}'
           awk -v head="- v$VER" '
-            index($0, head) == 1 { on = 1; sub(/^- /, "# "); sub(/——$/, ""); print; next }
+            index($0, head) == 1 { on = 1; sub(/——$/, ""); print; next }
             on && /^- / { exit }
             on { sub(/^  /, ""); print }
           ' CHANGELOG.md > /tmp/notes.md
@@ -41,7 +41,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER='${{ steps.v.outputs.ver }}'
-          TITLE=$(head -1 /tmp/notes.md | sed 's/^# //')
+          TITLE="v$VER"
           gh release create "v$VER" --target "$GITHUB_SHA" --title "$TITLE" --notes-file /tmp/notes.md
       - name: npm publish
         # tag 刚建过（这次运行是真的在发版）才发 npm；registry 已有这个版本就跳过（幂等，重跑 workflow 不会重复发）

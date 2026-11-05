@@ -20,7 +20,7 @@ export async function run(t) {
 		assert.ok(Math.abs(interjectScore({ text: '周末去撸猫吗', base: 0.05, keywords: ['猫'] }) - 0.45) < 1e-9, '话题 + 提问');
 		assert.ok(Math.abs(interjectScore({ text: '哈哈', base: 0.05 }) - 0.015) < 1e-9, '太短打三折');
 		assert.ok(Math.abs(interjectScore({ text: '今天天气不错', base: 0.2, relation: 'friend', busyCount: 9 }) - 0.15) < 1e-9, '熟人 +0.1、刷屏减半');
-		assert.deepEqual(interjectConfig(undefined), { enabled: false, chance: 0.05, cooldownMinutes: 15, maxPerHour: 3, keywords: [] });
+		assert.deepEqual(interjectConfig(undefined), { enabled: false, chance: 0.05, cooldownMinutes: 15, maxPerHour: 3, keywords: [], masterQuiet: true, masterQuietMinutes: 5 });
 		const c = interjectConfig({ enabled: true, chance: 5, maxPerHour: 2.7, cooldownMinutes: -3, keywords: [' 猫 ', '', 3] });
 		assert.deepEqual([c.enabled, c.chance, c.maxPerHour, c.cooldownMinutes, c.keywords], [true, 1, 2, 0, ['猫', '3']]);
 	}

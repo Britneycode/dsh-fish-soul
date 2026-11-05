@@ -33,7 +33,7 @@ dsh plugin --profile desktop add dsh-fish-soul
 
 手工等价：profile 的 `package.json` 把 `dsh-fish-soul` 加进 `dsh.profile.bundles`，并在 `dependencies` 里写 `dsh-fish-soul` 的版本（本地源码则用 `link:` 路径），然后 `pnpm install`。
 
-插件注入 `webServer / tools / systemPrompt / llm / agents / workspaceRegistry`，设置页在 DSH 的插件设置里（「人格 / 记忆 / QQ / B站 / 抖音 / 自走 / 模型 / 习惯 / 动态」）。
+插件注入 `webServer / tools / systemPrompt / llm / agents / workspaceRegistry`。在支持主面板的 DSH 版本中，左侧栏「鱼」可打开独立工作台；设置页入口也保留。旧宿主若不提供侧栏面板插槽，仍可从设置页打开（「人格 / 记忆 / QQ / B站 / 抖音 / 自走 / 模型 / 习惯 / 动态」）。
 
 已在 DSH **0.2.1-rc.5** 上验证；更早的 rc 版本未逐一验证，遇到问题请先升级复测。
 

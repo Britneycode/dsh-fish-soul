@@ -371,6 +371,65 @@ export async function run(t) {
 			await driver.reply({ author: '逍遥', content: '正常，都是这么过来的' }, '嗯嗯');
 			assert.equal(seenWant.at(-1).content, '正常，都是这么过来的', '正常内容照常按作者+内容找');
 		}
+		// COMMENT_STATE_JS：折叠的评论区（元素在 DOM 里但 0×0）不算「已打开」
+		// （2026-11-06 实测：note 页评论区默认折叠，只判存在 → openWork 误报 ok → reply 必然 NO_BOX）
+		{
+			const { COMMENT_STATE_JS } = await import('../lib/douyin-social.js');
+			const fn = new Function('document', 'location', `return ${COMMENT_STATE_JS}`);
+			const loc = { href: 'https://www.douyin.com/note/x' };
+			const folded = fn({ querySelector: () => ({ getBoundingClientRect: () => ({ width: 0, height: 0 }) }), querySelectorAll: () => [] }, loc);
+			assert.equal(folded.box, false, '折叠态（0×0）不算打开');
+			assert.equal(folded.inDom, true, '但能看出它在 DOM 里');
+			const open = fn({ querySelector: () => ({ getBoundingClientRect: () => ({ width: 320, height: 40 }) }), querySelectorAll: () => [] }, loc);
+			assert.equal(open.box, true, '有尺寸才算打开');
+			const none = fn({ querySelector: () => null, querySelectorAll: () => [] }, loc);
+			assert.equal(none.box, false, '根本不存在也不算打开');
+			assert.equal(none.inDom, false);
+		}
+		// openWork：评论区一开始折叠时要真的去点评论图标，点开后才返回 ok
+		{
+			const { douyinSocialDriver } = await import('../lib/douyin-social.js');
+			let visible = false;   // 页面状态：先折叠
+			let clicks = 0;
+			const fakeBrowser = {
+				goto: async () => ({}),
+				send: async () => {},
+				eval: async (js) => {
+					const s = String(js);
+					if (s.includes('comment-input-inner-container') && s.includes('getBoundingClientRect')) {
+						return { box: visible, inDom: true, items: visible ? 1 : 1, btn: true, url: 'https://www.douyin.com/note/x' };
+					}
+					if (s.includes('feed-comment-icon')) return { x: 10, y: 10 };
+					return null;
+				}
+			};
+			const driver = douyinSocialDriver({ running: true, loggedIn: true, browser: fakeBrowser });
+			// 模拟点图标会展开：把 send 换成计数并置可见
+			fakeBrowser.send = async (method) => { if (method === 'Input.dispatchMouseEvent') { clicks++; visible = true; } };
+			const r = await driver.openWork({ id: 'x', kind: 'note' });
+			assert.equal(r.ok, true, r.error);
+			assert.ok(clicks >= 1, '折叠时点过评论图标');
+		}
+		// openWork：一直点不开时，报错里带上诊断（DOM 在不在 / 图标在不在）
+		{
+			const { douyinSocialDriver } = await import('../lib/douyin-social.js');
+			const fakeBrowser = {
+				goto: async () => ({}),
+				send: async () => {},
+				eval: async (js) => {
+					const s = String(js);
+					if (s.includes('comment-input-inner-container') && s.includes('getBoundingClientRect')) {
+						return { box: false, inDom: true, items: 0, btn: false, url: 'https://www.douyin.com/note/x' };
+					}
+					return null;
+				}
+			};
+			const driver = douyinSocialDriver({ running: true, loggedIn: true, browser: fakeBrowser });
+			const r = await driver.openWork({ id: 'x', kind: 'note' });
+			assert.equal(r.ok, false);
+			assert.match(r.error, /在 DOM 里但不可见/, '报错说清是折叠不是不存在');
+			assert.match(r.error, /评论图标不在/, '报错说清图标状态');
+		}
 	}
 	ok('抖音：发图文（卡片 + 标题 + 描述）/ 配歌从推荐列表里挑 / 创作者中心没登录提醒 / 要验证就停 6 小时 / 回作品评论（第一次只记、作者不回、每小时上限、重开页面）');
 

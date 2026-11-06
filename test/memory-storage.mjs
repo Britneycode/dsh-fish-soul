@@ -47,5 +47,12 @@ try{
  assert.equal((await route('POST','/chat-archive/delete',{channel:'private:a'},false)).status,403);
  assert.equal((await route('POST','/chat-archive/delete',{channel:'private:a'})).changed,1);
  assert.equal(storage.remove(corrupt).ok,true);
- console.log('✓ 全库无损快照、校验恢复、容量告警、范围限定聊天存档、过期清理和权限校验');
+ // 存档份数上限：keep=2 时第三次快照后只留最新 2 份；keep=0 不限；非法值被路由拒绝
+ assert.equal((await route('POST','/storage/config',{keep:2})).keep,2);assert.equal(storage.config().keep,2);
+ const s2=await storage.snapshot({force:true});assert.equal(s2.ok,true);
+ const s3=await storage.snapshot({force:true});assert.equal(s3.ok,true);
+ assert.equal(storage.list().length,2);assert(storage.list().some(x=>x.file===s3.file));
+ assert.equal((await route('POST','/storage/config',{keep:201})).ok,false);assert.equal((await route('POST','/storage/config',{keep:-1})).ok,false);
+ saveConfig({storage:{keep:0}});const s4=await storage.snapshot({force:true});assert.equal(s4.ok,true);assert.equal(storage.list().length,3);
+ console.log('✓ 全库无损快照、校验恢复、容量告警、范围限定聊天存档、过期清理、存档份数上限和权限校验');
 }finally{storage.stop();chats.stop();db.close();rmSync(home,{recursive:true,force:true});}

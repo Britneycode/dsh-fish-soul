@@ -5,14 +5,40 @@ name: test
 on:
   push:
     branches: [main]
+    # 纯文档改动不跑测试（38 个套件不读任何根 md，已核实）；main 每个代码提交照常全量跑
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
     branches: [main]
+    # ⚠️ PR 不能用 paths-ignore：跳过后必需的 "test" check 会一直 pending 卡住合并。
+    # 取而代之：job 里 diff 判断，纯文档改动 30 秒内成功退出，check 有结论不卡 PR。
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   npm-test:
     runs-on: ubuntu-latest
+    # 只有 PR 允许取消在跑的旧 run（连推时只看最新结果）；push 到 main 永不取消——
+    # 每个提交都要完整跑过，失败绝不能被后一个成功提交「盖掉」
+    concurrency:
+      group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
+      - name: 判断是否纯文档改动
+        if: github.event_name == 'pull_request'
+        id: docs
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1 >/dev/null 2>&1
+          BASE=$(git merge-base HEAD origin/${{ github.base_ref }})
+          # 只看「文档之外」有没有动过文件
+          CODE=$(git diff --name-only "$BASE" HEAD -- . ':(exclude)**.md' ':(exclude)docs/**')
+          if [ -z "$CODE" ]; then echo "only=1" >> "$GITHUB_OUTPUT"; echo "纯文档改动，跳过测试"; else echo "有代码改动"; fi
       - uses: actions/setup-node@v4
+        if: steps.docs.outputs.only != '1'
         with:
           node-version: 22
-      - run: npm test
+
+      # 并行 runner：从 package.json 解析全部 38 个套件，并发 4 跑（ubuntu-latest 4 vCPU）
+      # 串行 npm test 的命令保留在 package.json，本地照样可用
+      - run: node test/parallel.mjs 4
+        if: steps.docs.outputs.only != '1'

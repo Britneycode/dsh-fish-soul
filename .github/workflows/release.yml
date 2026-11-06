@@ -8,6 +8,10 @@ on:
     branches: [main]
     paths: [package.json, .github/workflows/release.yml]
   workflow_dispatch:
+# 连推多个版本号提交时旧 run 直接取消（发版步骤幂等，取消安全）
+concurrency:
+  group: release
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
@@ -22,7 +26,13 @@ jobs:
         run: |
           VER=$(node -p "require('./package.json').version")
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
-          if git rev-parse -q --verify "refs/tags/v$VER" >/dev/null; then echo "skip=1" >> "$GITHUB_OUTPUT"; fi
+          if git rev-parse -q --verify "refs/tags/v$VER" >/dev/null; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "tag v$VER 已存在，整个发版流程跳过"
+            exit 0
+          fi
+          # 只在真发版时校验 README；tag 已存在（发版已完成）时跳过，
+          # 避免 README 后续改动把已完成的 workflow 标红
           grep -q "版本 \*\*$VER\*\*" README.md || { echo "README 里的版本不是 $VER"; exit 1; }
       - name: 正文
         if: steps.v.outputs.skip != '1'
@@ -62,19 +72,23 @@ jobs:
           npm publish --//registry.npmjs.org/:_authToken="$NPM_TOKEN"
       - name: 校验四环
         # 收尾校验：npm latest 要等于本次版本、gitHead 要等于本次提交。registry 同步有快有慢
-        # （0.12.0 约 2 分钟，0.13.1 超过 3 分钟才挂 latest），等 10 分钟；期间每轮打出当前值，别让人干瞪眼。
+        # （0.12.0 约 2 分钟，0.13.1 超过 3 分钟才挂 latest），最多等 5 分钟。
+        # 轮询从 5s 指数退避到 30s 封顶：同步快时不用白等一个 30s 周期，慢时减少无意义请求。
         if: steps.v.outputs.skip != '1'
         run: |
           VER='${{ steps.v.outputs.ver }}'
-          LATEST=$(curl -s "https://registry.npmjs.org/dsh-fish-soul" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))['dist-tags'].latest")
-          for i in $(seq 1 20); do
-            [ "$LATEST" = "$VER" ] && break
-            echo "registry latest 还是 $LATEST，第 $i 次等待 30s…"
-            sleep 30
-            LATEST=$(curl -s "https://registry.npmjs.org/dsh-fish-soul" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))['dist-tags'].latest")
+          latest() { curl -s "https://registry.npmjs.org/dsh-fish-soul" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))['dist-tags'].latest"; }
+          LATEST=$(latest)
+          ELAPSED=0; WAIT=5
+          while [ "$LATEST" != "$VER" ] && [ $ELAPSED -lt 300 ]; do
+            echo "registry latest 还是 $LATEST，等 ${WAIT}s…"
+            sleep $WAIT; ELAPSED=$((ELAPSED+WAIT))
+            [ $WAIT -lt 30 ] && WAIT=$((WAIT*2))
+            [ $WAIT -gt 30 ] && WAIT=30
+            LATEST=$(latest)
           done
           if [ "$LATEST" != "$VER" ]; then
-            echo "::error::npm latest 还是 $LATEST（等了 10 分钟），四环没对齐"
+            echo "::error::npm latest 还是 $LATEST（等了 ${ELAPSED}s），四环没对齐"
             exit 1
           fi
           HEAD=$(curl -s "https://registry.npmjs.org/dsh-fish-soul/$VER" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).gitHead")

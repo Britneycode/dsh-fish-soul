@@ -186,7 +186,7 @@ export async function run(t) {
 
 	// 5. 抖音：发图文（画卡片 → 创作者中心），回作品评论（第一次只记、作者自己的不回、要验证就停）
 	{
-		const { DouyinSocial, noteTitle, commentKey, pickMoodTheme, pickRecommendedSong } = await import('../lib/douyin-social.js');
+		const { DouyinSocial, noteTitle, commentKey, pickMoodTheme, pickRecommendedSong, LIST_COMMENTS_JS } = await import('../lib/douyin-social.js');
 		const { readFileSync, existsSync } = await import('node:fs');
 		assert.equal(noteTitle('今天下雨了。好想睡觉'), '今天下雨了');
 		assert.equal(noteTitle('一'.repeat(30)), '一'.repeat(20));
@@ -306,6 +306,47 @@ export async function run(t) {
 		assert.equal(r.replied, 1);
 		assert.deepEqual(dyd.replies.at(-1), ['路人丁', '哈哈谢谢']);
 		assert.ok(dsocial.status().comments.recent.some((x) => x.name === '路人丁' && x.status === 'replied'));
+
+		// LIST_COMMENTS_JS：拆行兜底跳过「...」截断行和「展开」按钮行（2026-11-06 实测 19/20 条评论被读成「...」，模型看不到真内容）
+		{
+			// 最小 DOM stub：只实现解析脚本用到的 querySelectorAll / querySelector
+			const makeItem = (lines, statsText) => ({
+				innerText: lines.join('\n'),
+				querySelector: (sel) => (sel.includes('stats') ? { innerText: statsText, querySelectorAll: () => [] } : null),
+				querySelectorAll: () => []
+			});
+			const items = [
+				makeItem(['逍遥', '正常，都是这么过来的', '作者', '96 分享 回复'], '96 分享 回复'),
+				makeItem(['燕燕', '...', '展开', '12 分享 回复'], '12 分享 回复'),
+				makeItem(['飞', '···', '3 分享 回复'], '3 分享 回复')
+			];
+			const fakeDocument = { querySelectorAll: () => items };
+			const fn = new Function('document', `return ${LIST_COMMENTS_JS}`);
+			const list = fn(fakeDocument);
+			assert.equal(list[0].author, '逍遥');
+			assert.equal(list[0].content, '正常，都是这么过来的', '拆行兜底读到真正文');
+			assert.equal(list[1].content, '', '「...」截断行不再被当成评论内容');
+			assert.equal(list[2].content, '', '「···」同样跳过');
+		}
+		// driver.reply()：content 是「...」这类截断残渣时，查找键退化为只按作者（2026-11-06：5 条想回的评论全 NOT_FOUND）
+		{
+			const { douyinSocialDriver } = await import('../lib/douyin-social.js');
+			const seenWant = [];
+			const fakeBrowser = {
+				eval: async (js) => {
+					const m = String(js).match(/const want = (\{.*?\});/s);
+					if (m) { seenWant.push(JSON.parse(m[1])); return true; }
+					if (String(js).includes('data-fish-box')) return '';
+				 return true;
+				},
+				send: async () => {}
+			};
+			const driver = douyinSocialDriver({ running: true, loggedIn: true, browser: fakeBrowser });
+			await driver.reply({ author: '燕燕', content: '...' }, '哈哈');
+			assert.equal(seenWant.at(-1).content, null, '「...」内容只按作者找');
+			await driver.reply({ author: '逍遥', content: '正常，都是这么过来的' }, '嗯嗯');
+			assert.equal(seenWant.at(-1).content, '正常，都是这么过来的', '正常内容照常按作者+内容找');
+		}
 	}
 	ok('抖音：发图文（卡片 + 标题 + 描述）/ 配歌从推荐列表里挑 / 创作者中心没登录提醒 / 要验证就停 6 小时 / 回作品评论（第一次只记、作者不回、每小时上限、重开页面）');
 

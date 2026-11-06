@@ -25,7 +25,8 @@
     "memory",
     "qq",
     "bilibili",
-    "douyin"
+    "douyin",
+    "snowluma"
   ],
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": "*",

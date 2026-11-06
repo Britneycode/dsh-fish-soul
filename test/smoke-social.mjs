@@ -186,7 +186,7 @@ export async function run(t) {
 
 	// 5. 抖音：发图文（画卡片 → 创作者中心），回作品评论（第一次只记、作者自己的不回、要验证就停）
 	{
-		const { DouyinSocial, noteTitle, commentKey, pickMusicTheme } = await import('../lib/douyin-social.js');
+		const { DouyinSocial, noteTitle, commentKey, pickMoodTheme, pickRecommendedSong } = await import('../lib/douyin-social.js');
 		const { readFileSync, existsSync } = await import('node:fs');
 		assert.equal(noteTitle('今天下雨了。好想睡觉'), '今天下雨了');
 		assert.equal(noteTitle('一'.repeat(30)), '一'.repeat(20));
@@ -194,10 +194,12 @@ export async function run(t) {
 		const locks = [];
 		const host = { running: true, loggedIn: true, exclusive: async (label, fn) => { locks.push(label); return await fn(); } };
 		const dcfg = { enabled: true, masterName: '主人抖音', post: { enabled: true, perDay: 1 }, comments: { enabled: false, perHour: 2 } };
-		const dyd = { published: [], replies: [], publishResult: { ok: true }, replyResult: () => ({ ok: true }), works: [{ id: '7001', kind: 'note', title: '晚饭吃了泡面' }], comments: new Map(), opened: 0 };
+		const dyd = { prepped: [], published: [], replies: [], recommended: ['晚风心里吹', '人间烟火', '小美满'], prepareResult: { ok: true }, publishResult: { ok: true }, replyResult: () => ({ ok: true }), works: [{ id: '7001', kind: 'note', title: '晚饭吃了泡面' }], comments: new Map(), opened: 0 };
 		const driver = {
 			renderCard: async (text, foot, theme) => { dyd.card = [text, foot, theme]; return Buffer.from('89504e470d0a1a0a', 'hex'); },
-			publishNote: async (x) => { dyd.published.push({ ...x, png: existsSync(x.file) ? readFileSync(x.file).subarray(0, 4).toString('hex') : '' }); return dyd.publishResult; },
+			prepareNote: async (x) => { dyd.prepped.push({ ...x, png: existsSync(x.file) ? readFileSync(x.file).subarray(0, 4).toString('hex') : '' }); return dyd.prepareResult; },
+			listRecommendedMusic: async () => dyd.recommended,
+			publishNote: async (x) => { dyd.published.push(x); return dyd.publishResult; },
 			listWorks: async () => dyd.works,
 			openWork: async (w) => { dyd.opened++; return { ok: dyd.comments.has(w.id) }; },
 			listComments: async () => (dyd.comments.get('7001') ?? []).map((c, i) => ({ i, canReply: true, isAuthor: false, ...c })),
@@ -206,9 +208,10 @@ export async function run(t) {
 		const dnotes = [];
 		const notify = [];
 		let dyOut = '下雨天适合躺着\n什么都不想干';
+		let dyMoodOut = '';
 		let dyMusicOut = '';
 		const dsocial = new DouyinSocial({
-			db, clock, host, driver, getConfig: () => dcfg, callLlm: async (p) => { prompts.push(p); return /背景音乐/.test(p) ? dyMusicOut : (typeof dyOut === 'function' ? dyOut(p) : dyOut); },
+			db, clock, host, driver, getConfig: () => dcfg, callLlm: async (p) => { prompts.push(p); return /背景音乐/.test(p) ? dyMusicOut : (/「心情」/.test(p) ? dyMoodOut : (typeof dyOut === 'function' ? dyOut(p) : dyOut)); },
 			persona: () => ({ name: '鱼', brief: '' }), note: (k, x) => dnotes.push([k, x]), notify: (k, t) => notify.push([k, t]),
 			replyGapMs: 0, postRealGapMs: 0, random: () => 0.9, cardDir: join(home, 'cards')
 		});
@@ -217,26 +220,35 @@ export async function run(t) {
 		assert.ok(prompts.some((p) => /文字卡片/.test(p)), '文案 prompt 还在发');
 		assert.equal(dyd.card[0], '下雨天适合躺着\n什么都不想干');
 		assert.match(dyd.card[1], /^\d{4}\.\d{2}\.\d{2}$/);
+		assert.deepEqual([dyd.prepped[0].title, dyd.prepped[0].text, dyd.prepped[0].png], ['下雨天适合躺着', '下雨天适合躺着\n什么都不想干', '89504e47']);
 		assert.equal(dyd.published[0].music, '', '挑歌 LLM 没输出：不配音乐，发布照常');
-		assert.deepEqual([dyd.published[0].title, dyd.published[0].text, dyd.published[0].png], ['下雨天适合躺着', '下雨天适合躺着\n什么都不想干', '89504e47']);
-		// 挑歌：mood 映射主题、歌名带上；页面没配上（musicPicked false）也照样发布，只是记一笔
-		dyMusicOut = '```json\n{"mood":"blue","music":"若月亮没来","reason":"配丧的"}\n```';
+		assert.ok(prompts.some((p) => /背景音乐/.test(p) && /晚风心里吹/.test(p)), '推荐歌名喂给模型了');
+		// 心情映射卡片主题；歌只能从推荐列表里挑
+		dyMoodOut = '```json\n{"mood":"blue","reason":"有点丧"}\n```';
+		dyMusicOut = '晚风心里吹';
+		dyd.prepped.length = 0;
 		dyd.published.length = 0;
 		r = await dsocial.post({ force: true });
 		assert.equal(r.ok, true, r.error);
-		assert.equal(dyd.published[0].music, '若月亮没来');
+		assert.equal(dyd.published[0].music, '晚风心里吹', '从推荐歌里挑一首');
 		assert.equal(dyd.card[2], 1, 'blue → 浅蓝主题');
-		assert.ok(dnotes.some(([k, x]) => k === 'post' && /配了首《若月亮没来》/.test(x.reason)));
+		assert.ok(dnotes.some(([k, x]) => k === 'post' && /配了首《晚风心里吹》/.test(x.reason)));
 		dyd.publishResult = { ok: true, musicPicked: false };
 		dyd.published.length = 0;
 		r = await dsocial.post({ force: true });
 		assert.equal(r.ok, true, '配歌失败不影响发布');
 		assert.ok(dnotes.some(([k, x]) => k === 'post' && /没配上/.test(x.reason)));
 		dyd.publishResult = { ok: true };
-		// pickMusicTheme：宽容解析 + 池外歌名丢弃
-		assert.deepEqual(pickMusicTheme('垃圾输出没有 JSON', () => 0.9), { theme: 4, music: '' });
-		assert.equal(pickMusicTheme('{"mood":"pink","music":"不存在的歌"}').music, '');
-		assert.equal(pickMusicTheme('{"mood":"dream","music":"月亮照山川"}').theme, 2);
+		// pickMoodTheme：宽容解析 + 认不出就随机主题
+		assert.deepEqual(pickMoodTheme('垃圾输出没有 JSON', () => 0.9), { theme: 4, reason: '' });
+		assert.equal(pickMoodTheme('{"mood":"dream"}').theme, 2);
+		assert.equal(pickMoodTheme('{"mood":"pink"}').theme, 4);
+		// pickRecommendedSong：只能挑列表里的歌，模型编的名字不算
+		assert.equal(pickRecommendedSong('晚风心里吹', ['晚风心里吹', '小美满']), '晚风心里吹');
+		assert.equal(pickRecommendedSong('配个《晚风心里吹》', ['晚风心里吹']), '晚风心里吹');
+		assert.equal(pickRecommendedSong('不存在的歌', ['晚风心里吹']), '');
+		assert.equal(pickRecommendedSong('', ['晚风心里吹']), '');
+		assert.equal(pickRecommendedSong('晚风心里吹', []), '');
 		assert.ok(locks.includes('发抖音图文'), '在浏览器锁里发');
 		assert.equal(db.prepare("SELECT COUNT(*) AS n FROM social_post WHERE platform = 'douyin'").get().n, 3, 'force 发了 3 次（含配歌两次）');
 		assert.ok(db.prepare("SELECT 1 FROM memory WHERE owner_id = 'self' AND content LIKE '我在抖音发了条图文：%'").get());
@@ -295,7 +307,7 @@ export async function run(t) {
 		assert.deepEqual(dyd.replies.at(-1), ['路人丁', '哈哈谢谢']);
 		assert.ok(dsocial.status().comments.recent.some((x) => x.name === '路人丁' && x.status === 'replied'));
 	}
-	ok('抖音：发图文（卡片 + 标题 + 描述）/ 创作者中心没登录提醒 / 要验证就停 6 小时 / 回作品评论（第一次只记、作者不回、每小时上限、重开页面）');
+	ok('抖音：发图文（卡片 + 标题 + 描述）/ 配歌从推荐列表里挑 / 创作者中心没登录提醒 / 要验证就停 6 小时 / 回作品评论（第一次只记、作者不回、每小时上限、重开页面）');
 
 	// 6. 抖音刷到的分享：能发抖音私信就发给抖音里的主人，不然走 QQ；抖音私信只放行分享
 	{

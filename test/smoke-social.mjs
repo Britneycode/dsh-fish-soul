@@ -307,26 +307,50 @@ export async function run(t) {
 		assert.deepEqual(dyd.replies.at(-1), ['路人丁', '哈哈谢谢']);
 		assert.ok(dsocial.status().comments.recent.some((x) => x.name === '路人丁' && x.status === 'replied'));
 
-		// LIST_COMMENTS_JS：拆行兜底跳过「...」截断行和「展开」按钮行（2026-11-06 实测 19/20 条评论被读成「...」，模型看不到真内容）
+		// LIST_COMMENTS_JS：正文取「作者信息块的下一个兄弟节点」，不再把「...」更多按钮当正文
+		// （2026-11-06 连真浏览器 dump 出真实结构：item 内 [data-e2e=video-comment-more] 文本就是「...」，19/20 条评论被读成「...」）
 		{
-			// 最小 DOM stub：只实现解析脚本用到的 querySelectorAll / querySelector
-			const makeItem = (lines, statsText) => ({
-				innerText: lines.join('\n'),
-				querySelector: (sel) => (sel.includes('stats') ? { innerText: statsText, querySelectorAll: () => [] } : null),
-				querySelectorAll: () => []
-			});
+			// 按真实结构搭 DOM stub：叶子节点的 innerText / 左右关系照影子
+			const leaf = (text, cls = '') => ({ children: [], className: cls, innerText: text });
+			const makeItem = ({ name, text, more = true, isAuthor = false }) => {
+				const nameLeaf = leaf(name);
+				const nameLink = { children: [], innerText: name, querySelectorAll: () => [nameLeaf] };
+				const moreLeaf = more ? leaf('...') : null;
+				const infoWrapLeaf = leaf(name + (more ? '...' : ''));
+				const infoWrap = { children: [], className: 'xRxUIIMP comment-item-info-wrap', innerText: infoWrapLeaf.innerText, nextElementSibling: null };
+				const body = { children: [], innerText: text };
+				infoWrap.nextElementSibling = body; // 真实结构：正文紧跟作者信息块
+				const statsLeaf = leaf('回复');
+				const stats = { innerText: '0 分享 回复', querySelectorAll: () => [statsLeaf] };
+				const authorMark = isAuthor ? [leaf('作者')] : [];
+				const all = [...authorMark];
+				return {
+					innerText: name + (more ? '...' : '') + text + '3天前·浙江0分享回复',
+					querySelector: (sel) => {
+						if (sel.includes('comment-item-info-wrap')) return infoWrap;
+						if (sel.includes('video-comment-more')) return moreLeaf;
+						if (sel.includes('/user/')) return nameLink;
+						if (sel.includes('stats')) return stats;
+						return null;
+					},
+					querySelectorAll: () => all
+				};
+			};
 			const items = [
-				makeItem(['逍遥', '正常，都是这么过来的', '作者', '96 分享 回复'], '96 分享 回复'),
-				makeItem(['燕燕', '...', '展开', '12 分享 回复'], '12 分享 回复'),
-				makeItem(['飞', '···', '3 分享 回复'], '3 分享 回复')
+				makeItem({ name: '逍遥', text: '正常，都是这么过来的' }),
+				makeItem({ name: '燕燕', text: '这是一条比较长的评论内容' }),
+				makeItem({ name: '鱼', text: '我自己发的', isAuthor: true }),
+				makeItem({ name: '萍', text: '晚安啦', more: false })
 			];
-			const fakeDocument = { querySelectorAll: () => items };
 			const fn = new Function('document', `return ${LIST_COMMENTS_JS}`);
-			const list = fn(fakeDocument);
+			const list = fn({ querySelectorAll: () => items });
 			assert.equal(list[0].author, '逍遥');
-			assert.equal(list[0].content, '正常，都是这么过来的', '拆行兜底读到真正文');
-			assert.equal(list[1].content, '', '「...」截断行不再被当成评论内容');
-			assert.equal(list[2].content, '', '「···」同样跳过');
+			assert.equal(list[0].content, '正常，都是这么过来的', '正文取兄弟节点，不是「...」按钮');
+			assert.equal(list[1].content, '这是一条比较长的评论内容');
+			assert.equal(list[2].isAuthor, true, '「作者」标记认出来');
+			assert.equal(list[3].content, '晚安啦', '没有「更多」按钮时也正确');
+			assert.ok(list.every((c) => c.content !== '...' && c.content !== ''), '不再把「...」当正文');
+			assert.ok(list.every((c) => c.canReply === true));
 		}
 		// driver.reply()：content 是「...」这类截断残渣时，查找键退化为只按作者（2026-11-06：5 条想回的评论全 NOT_FOUND）
 		{

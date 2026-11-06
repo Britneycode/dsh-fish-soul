@@ -294,7 +294,7 @@ export async function run(t) {
 		assert.equal(turns.at(-1).interject, true);
 		assert.deepEqual(turns.at(-1).backlog, ['u20002：今天下雨了好烦']);
 		assert.equal(gw.decisions[0].kind, 'interject'); assert.match(gw.decisions[0].reason, /自己想插一句（100%）/);
-		assert.equal(gw.replyTo.has(fups('group:991')[0].id), false, '插话不引用');
+		assert.equal(gw.turnState(fups('group:991')[0].id).replyTo, null, '插话不引用');
 		await g(991, 30003, '真的没人吗大家');
 		await waitFor(() => fups('group:991').length === 2);
 		await g(991, 30003, '好吧那我自己找');
@@ -335,7 +335,7 @@ export async function run(t) {
 		await poke(1000);
 		await waitFor(() => fups('group:993').length === 1);
 		assert.match(fups('group:993')[0].msg.content[0].text, /戳了戳你/);
-		assert.equal(gw.replyTo.has(fups('group:993')[0].id), false, '戳一戳没有消息可引用');
+		assert.equal(gw.turnState(fups('group:993')[0].id).replyTo, null, '戳一戳没有消息可引用');
 		await poke(1000); await poke(55555, 20002);
 		await sleep(200);
 		assert.equal(fups('group:993').length, 1);
@@ -363,6 +363,67 @@ export async function run(t) {
 		await waitFor(() => !gw.isPaused('group:995'));
 		await g(995, 20002, '回来啦', [{ type: 'at', data: { qq: '1000' } }]);
 		await waitFor(() => fups('group:995').length === 1);
+
+		// 引用我自己（内存里没记录 = 宿主刚重启）：问一次 QQ 也要认出是点名
+		{
+			const before997 = fups('group:997').length;
+			gw.channel.getMessage = async (id) => ({ message_id: id, message_type: 'group', sender: { user_id: '1000', nickname: '小鱼' }, message: [{ type: 'text', data: { text: '她之前说的话' } }] });
+			await g(997, 20002, '这条是在引用你', [{ type: 'reply', data: { id: '99999' } }]);
+			await waitFor(() => fups('group:997').length === before997 + 1);
+			assert.equal(gw.decisions[0].reason, '点名', '引用她自己（内存没记录）也算点名');
+			// 引用的是别人 → 不算点名
+			gw.channel.getMessage = async (id) => ({ message_id: id, message_type: 'group', sender: { user_id: '20002', nickname: '别人' }, message: [{ type: 'text', data: { text: '别人的话' } }] });
+			gw.decisions.length = 0;
+			await g(997, 20002, '这条引用的是别人', [{ type: 'reply', data: { id: '88888' } }]);
+			await sleep(200);
+			assert.notEqual(gw.decisions[0]?.reason ?? '', '点名', '引用别人不算点名');
+			gw.channel.getMessage = async () => null;
+		}
+
+		// quoteLine：取不到原文 / 不是文字，要说清楚，别让模型对着空话瞎接
+		{
+			gw.channel.getMessage = async () => null;
+			assert.match(await gw.quoteLine('123'), /原文没取到/, '取不到原文要说取不到');
+			gw.channel.getMessage = async (id) => ({ message_id: id, message_type: 'group', sender: { user_id: '20002', nickname: '阿四' }, message: [{ type: 'image', data: { file: 'x.png' } }] });
+			assert.match(await gw.quoteLine('124'), /阿四：【图片】/, '图片引用要带占位');
+			gw.channel.getMessage = async (id) => ({ message_id: id, message_type: 'group', sender: { user_id: '20002', nickname: '阿四' }, message: [] });
+			assert.match(await gw.quoteLine('124b'), /不是文字消息/, '空内容要说不是文字');
+			gw.channel.getMessage = async (id) => ({ message_id: id, message_type: 'group', sender: { user_id: '20002', nickname: '阿四' }, message: [{ type: 'text', data: { text: '他说的原话' } }] });
+			assert.match(await gw.quoteLine('125'), /阿四：他说的原话/, '正常引用要带作者和原文');
+			gw.channel.getMessage = async () => null;
+		}
+
+		// 并发 dispatch：两条消息同时进来，各自引用不同消息，回复不能串到别人那条
+		{
+			const mk = (messageId, replyId, user, text) => ({
+				m: { channel: 'qq', chatType: 'group', channelId: 'group:996', targetId: '996', groupId: '996', userId: String(user), nickname: `u${user}`, messageId: String(messageId), mentioned: true, replyId: String(replyId), text: `回我${messageId}`, images: [], links: [], timeMs: Date.now() },
+				person: null
+			});
+			const sentBefore = sent.length;
+			// 两次 dispatch 不 await，并发跑
+			const p1 = gw.dispatch('group:996', [mk(9001, 8001, 20002, '第一条')]);
+			const p2 = gw.dispatch('group:996', [mk(9002, 8002, 30003, '第二条')]);
+			await waitFor(() => fups('group:996').length === 2);
+			const [fu1, fu2] = fups('group:996');
+			assert.equal(fu1.msg.source.replyTo, '9001', '第一条消息的 replyTo 跟着消息走');
+			assert.equal(fu2.msg.source.replyTo, '9002', '第二条消息的 replyTo 跟着消息走');
+			// 按序触发两轮 turn/end，回复应该各自引用各自那条
+			gw.onSessionEvent({ id: fu1.id }, { type: 'user/message', data: fu1.msg });
+			gw.onSessionEvent({ id: fu1.id }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '回第一条' }] } } });
+			gw.onSessionEvent({ id: fu1.id }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+			await waitFor(() => sent.length > sentBefore);
+			const reply1 = sent[sent.length - 1][1];
+			assert.equal(reply1[0].type, 'reply', '第一轮回复带引用');
+			assert.equal(String(reply1[0].data.id), '9001', '第一轮引用第一条的消息');
+			gw.onSessionEvent({ id: fu2.id }, { type: 'user/message', data: fu2.msg });
+			gw.onSessionEvent({ id: fu2.id }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '回第二条' }] } } });
+			gw.onSessionEvent({ id: fu2.id }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+			await waitFor(() => sent.length > sentBefore + 1);
+			const reply2 = sent[sent.length - 1][1];
+			assert.equal(reply2[0].type, 'reply', '第二轮回复带引用');
+			assert.equal(String(reply2[0].data.id), '9002', '第二轮引用第二条的消息');
+			await Promise.allSettled([p1, p2]);
+		}
 		gw.stop?.();
 	}
 	ok('群：插话（默认关、概率、带上刚才的话、不引用、每小时上限、睡觉 / 冷却不插）、叫名字算点名、戳一戳、撤回不回、群里暂停命令');

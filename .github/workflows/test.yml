@@ -28,8 +28,12 @@ jobs:
         if: github.event_name == 'pull_request'
         id: docs
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=1 >/dev/null 2>&1
+          # actions/checkout 默认浅克隆（depth=1，PR 上只有一个 merge commit），
+          # 直接 fetch --depth=1 的主干没有共同祖先 → merge-base 必失败。
+          # 先补全历史再算 base。
+          git fetch --unshallow origin ${{ github.base_ref }} 2>/dev/null || git fetch origin ${{ github.base_ref }}
           BASE=$(git merge-base HEAD origin/${{ github.base_ref }})
+          if [ -z "$BASE" ]; then echo "取不到与 ${{ github.base_ref }} 的共同祖先"; exit 1; fi
           # 只看「文档之外」有没有动过文件
           CODE=$(git diff --name-only "$BASE" HEAD -- . ':(exclude)**.md' ':(exclude)docs/**')
           if [ -z "$CODE" ]; then echo "only=1" >> "$GITHUB_OUTPUT"; echo "纯文档改动，跳过测试"; else echo "有代码改动"; fi

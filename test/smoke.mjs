@@ -901,7 +901,7 @@ assert.equal(fq.msg.source.kind, 'fish-soul/qq');
 assert.match(fq.msg.content[0].text, /^【分享卡片：猫咪打架实录】\n【视频 BV1Ab411c7Zz：《猫咪打架实录》/);
 ok('QQ 分享的 B站卡片：抠出 BV 号，附上视频简介 / 字幕 / 热评');
 
-// 28 自走层：空闲时段才刷，每天 ≤ perDay，两轮间隔 ≥ 90 虚拟分钟
+// 28 自走层：空闲时段才刷，每天 ≤ perDay，两轮间隔 ≥ 30 虚拟分钟
 {
 	const home3 = tmpHome('dsh-b-');
 	const prevHome = process.env.DSH_HOME; process.env.DSH_HOME = home3;
@@ -917,15 +917,15 @@ ok('QQ 分享的 B站卡片：抠出 BV 号，附上视频简介 / 字幕 / 热�
 	});
 	const tick = async () => { await blife.tick(); await sleep(5); };
 	await tick(); assert.equal(runs, 1);
-	t += 30 * 60_000; await tick(); assert.equal(runs, 1, '90 虚拟分钟内不再刷');
-	t += 61 * 60_000; await tick(); assert.equal(runs, 2);
+	t += 29 * 60_000; await tick(); assert.equal(runs, 1, '29 虚拟分钟内不再刷');
+	t += 2 * 60_000; await tick(); assert.equal(runs, 2);
 	t = Date.parse('2030-01-01T12:00:00Z'); await tick(); assert.equal(runs, 2, '每天上限 2');
 	t = Date.parse('2030-01-02T01:00:00Z'); await tick(); assert.equal(runs, 2, '09:00 不是空闲时段');
 	t = Date.parse('2030-01-02T06:30:00Z'); biliOn = false; await tick(); assert.equal(runs, 2, 'B站没开不刷');
 	biliOn = true; await tick(); assert.equal(runs, 3, '新的一天重新计数');
 	bdb.close();
 }
-ok('自走层刷 B站：只在空闲时段、每天 ≤ 上限、两轮间隔 ≥ 90 虚拟分钟');
+ok('自走层刷 B站：只在空闲时段、每天 ≤ 上限、两轮间隔 ≥ 30 虚拟分钟');
 
 // 29 退出登录：凭据文件删掉，轮询停
 assert.equal((await call('POST', '/bili/logout', {})).json.ok, true);

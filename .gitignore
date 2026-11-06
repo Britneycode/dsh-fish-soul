@@ -41,6 +41,8 @@ scripts/probe-group-real.mjs
 scripts/probe-group-uid-api.mjs
 scripts/verify-mention-rule.mjs
 scripts/verify-sender-rule.mjs
+# 群管理真机自检脚本（读本机令牌、对真实群发消息，不进仓库）
+scripts/verify-group-admin-live.mjs
 .alma-snapshots
 
 # AI 交接文档：只在本机，不进公开仓库（含本机路径 / 半成品状态 / 内部复盘）

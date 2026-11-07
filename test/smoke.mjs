@@ -491,6 +491,10 @@ ok('WS 直连：带 access_token，连上后取登录号和好友列表');
 const wsDir = join(home, 'fish-soul', 'workspace');
 mkdirSync(join(wsDir, '_stickers'), { recursive: true });
 writeFileSync(join(wsDir, '_stickers', 'ok.png'), png);
+// ok.png 带标签：提示词里要能看见「表示同意」这种描述，光有文件名她只能瞎猜
+db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run('stickers.collected', JSON.stringify([
+	{ file: 'ok.png', hash: 'h1', workspacePath: wsDir, from: 'QQ·某人', summary: '', tags: ['表示同意', 'OK'], tagsBy: 'self', at: Date.now() }
+]));
 // 1×1 的 webp（无损）：B站 / 抖音发之前要转成 png
 const webp1 = Buffer.from('UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==', 'base64');
 writeFileSync(join(wsDir, '_stickers', 'wow.webp'), webp1);

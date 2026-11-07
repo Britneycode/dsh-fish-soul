@@ -74,7 +74,11 @@ export async function run(t) {
 		assert.equal(voiceMod.voiceConfig({ baseURL: 'https://other/v1' }, { baseURL: 'https://api.siliconflow.cn/v1', apiKey: 'sk-emb' }).apiKey, '', '换了地址不带检索的 key');
 		assert.equal(voiceMod.voiceConfig({ speak: 'loud', maxChars: 5 }).speak, 'mirror');
 		assert.equal(voiceMod.voiceConfig({ maxChars: 5 }).maxChars, 10);
-		assert.deepEqual(stMod.parseCollect('哈哈\n[收藏表情:狗头]\n[存表情：猫猫/震惊]'), { text: '哈哈', names: ['狗头', '猫猫/震惊'] });
+		assert.deepEqual(stMod.parseCollect('哈哈\n[收藏表情:狗头]\n[存表情：猫猫/震惊]'),
+			{ text: '哈哈', names: ['狗头', '猫猫/震惊'], items: [{ name: '狗头', tags: [] }, { name: '猫猫/震惊', tags: [] }] });
+		// 竖线后面是标签：以后按感觉挑表情要靠它
+		assert.deepEqual(stMod.parseCollect('好耶\n[收藏表情:得意猫|得意,猫]'),
+			{ text: '好耶', names: ['得意猫'], items: [{ name: '得意猫', tags: ['得意', '猫'] }] });
 		assert.equal(stMod.stickerName(' ../猫猫/震惊?.png '), '猫猫震惊');
 		assert.deepEqual(stMod.stickerConfig(undefined), { collect: true, perDay: 10 });
 		assert.deepEqual(slMod.slangConfig(undefined), { enabled: true, minLines: 60, intervalHours: 6, expressions: true, privateChats: true });

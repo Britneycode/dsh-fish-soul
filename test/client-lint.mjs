@@ -82,3 +82,21 @@ assert.match(main, /subtab === "interface" \? Row\(\{ title: "显示开始" \}/)
 assert.match(main, /readGuideVisible\(\) && r\?\.ok/);
 assert.match(main, /current === "guide" \? "memory" : current/);
 console.log('  ✓ 开始入口：可隐藏、持久化并在界面设置中恢复');
+
+// 表单键必须对得上：useForm(data, () => ({...})) 里定义的键，和 form.xxx 用的键，
+// 拼错一个就变成 undefined —— 表现是数字框显示空白、改了还存不进去（#61 就踩过：
+// 初始化的键是 xxx，读的时候写成 form.yyy，空白了两天没人发现）。
+{
+	// 一个文件里有多套表单（QQ / B站 / 抖音各一块），键要合并起来看
+	const blocks = [...main.matchAll(/useForm\(data, \(\) => \(\{([\s\S]*?)\}\)\)/g)].map((m) => m[1]);
+	assert.ok(blocks.length > 0, '应该能找到 useForm 初始化块');
+	const initKeys = new Set();
+	for (const block of blocks) {
+		for (const m of block.matchAll(/(?:^|[\s{,])([A-Za-z_$][\w$]*)\s*:/g)) initKeys.add(m[1]);
+	}
+	const used = [...new Set([...main.matchAll(/form\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]))];
+	const missing = used.filter((k) => !initKeys.has(k));
+	assert.deepEqual(missing, [],
+		`这些 form 键读了但初始化块里没有（会显示空白 / 存不进去）：${missing.join(', ')}`);
+	console.log(`  ✓ 表单键对得上：${blocks.length} 套表单、${used.length} 个 form 键全有初始化`);
+}

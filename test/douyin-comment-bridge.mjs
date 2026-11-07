@@ -168,4 +168,39 @@ ok('抖音评论桥：Node 侧调用（透传 / 异常不外抛 / 桥没装）')
   ok('上传链路：授权 → 申请地址 → 传字节 → 提交 → 拿 uri');
 }
 
+{
+  // 桥的四个写/读方法都接**一个对象**（callBridge 传的是对象）
+  // —— 之前按位置参数接，cid 会变成 [object Object]（踩过两次）。
+  const src = mod.COMMENT_BRIDGE_SOURCE;
+  // 不用正则（转义太容易错）—— 直接找 'async <fn>(' 然后读括号里的内容
+  const argsOf = (fn) => {
+    const at = src.indexOf('async ' + fn + '(');
+    if (at < 0) return null;
+    const start = at + ('async ' + fn + '(').length;
+    const end = src.indexOf(')', start);
+    return src.slice(start, end).trim();
+  };
+  for (const fn of ['postComment', 'deleteComment', 'commentList']) {
+    const args = argsOf(fn);
+    assert.ok(args !== null, fn + ' 应该在桥里');
+    assert.equal(args, 'o', `${fn} 的入参应该是「一个对象」（callBridge 传的就是对象），实际是 (${args})`);
+  }
+  for (const fn of ['uploadAuth', 'emojiList']) {
+    const args = argsOf(fn);
+    assert.ok(args !== null, fn + ' 应该在桥里');
+    assert.equal(args, '', `${fn} 应该无参，实际是 (${args})`);
+  }
+  // uploadImage 在 Node 侧（页面里发 imagex 会被 CORS 挡）
+  assert.equal(typeof mod.uploadImage, 'function', 'uploadImage 在 Node 侧导出');
+  ok('桥方法统一接一个对象（callBridge 传的就是对象）');
+}
+
+{
+  // 页面在作品页上时，评论列表才给数据；页面停在 ?modal_id= 上是空的。
+  // （Referer 是受限头，fetch 里设不了，只能保证页面本身在那儿 —— driver 负责。）
+  assert.match(mod.COMMENT_BRIDGE_SOURCE, /comment\/list/, '有 commentList');
+  assert.match(mod.COMMENT_BRIDGE_SOURCE, /reply_id/, '列表里带 replyId');
+  ok('评论列表：接口版带 cid / replyId');
+}
+
 console.log('douyin-comment-bridge ok');

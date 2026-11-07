@@ -121,7 +121,7 @@ export async function run(t) {
 	assert.ok(dyBoot, '第一轮记基线');
 	assert.equal(dy.launches, 1);
 	assert.match(dy.launchOpts.userDataDir, /fish-soul[\\/]douyin-browser[\\/]edge$/);
-	assert.equal(dy.launchOpts.exe, '/fake/msedge.exe'); assert.ok(dy.launchOpts.extraArgs.includes('--mute-audio')); assert.equal(dy.launchOpts.preloadScripts.length, 1);
+	assert.equal(dy.launchOpts.exe, '/fake/msedge.exe'); assert.ok(dy.launchOpts.extraArgs.includes('--mute-audio')); assert.equal(dy.launchOpts.preloadScripts.length, 2, 'IM hook + 评论桥');
 	assert.equal(dy.canaries, 1, '启动时自检一次');
 	// 窗口：默认藏在后台（启动参数就在屏幕外，连上后再停一次）；显示一下 / 藏起来；换成正常显示马上挪回来
 	assert.ok(dy.launchOpts.extraArgs.includes('--window-position=-20000,0'));

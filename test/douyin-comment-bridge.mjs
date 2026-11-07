@@ -239,7 +239,7 @@ ok('抖音评论桥：Node 侧调用（透传 / 异常不外抛 / 桥没装）')
   const r = await social.replyImages('哈哈 ![得意](_stickers/得意猫.png)');
   assert.equal(r.text.trim(), '哈哈', '引用从文字里剥掉');
   assert.equal(r.images.length, 1, '解析出一张图');
-  assert.equal(r.images[0].format, 'png');
+  assert.equal(r.images[0].format, '', '不自己猜格式——交给 ImageX 返回的');
   assert.ok(r.images[0].bytes.equals(PNG), '读的是文件本体');
   console.log('✓ 图片评论：解析引用 → 读文件 → images');
 }
@@ -266,6 +266,48 @@ ok('抖音评论桥：Node 侧调用（透传 / 异常不外抛 / 桥没装）')
   assert.equal(r.images.length, 0, '文件不存在 → 没有图');
   assert.equal(r.text.trim(), '看这张', '引用照样剥掉');
   console.log('✓ 图片评论：文件不存在跳过');
+}
+
+{
+  // 格式：png / jpg / gif / webp 一律原样收，不挑扩展名、不转格式
+  // （实测 2026-11-08：gif 和 webp 都能直接发；「抖音不收 gif」是看评论框 accept 猜的，
+  //   那是文件选择器的 UI 过滤，走 API 绕开它）
+  const { DouyinSocial } = await import('../lib/douyin-social.js');
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpHome } = await import('./_tmp.mjs');
+  const home = tmpHome('dy-fmt-');
+  const ws = home + '/ws';
+  mkdirSync(ws + '/_stickers', { recursive: true });
+  const files = {
+    'a.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]),
+    'b.jpg': Buffer.from([0xFF, 0xD8, 0xFF, 1, 2, 3]),
+    'c.gif': Buffer.from('GIF89a123', 'latin1'),
+    'd.webp': Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), Buffer.alloc(4)]),
+  };
+  for (const [n, b] of Object.entries(files)) writeFileSync(ws + '/_stickers/' + n, b);
+  const social = new DouyinSocial({
+    host: { running: false, exclusive: async (n, fn) => fn() },
+    getConfig: () => ({}), log: () => {}, callLlm: async () => '',
+    stickers: { list: () => [], resolveFeelRefs: async (t) => ({ text: t, resolved: [] }) },
+    workspacePath: () => ws,
+    canvasConvert: async () => { throw new Error('不该调 canvas 转换'); },
+  });
+  for (const n of Object.keys(files)) {
+    const r = await social.replyImages(`看 ![x](_stickers/${n})`);
+    assert.equal(r.images.length, 1, `${n} 应该被收下（不挑格式）`);
+    assert.ok(r.images[0].bytes.equals(files[n]), `${n} 是原字节，不能被转换过`);
+    assert.equal(r.images[0].format, '', `${n} 不自己猜格式（交给 ImageX 返回的）`);
+  }
+  ok('图片评论：png/jpg/gif/webp 一律原样收（不转格式、不跳过 gif）');
+}
+
+{
+  // guessFormat 认得这四种（format 留空时它兜底）
+  assert.equal(mod.guessFormat(Buffer.from([0x89, 0x50, 0x4e, 0x47])), 'png');
+  assert.equal(mod.guessFormat(Buffer.from([0xFF, 0xD8, 0xFF])), 'jpeg');
+  assert.equal(mod.guessFormat(Buffer.from('GIF89a')), 'gif');
+  assert.equal(mod.guessFormat(Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), Buffer.alloc(4)])), 'webp');
+  ok('图片格式识别：png / jpeg / gif / webp');
 }
 
 console.log('douyin-comment-bridge ok');

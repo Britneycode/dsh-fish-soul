@@ -92,7 +92,7 @@ const { DouyinHost } = await import('../lib/channels/douyin.js');
 const { DouyinBrowser } = await import('../lib/douyin-browse.js');
 const { prepareImage, sniffImage, imageSize } = await import('../lib/imageconv.js');
 const db = openDatabase();
-const PORT = 47000 + Math.floor(Math.random() * 900);
+const PORT = Number(process.env.FISH_SOUL_TEST_PORT) || 47000 + Math.floor(Math.random() * 900);
 const pref = { browser: { kind: found[0].kind, customPath: '' } };
 const notes = [];
 const host = new DouyinHost({ db, port: PORT, getConfig: () => pref, notify: (k, t) => notes.push([k, t]) });

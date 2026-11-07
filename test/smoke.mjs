@@ -342,6 +342,8 @@ mod.testHooks.douyin = {
 		sendText: async (name, text) => { dy.sent.push([name, 'text', text]); return { ok: true }; },
 		sendImage: async (name, file) => { dy.sent.push([name, 'image', file]); return { ok: true }; },
 		sendEmoji: async (name, e) => (dy.emojis.includes(e) ? (dy.sent.push([name, 'emoji', e]), { ok: true }) : { ok: false, error: '没有这个表情' }),
+		// 已知表情名（真实现是抓过表情面板后攒下来的；测试里直接给 dy.emojis）
+		emojiNames: (limit = 40) => dy.emojis.slice(0, limit),
 		canary: async () => { dy.canaries++; return dy.canaryOk ? { ok: true, broken: [] } : { ok: false, broken: ['私信列表'] }; }
 	}),
 	readDetail: async ({ id }) => dy.details.get(id) ?? { ok: false, error: '没有' },

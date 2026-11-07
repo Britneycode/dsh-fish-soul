@@ -179,6 +179,8 @@ export async function run(t) {
 	// 接线断言：标签得真流到提示词里（光有文件名她只能瞎猜哪张合适）
 	assert.match(dyBlock, /ok\.png（表示同意、OK）/, '表情清单带标签');
 	assert.match(dyBlock, /wow\.webp(?!（)/, '没标签的照旧只给文件名（降级不报错）');
+	// 已知的抖音表情名要列给她（她写 [名字] 才能发出去）
+	assert.match(dyBlock, /这些确认能用：.*\[微笑\].*\[比心\]/, '抖音表情名清单进提示词');
 	const fa = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'douyin:阿二抖音'), 6000);
 	assert.ok(fa, '白名单里的人可以回');
 	const pa = db.prepare("SELECT * FROM person WHERE qq_uin = '20002'").get();

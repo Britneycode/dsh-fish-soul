@@ -220,4 +220,52 @@ ok('抖音评论桥：Node 侧调用（透传 / 异常不外抛 / 桥没装）')
   console.log('✓ 表情开关：默认关');
 }
 
+{
+  // 图片评论：replyImages 解析 `![x](_stickers/文件)` → 读文件 → images；文字里不再带引用
+  const { DouyinSocial } = await import('../lib/douyin-social.js');
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpHome } = await import('./_tmp.mjs');
+  const home = tmpHome('dy-img-');
+  const ws = home + '/ws';
+  mkdirSync(ws + '/_stickers', { recursive: true });
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  writeFileSync(ws + '/_stickers/得意猫.png', PNG);
+  const social = new DouyinSocial({
+    host: { running: false, exclusive: async (n, fn) => fn() },
+    getConfig: () => ({}), log: () => {}, callLlm: async () => '',
+    stickers: { list: () => [{ file: '得意猫.png', tags: ['得意'], exists: true }], resolveFeelRefs: async (t) => ({ text: t, resolved: [] }) },
+    workspacePath: () => ws,
+  });
+  const r = await social.replyImages('哈哈 ![得意](_stickers/得意猫.png)');
+  assert.equal(r.text.trim(), '哈哈', '引用从文字里剥掉');
+  assert.equal(r.images.length, 1, '解析出一张图');
+  assert.equal(r.images[0].format, 'png');
+  assert.ok(r.images[0].bytes.equals(PNG), '读的是文件本体');
+  console.log('✓ 图片评论：解析引用 → 读文件 → images');
+}
+
+{
+  // 没配 stickers：原样返回（降级，不炸）
+  const { DouyinSocial } = await import('../lib/douyin-social.js');
+  const social = new DouyinSocial({ host: { running: false }, getConfig: () => ({}), log: () => {}, callLlm: async () => '' });
+  const r = await social.replyImages('哈哈 ![得意](_stickers/x.png)');
+  assert.equal(r.images.length, 0, '没配 stickers 就没有图');
+  assert.equal(r.text, '哈哈 ![得意](_stickers/x.png)', '原文原样');
+  console.log('✓ 图片评论：没配 stickers 原样降级');
+}
+
+{
+  // 文件不存在：跳过这张，不炸
+  const { DouyinSocial } = await import('../lib/douyin-social.js');
+  const social = new DouyinSocial({
+    host: { running: false }, getConfig: () => ({}), log: () => {}, callLlm: async () => '',
+    stickers: { list: () => [], resolveFeelRefs: async (t) => ({ text: t, resolved: [] }) },
+    workspacePath: () => 'Z:/不存在',
+  });
+  const r = await social.replyImages('看这张 ![x](_stickers/没有.png)');
+  assert.equal(r.images.length, 0, '文件不存在 → 没有图');
+  assert.equal(r.text.trim(), '看这张', '引用照样剥掉');
+  console.log('✓ 图片评论：文件不存在跳过');
+}
+
 console.log('douyin-comment-bridge ok');

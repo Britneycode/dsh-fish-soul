@@ -80,6 +80,23 @@ export async function run(t) {
 		assert.deepEqual(stMod.parseCollect('好耶\n[收藏表情:得意猫|得意,猫]'),
 			{ text: '好耶', names: ['得意猫'], items: [{ name: '得意猫', tags: ['得意', '猫'] }] });
 		assert.equal(stMod.stickerName(' ../猫猫/震惊?.png '), '猫猫震惊');
+		// summary 白捡标签：真信息留下、废话丢掉（实测 5 张里 3 张是「[动画表情]」）
+		assert.deepEqual(stMod.tagsFromSummary('[可以可以]'), ['可以可以']);
+		assert.deepEqual(stMod.tagsFromSummary('［好］'), ['好'], '全角括号也认');
+		assert.deepEqual(stMod.tagsFromSummary('[动画表情]'), [], '废话不算标签');
+		assert.deepEqual(stMod.tagsFromSummary('[表情]'), [], '废话不算标签');
+		assert.deepEqual(stMod.tagsFromSummary(''), []);
+		assert.deepEqual(stMod.tagsFromSummary('[一个特别特别长的描述句子]'), [], '太长不当标签');
+		// 落库：summary 白捡的标签要真存进 collected（用独立工作区，不碰后面断言的 items[0] 顺序）
+		{
+			const box2 = new stMod.StickerBox({ db, getConfig: () => stMod.stickerConfig({}) });
+			const gotSum = box2.importImage({ bytes: PNG, mediaType: 'image/png', name: '捡来的', workspacePath: tmpHome('fish-v07-sum-'), summary: '[可以可以]' });
+			assert.deepEqual([gotSum.ok, gotSum.tags], [true, ['可以可以']], 'summary 白捡成标签');
+			assert.equal(box2.collected()[0].tagsBy, 'summary', '记下标签是白捡来的');
+			const gotOwn = box2.importImage({ bytes: PNG, mediaType: 'image/png', name: '自己标的', workspacePath: tmpHome('fish-v07-own-'), summary: '[动画表情]', tags: ['得意'] });
+			assert.deepEqual([gotOwn.ok, gotOwn.tags], [true, ['得意']], '自己给的标签优先于 summary');
+			assert.equal(box2.collected()[0].tagsBy, 'self');
+		}
 		assert.deepEqual(stMod.stickerConfig(undefined), { collect: true, perDay: 10 });
 		assert.deepEqual(slMod.slangConfig(undefined), { enabled: true, minLines: 60, intervalHours: 6, expressions: true, privateChats: true });
 		const s = segmentsToText([{ type: 'record', data: { file: 'a.amr', url: 'http://x/a' } }, { type: 'image', data: { file: 'f1', sub_type: 1 } }, { type: 'mface', data: { url: 'u', summary: '[狗头]' } }, { type: 'image', data: { file: 'f2' } }]);
@@ -239,6 +256,8 @@ export async function run(t) {
 		const ws = gw.bound.get(f3.id).workspace_path;
 		assert.equal(existsSync(join(ws, '_stickers', '狗头.png')), true);
 		assert.equal(stickers.collected()[0].file, '狗头.png');
+		// summary 是「[动画表情]」这种废话 → 不该变成标签（她自己也没写标签）
+		assert.deepEqual(stickers.collected()[0].tags, [], '废话 summary 不当标签');
 		collectedFile = { file: '狗头.png', ws };
 		// 同一张再存：去重；带正文的收藏行：正文照发
 		await priv(70007, [{ type: 'image', data: { file: `base64://${PNG.toString('base64')}`, sub_type: 1 } }]);
@@ -247,6 +266,8 @@ export async function run(t) {
 		await waitFor(() => sent.length === n + 1);
 		assert.deepEqual(sent[n][1], [{ type: 'text', data: { text: '这个也好玩' } }]);
 		assert.match(gw.decisions.find((x) => x.kind === 'sticker-skip').reason, /已经存过了/);
+
+
 
 		// 群里的话交给学说法（点没点名都算）
 		await gw.onEvent({ post_type: 'message', message_type: 'group', group_id: 8802, user_id: 30003, message_id: ++mid, sender: { card: '阿三' }, message: [{ type: 'text', data: { text: '今天也绷不住了' } }] });

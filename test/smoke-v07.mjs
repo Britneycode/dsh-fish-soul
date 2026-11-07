@@ -97,7 +97,8 @@ export async function run(t) {
 			assert.deepEqual([gotOwn.ok, gotOwn.tags], [true, ['得意']], '自己给的标签优先于 summary');
 			assert.equal(box2.collected()[0].tagsBy, 'self');
 		}
-		assert.deepEqual(stMod.stickerConfig(undefined), { collect: true, perDay: 10 });
+		assert.deepEqual(stMod.stickerConfig(undefined), { collect: true, perDay: 10, biliPanel: false, biliPanelListed: 30 }, 'B站 面板默认关');
+		assert.deepEqual([stMod.stickerConfig({ biliPanel: true, biliPanelListed: 999 }).biliPanelListed], [60], '条数夹到 60');
 		assert.deepEqual(slMod.slangConfig(undefined), { enabled: true, minLines: 60, intervalHours: 6, expressions: true, privateChats: true });
 		const s = segmentsToText([{ type: 'record', data: { file: 'a.amr', url: 'http://x/a' } }, { type: 'image', data: { file: 'f1', sub_type: 1 } }, { type: 'mface', data: { url: 'u', summary: '[狗头]' } }, { type: 'image', data: { file: 'f2' } }]);
 		assert.deepEqual(s.records, [{ file: 'a.amr', url: 'http://x/a', path: undefined }]);
@@ -593,7 +594,14 @@ export async function run(t) {
 		assert.equal(p.json.ok, true);
 		assert.equal(existsSync(join(curWs, '_stickers', '改个名.png')), false);
 		p = await call('POST', '/stickers/config', { collect: false, perDay: 3 });
-		assert.deepEqual(p.json.config, { collect: false, perDay: 3 });
+		assert.deepEqual(p.json.config, { collect: false, perDay: 3, biliPanel: false, biliPanelListed: 30 });
+		// B站 平台表情面板的开关（默认关；条数夹到 60）
+		p = await call('POST', '/stickers/config', { biliPanel: true, biliPanelListed: 999 });
+		assert.equal(p.json.config.biliPanel, true);
+		assert.equal(p.json.config.biliPanelListed, 60, '条数夹到 60');
+		assert.equal((await call('GET', '/stickers/state')).json.config.biliPanel, true, 'state 里能读到');
+		p = await call('POST', '/stickers/config', { biliPanel: false });
+		assert.equal(p.json.config.biliPanel, false);
 		assert.equal((await call('GET', '/channels/state')).json.qq.stickers.collect, false);
 		await call('POST', '/stickers/config', { collect: true });
 

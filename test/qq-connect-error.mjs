@@ -39,9 +39,11 @@ function fakeWs(script) {
 	return Fake;
 }
 
-const newChannel = (Impl, cfg = {}) => new SnowLumaChannel({
+const newChannel = (Impl, cfg = {}, deps = {}) => new SnowLumaChannel({
 	getConfig: () => ({ enabled: true, wsUrl: 'ws://127.0.0.1:3001', accessToken: 't', ...cfg }),
 	log: () => {}, onEvent: () => {}, onConnected: () => {}, WebSocketImpl: Impl,
+	findToken: () => ({ token: '', from: '' }),   // 默认：找不到，除非用例自己给
+	...deps,
 });
 
 // ③ 压根连不上（SnowLuma 没起）→ lastError 必须是「连不上」，不是空
@@ -93,5 +95,69 @@ ok('连上了：lastError 清空 + connected');
 	ch.stop();
 }
 ok('连上后掉线：同样留下原因');
+
+// ⑦ 令牌被拒 → 自动去 SnowLuma 配置里取一份，「换个钥匙再连一次」
+{
+	let called = 0;
+	const ch = newChannel(fakeWs('unauthorized'), {}, { findToken: () => { called++; return { token: 'x'.repeat(43), from: 'fake' }; } });
+	ch.start();
+	await new Promise((r) => setTimeout(r, 10));
+	assert.equal(called, 1, '被拒时要去找一次令牌');
+	assert.equal(ch.autoToken.length, 43, '找到了就记在内存里');
+	assert.ok(ch.buildUrl().includes(encodeURIComponent('x'.repeat(43))), '下一次连要用新令牌');
+	ch.stop();
+}
+ok('令牌被拒：自动去 SnowLuma 配置里取一份');
+
+// ⑧ 用户自己填了令牌 → 用户填的优先（自动取的那份只在空的或连不上时顶上）
+{
+	const ch = newChannel(fakeWs('open'), { accessToken: 'user-token' }, { findToken: () => ({ token: 'x'.repeat(43), from: 'fake' }) });
+	ch.start();
+	await new Promise((r) => setTimeout(r, 10));
+	assert.ok(ch.buildUrl().includes('user-token'), '用户填的优先');
+	ch.stop();
+}
+
+// ⑨ 找不到令牌 / 每次都一样 → 不重复刷日志、不抖
+{
+	let called = 0;
+	const ch = newChannel(fakeWs('refused'), { accessToken: '' }, { findToken: () => { called++; return { token: '', from: '' }; } });
+	ch.start();
+	await new Promise((r) => setTimeout(r, 10));
+	assert.equal(called, 1, '连不上也会找一次');
+	assert.equal(ch.autoToken, '', '没找到就还是空的');
+	assert.ok(!ch.buildUrl().includes('access_token'), '配置里没填、也没找到 → 不带参数（连不上会报「连不上」，不会假装在连）');
+	const before = called;
+	ch.askSnowLumaToken();
+	assert.equal(called, before + 1, '再问一次也只会再读一次文件');
+	assert.equal(ch.autoToken, '', '还是空');
+	ch.stop();
+}
+ok('找不到令牌：不炸、不重复刷日志');
+
+// ⑩ 自动取到的令牌在关掉重启后不残留（只在内存）→ 新实例 autoToken 是空的
+{
+	const ch2 = newChannel(fakeWs('open'));
+	assert.equal(ch2.autoToken, '', '新实例不带上次自动取到的令牌');
+	ch2.stop();
+}
+ok('自动令牌只在内存：新实例不带旧值');
+
+// ⑪ 用户在设置页改了配置（restart）→ 自动取来的那份作废，重新听用户的
+{
+	const Impl = fakeWs('unauthorized');
+	const ch = newChannel(Impl, { accessToken: 'user-token' }, { findToken: () => ({ token: 'x'.repeat(43), from: 'fake' }) });
+	ch.start();
+	await new Promise((r) => setTimeout(r, 10));
+	assert.equal(ch.autoToken.length, 43, '被拒后拿到了自动令牌');
+	const n = Impl.made.length;
+	ch.restart();
+	await new Promise((r) => setTimeout(r, 10));
+	const first = Impl.made[n];
+	assert.ok(String(first?.url).includes('user-token'), 'restart 后第一次连用的是用户填的那份');
+	assert.ok(!String(first?.url).includes('x'.repeat(43)), '不再抱着旧的自动令牌不放');
+	ch.stop();
+}
+ok('设置页改配置后：自动令牌作废');
 
 console.log('qq-connect-error ok');

@@ -31,6 +31,8 @@ fish-soul 只用它的「浏览器 + 页面操作」部分，不用它的桥接 
   - `browserProcesses()` 除了 `msedge.exe` / `chrome.exe`，也按实际启动的 exe 名找残留进程（Brave、Vivaldi 等）；
   - 新增 `Browser.quit()`：通过 CDP `Browser.close` 真正关掉浏览器（连上的是已有实例时 `close()` 只断连接）。
   - 新增 `Browser.onEvent`：每个 CDP 事件先给上层看一眼（用来判断用户是不是自己把窗口 / 标签页关了）。
+  - 新增 `Browser.reload()`：走 CDP `Page.reload` 刷新当前页面（抖音页面放久了会被浏览器睡掉 → 白屏，
+    刷新一下就恢复）。不用 `location.reload()`：页面正在卸载时它会抛 "Execution context was destroyed"。
 - `media.mjs`：`mergeMessages()` 末尾原来把已经放进结果的 API 消息又追加了一遍，
   会让窗口对比把旧消息当成新消息；改成只补没匹配上的更新消息。
 - `douyin-dm.mjs`：`shapeResult()` 带上分享视频的 `shareAweme`（视频 id）。

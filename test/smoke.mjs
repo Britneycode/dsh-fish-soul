@@ -741,7 +741,8 @@ assert.deepEqual(nm({ msg_type: 7, content: JSON.stringify({ title: '猫', bvid:
 assert.equal(nm({ msg_type: 1, msg_source: 8, content: '{"content":"感谢关注"}' }), null, '自动回复不当真人消息');
 assert.equal(nm({ msg_type: 1, msg_status: 1, content: '{"content":"撤回了"}' }), null);
 assert.equal(nm({ msg_type: 1, sender_uid: 999, content: '{"content":"自己发的"}' }), null);
-assert.deepEqual([nm({ msg_type: 6, content: JSON.stringify({ url: 'https://i0.hdslb.com/bfs/emote/x.png' }) })].map((x) => [x.text, x.images]), [['【表情】', [{ url: 'https://i0.hdslb.com/bfs/emote/x.png' }]]]);
+// 表情要带 sticker 标记：收藏时优先挑表情，面板上也能认出来
+assert.deepEqual([nm({ msg_type: 6, content: JSON.stringify({ url: 'https://i0.hdslb.com/bfs/emote/x.png' }) })].map((x) => [x.text, x.images]), [['【表情】', [{ url: 'https://i0.hdslb.com/bfs/emote/x.png', sticker: true }]]]);
 assert.deepEqual(findVideoRefs('看 https://b23.tv/abc123 和 BV1Ab411c7Zz 还有 BV1Ab411c7Zz'), { bvids: ['BV1Ab411c7Zz'], shorts: ['https://b23.tv/abc123'] });
 const qm = encodeQr('https://passport.bilibili.com/h5-app/passport/login/scan?navhide=1&qrcode_key=0123456789abcdef0123456789abcdef');
 assert.equal(qm.length, qm[0].length); assert.equal((qm.length - 17) % 4, 0);

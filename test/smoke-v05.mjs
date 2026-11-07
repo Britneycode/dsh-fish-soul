@@ -82,10 +82,10 @@ export async function run(t) {
 		const nd = (m) => dyc.normalizeDouyinMessage(m, { name: '阿:二', timeMs: 1, messageId: 'm1' });
 		assert.deepEqual([nd(img(1)).text, nd(img(1)).images.length, nd(img(1)).channelId], ['【图片】', 1, 'douyin:阿:二']);
 		assert.equal(nd({ type: 'emoji', media: { name: '比心' } }).text, '[比心]');
-		// 带名字的表情也要把图推给模型 —— 否则她只看得到一行 [比心]、看不到图，收藏无从谈起
+		// 带名字的表情也要把图推给模型，并标成表情包 —— 否则她只看得到一行 [比心]、看不到图，收藏无从谈起
 		{
 			const e = nd({ type: 'emoji', media: { name: '比心', src: 'https://p3-sign.douyinpic.com/obj/im-resource/x' } });
-			assert.deepEqual([e.text, e.images], ['[比心]', [{ url: 'https://p3-sign.douyinpic.com/obj/im-resource/x' }]]);
+			assert.deepEqual([e.text, e.images], ['[比心]', [{ url: 'https://p3-sign.douyinpic.com/obj/im-resource/x', sticker: true }]]);
 		}
 		assert.equal(nd({ type: 'voice', media: { seconds: 3 } }).text, '【语音 3 秒（听不了）】');
 		assert.deepEqual([nd({ text: '看看', shareAweme: '7300000000000000009' }).text, nd({ text: '看看', shareAweme: '7300000000000000009' }).links], ['【分享视频】看看', ['https://www.douyin.com/video/7300000000000000009']]);

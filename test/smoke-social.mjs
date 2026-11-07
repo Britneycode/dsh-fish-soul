@@ -491,7 +491,7 @@ export async function run(t) {
 		assert.equal(p.json.ok, true);
 		p = await call('GET', '/channels/state');
 		const d = p.json.douyin;
-		assert.deepEqual([d.post, d.comments, d.browse.shareInDm], [{ enabled: true, perDay: 2 }, { enabled: true, perHour: 30 }, false]);
+		assert.deepEqual([d.post, d.comments, d.browse.shareInDm], [{ enabled: true, perDay: 2 }, { enabled: true, perHour: 30, emoji: false }, false], 'comments 多了 emoji（默认关）');
 		assert.ok(d.social && Array.isArray(d.social.post.recent));
 		p = await call('POST', '/channels/douyin-config', { post: { enabled: false }, comments: { enabled: false }, browse: { shareInDm: true } });
 		assert.equal(p.json.ok, true);

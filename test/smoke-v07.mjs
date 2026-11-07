@@ -529,6 +529,29 @@ export async function run(t) {
 		await call('POST', '/voice/config', { sttBaseURL: '' });
 		p = await call('GET', '/voice/state');
 		assert.equal(p.json.stt.baseURL, '', '地址清空 = 沿用公用的');
+		// #74 等语音合成最多等多久可调（长句经常超过写死的 20 秒），默认 60 秒
+		assert.equal(p.json.timeoutSec, 60, '默认等 60 秒（不是以前写死的 20）');
+		assert.equal(voiceMod.voiceConfig({}).timeoutSec, 60, '没填就是 60');
+		assert.equal(voiceMod.timeoutMs({ timeoutSec: 60 }), 60000);
+		assert.equal(voiceMod.voiceConfig({ timeoutSec: 90 }).timeoutSec, 90);
+		p = await call('POST', '/voice/config', { timeoutSec: 1 });
+		assert.equal(p.json.timeoutSec, 5, '填太小夹到 5 秒');
+		p = await call('POST', '/voice/config', { timeoutSec: 9999 });
+		assert.equal(p.json.timeoutSec, 300, '填太大夹到 300 秒');
+		{
+			// 配置里的秒数真的进了定时器（不是还留着 20 秒那个常量）
+			const localVoice = new voiceMod.VoiceService({ db, getConfig: () => voiceMod.voiceConfig({ enabled: true, apiKey: 'sk-t', timeoutSec: 300 }), fetchImpl: async () => new Response(MP3, { status: 200 }) });
+			const realSetTimeout = globalThis.setTimeout;
+			let waited = -1;
+			globalThis.setTimeout = (fn, ms) => { waited = ms; return { unref() {} }; };
+			try {
+				assert.ok(await localVoice.synthesize('试一下等待上限'), '合成成功（假 fetch 直接回 mp3）');
+			} finally {
+				globalThis.setTimeout = realSetTimeout;
+			}
+			assert.equal(waited, 300000, `定时器用的是设置里的秒数，实测 ${waited}ms`);
+		}
+		await call('POST', '/voice/config', { timeoutSec: 60 });
 		await call('POST', '/voice/config', { enabled: false });
 		assert.doesNotMatch(context.text(at(sid)), /开头写 \[语音\]/);
 		delete mod.testHooks.voiceFetch;

@@ -116,4 +116,115 @@ assert.equal(imported.ok, true, imported.reason);
 	assert.match(blocked.reason, /存够了/);
 }
 
-console.log('✓ 表情包面板：目录里的图看得见、改名、删；导入不占每天收藏的额度');
+// 11. 按感觉挑：打向量 → 按标签相似度选 → 换成真文件名
+//     用假 embedder（词表哈希），CI 不依赖外网；真模型的排序在本地验过（top3 6/6）
+{
+	const feelWs = join(tmpHome('fs-feel-'), 'ws');
+	mkdirSync(join(feelWs, '_stickers'), { recursive: true });
+	const boxF = new StickerBox({ db, getConfig: () => stickerConfig({ perDay: 10 }) });
+	const lib = {
+		'害羞.png': ['害羞', '被捏脸'],
+		'卖萌.png': ['卖萌', '可爱'],
+		'得意猫.png': ['得意', '猫'],
+		'同意.png': ['同意', '可以可以']
+	};
+	const all = boxF.collected();
+	for (const [file, tags] of Object.entries(lib)) {
+		writeFileSync(join(feelWs, '_stickers', file), PNG);
+		all.unshift({ file, hash: `h-${file}`, workspacePath: feelWs, from: '她', summary: '', tags, tagsBy: 'self', at: Date.now() });
+	}
+	db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run('stickers.collected', JSON.stringify(all));
+
+	// 假 embedder：按**字**计数（不是子串）。
+	// 用子串会踩坑：「想卖个萌」里「卖萌」不是连续子串（想-卖-个-萌），查询向量会退化成全 0，
+	// 所有表情同分，排序就成了池子顺序。按字计数才能让它们通过「卖」「萌」共享维度。
+	// 这测的是「挑对了哪张」；真模型的排序在本地单独验过（top1 5/6、top3 6/6）。
+	const CHARS = ['害', '羞', '卖', '萌', '得', '意', '同', '可', '以', '猫', '爱', '被', '捏', '脸', '个', '想'];
+	const fake = {
+		embed: async (texts) => ({
+			vectors: texts.map((t) => {
+				const s = String(t);
+				return CHARS.map((c) => (s.includes(c) ? 1 : 0));
+			})
+		})
+	};
+
+	const n = await boxF.embedStickers(feelWs, fake, { model: 'fake-1' });
+	assert.equal(n, 4, '四张都打上向量');
+	assert.ok(boxF.collected().every((x) => x.workspacePath !== feelWs || x.vec), '向量真存进 kv');
+
+	// 换模型后要重打（vecModel 对不上）
+	assert.equal(await boxF.embedStickers(feelWs, fake, { model: 'fake-2' }), 4, '换模型重打');
+
+	for (const [feel, want] of [['害羞', '害羞.png'], ['想卖个萌', '卖萌.png'], ['得意', '得意猫.png']]) {
+		const r = await boxF.pickByFeel(feelWs, feel, fake, { model: 'fake-2' });
+		assert.equal(r.ok, true, r.reason);
+		assert.equal(r.file, want, `「${feel}」应挑到 ${want}，实际 ${r.file}`);
+	}
+
+	// 整段替换：`@感觉` 换成真文件名，不留 @
+	const rr = await boxF.resolveFeelRefs('好呀 ![得意](_stickers/@得意)', feelWs, fake, { model: 'fake-2' });
+	assert.match(rr.text, /!\[得意\]\(_stickers\/得意猫\.png\)/);
+	assert.ok(!rr.text.includes('@'), '不漏 @ 进正文');
+
+	// 降级：没 embedder / 空库 / 没标签，都明确失败不抛错
+	assert.equal((await boxF.pickByFeel(feelWs, '得意', null)).ok, false, '没 embedder');
+	assert.equal((await boxF.pickByFeel(feelWs, '', fake)).ok, false, '没说感觉');
+	const emptyWs = join(tmpHome('fs-feel-empty-'), 'ws');
+	assert.equal((await boxF.pickByFeel(emptyWs, '得意', fake)).ok, false, '库里没向量');
+	// 没 embedder 时 `@感觉` 那段要被丢掉，不能原样漏进她的话
+	const lost = await boxF.resolveFeelRefs('好 ![得意](_stickers/@得意)', feelWs, null);
+	assert.ok(!lost.text.includes('@'), '没 embedder 时 @ 段丢掉');
+	assert.equal(lost.resolved.length, 1);
+	assert.equal(lost.resolved[0].file, null);
+}
+
+// 12. 接线：sendReply 里 `_stickers/@感觉` 那段真的被走到（不是死代码）
+//     用 spy 替掉 resolveFeelRefs —— 单测解析容易，难的是「接线断了测试还全绿」
+{
+	const { ChatGateway } = await import('../lib/gateway.js');
+	// ChatGateway 构造时要摸 outbox / chat_session 这些表，用 openDatabase 一次建全（别手抄 DDL）。
+	// openDatabase 每次读 DSH_HOME，先指到临时目录，别写到真实数据目录去。
+	const { openDatabase } = await import('../lib/db.js');
+	const prevHome = process.env.DSH_HOME;
+	process.env.DSH_HOME = tmpHome('fs-feel-gatedb-');
+	const gateDb = openDatabase();
+	if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome;
+	const gwWs = join(tmpHome('fs-feel-gw-'), 'ws');
+	mkdirSync(join(gwWs, '_stickers'), { recursive: true });
+	writeFileSync(join(gwWs, '_stickers', '得意猫.png'), PNG);
+	const feelCalls = []; const imgSent = []; const textSent = [];
+	const spyStickers = {
+		list: () => [],
+		collect: () => ({ ok: false }),
+		resolveFeelRefs: async (text, ws, emb, opts) => {
+			feelCalls.push({ text, ws, hasEmb: emb !== null, model: opts?.model });
+			return { text: text.replace('_stickers/@得意', '_stickers/得意猫.png'), resolved: [{ feel: '得意', file: '得意猫.png' }] };
+		}
+	};
+	const gw = new ChatGateway({
+		ctx: { get: () => undefined, logger: { info() {}, warn() {}, error() {} }, effect: (f) => f(), tools: { get: () => ({}) } },
+		db: gateDb, clock: { now: () => Date.now() },
+		getConfig: () => ({ sessions: { workspacePath: gwWs }, bili: { enabled: true, masterUid: '555' }, stickers: {}, qq: {} }),
+		log: () => {},
+		channel: { connected: true, send: async () => '1' },
+		bili: { send: async (_m, t) => { textSent.push(t); return '1'; }, sendImage: async (_m, img) => { imgSent.push(img.path); return '1'; } },
+		soul: { personaName: () => '鱼', journalOut: () => {}, recallInfo: () => [] },
+		stickers: spyStickers, voice: null,
+		embedder: { embed: async () => null }, embeddingCfg: () => ({ model: 'fake-model' })
+	});
+	gw.random = () => 0.5;
+	gw.bound.set('s-feel', { channel_id: 'bili:555', title: 'B站·某人', workspace_path: gwWs });
+	gw.onSessionEvent({ id: 's-feel' }, { type: 'user/message', data: { source: { kind: 'fish-soul/bili', replyTo: null } } });
+	gw.onSessionEvent({ id: 's-feel' }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '好呀\n\n![得意](_stickers/@得意)' }] } } });
+	gw.onSessionEvent({ id: 's-feel' }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+	await new Promise((r) => setTimeout(r, 500));
+	assert.equal(feelCalls.length, 1, 'sendReply 里 resolveFeelRefs 要被调用（接线断了会变 0）');
+	assert.equal(feelCalls[0].hasEmb, true, '要把 embedder 传进去');
+	assert.equal(feelCalls[0].model, 'fake-model', '要用当前嵌入模型 id');
+	assert.equal(imgSent.length, 1, '换出来的图要真的进发送队列');
+	assert.match(imgSent[0], /得意猫\.png$/);
+	assert.ok(!textSent.join('').includes('@'), '@ 不能漏进正文');
+}
+
+console.log('✓ 表情包面板：目录里的图看得见、改名、删；导入不占每天收藏的额度；按感觉挑表情（含 sendReply 接线）');

@@ -203,4 +203,21 @@ ok('抖音评论桥：Node 侧调用（透传 / 异常不外抛 / 桥没装）')
   ok('评论列表：接口版带 cid / replyId');
 }
 
+{
+  // 表情：抖音服务端会把文字码自动渲染成表情图 —— 所以表情清单只要「码」就够了
+  assert.match(mod.COMMENT_BRIDGE_SOURCE, /emoji\/list/, '桥里有 emojiList');
+  assert.match(mod.COMMENT_BRIDGE_SOURCE, /display_name/, '表情清单带 display_name（就是码）');
+  // 清单是对象数组，映射成 name
+  assert.match(mod.COMMENT_BRIDGE_SOURCE, /name: e\.display_name/, '清单项映射成 name');
+  ok('表情清单：取码（[微笑] 这种，平台会渲染成表情图）');
+}
+
+{
+  // 配置开关：comments.emoji 默认关（这个仓库零依赖，zod 在宿主里，这里只能查源码）
+  const { readFileSync } = await import('node:fs');
+  const schemaSrc = readFileSync(new URL('../lib/config-platforms.js', import.meta.url), 'utf8');
+  assert.match(schemaSrc, /emoji: z\.boolean\(\)\.default\(false\)/, '表情开关默认关');
+  console.log('✓ 表情开关：默认关');
+}
+
 console.log('douyin-comment-bridge ok');

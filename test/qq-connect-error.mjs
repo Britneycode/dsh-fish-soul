@@ -124,7 +124,7 @@ ok('令牌被拒：自动去 SnowLuma 配置里取一份');
 	const ch = newChannel(fakeWs('refused'), { accessToken: '' }, { findToken: () => { called++; return { token: '', from: '' }; } });
 	ch.start();
 	await new Promise((r) => setTimeout(r, 10));
-	assert.equal(called, 1, '连不上也会找一次');
+	assert.ok(called >= 1, '找不到也会去读（启动预读 + 自愈各一次都算）');
 	assert.equal(ch.autoToken, '', '没找到就还是空的');
 	assert.ok(!ch.buildUrl().includes('access_token'), '配置里没填、也没找到 → 不带参数（连不上会报「连不上」，不会假装在连）');
 	const before = called;
@@ -159,5 +159,55 @@ ok('自动令牌只在内存：新实例不带旧值');
 	ch.stop();
 }
 ok('设置页改配置后：自动令牌作废');
+
+// ⑫ 启动前预读：配置里没令牌 → 一次失败都没有，第一条连接就带上真令牌
+{
+	const Impl = fakeWs('open');
+	const ch = newChannel(Impl, { accessToken: '' }, { findToken: () => ({ token: 'y'.repeat(43), from: 'fake' }) });
+	ch.start();
+	await new Promise((r) => setTimeout(r, 10));
+	assert.ok(String(Impl.made[0]?.url).includes('y'.repeat(43)), '第一条连接就用上了预读到的令牌');
+	assert.equal(ch.status().connected, true);
+	assert.equal(ch.status().lastError, null, '一次失败都不该有');
+	ch.stop();
+}
+ok('启动预读：没手填令牌时一次失败都没有');
+
+// ⑬ 启动预读不顶替用户：手填了就先按手填的连（不猜用户为什么填）
+{
+	const Impl = fakeWs('open');
+	const ch = newChannel(Impl, { accessToken: 'mine' }, { findToken: () => ({ token: 'y'.repeat(43), from: 'fake' }) });
+	ch.start();
+	await new Promise((r) => setTimeout(r, 10));
+	assert.ok(String(Impl.made[0]?.url).includes('mine'), '手填的优先');
+	assert.equal(ch.prefetchUsed, undefined, '不该被当成「用了自动令牌」');
+	ch.stop();
+}
+ok('启动预读：手填了就先听手填的');
+
+// ⑭ 预读到的和手填的撞上：不多读、也不改优先级
+{
+	let reads = 0;
+	const ch = newChannel(fakeWs('refused'), { accessToken: 'mine' }, { findToken: () => { reads++; return { token: 'mine', from: 'fake' }; } });
+	ch.start();
+	await new Promise((r) => setTimeout(r, 10));
+	assert.equal(reads, 1, '预读阶段不白读（这一读来自连不上之后的自愈，不是预读）');
+	assert.equal(ch.autoToken, 'mine', '自愈读到的和手填的一样，就照旧用手填的');
+	ch.stop();
+}
+ok('启动预读：手填了不白读，自愈撞上同值也不改优先级');
+
+// ⑮ 端口没人听（SnowLuma 还没起）也能把令牌先拿在手里
+{
+	let refreshes = 0;
+	const ch = newChannel(fakeWs('refused'), { accessToken: '' }, { findToken: () => { refreshes++; return { token: 'z'.repeat(43), from: 'fake' }; } });
+	ch.start();
+	await new Promise((r) => setTimeout(r, 10));
+	assert.equal(ch.autoToken, 'z'.repeat(43), '服务没起也该先备好钥匙');
+	assert.equal(ch.status().connected, false);
+	assert.match(String(ch.status().lastError), /连不上/, '连不上照样要说清楚原因');
+	ch.stop();
+}
+ok('启动预读：服务没起也先把钥匙备好');
 
 console.log('qq-connect-error ok');

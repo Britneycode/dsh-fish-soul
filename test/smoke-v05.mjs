@@ -82,6 +82,11 @@ export async function run(t) {
 		const nd = (m) => dyc.normalizeDouyinMessage(m, { name: '阿:二', timeMs: 1, messageId: 'm1' });
 		assert.deepEqual([nd(img(1)).text, nd(img(1)).images.length, nd(img(1)).channelId], ['【图片】', 1, 'douyin:阿:二']);
 		assert.equal(nd({ type: 'emoji', media: { name: '比心' } }).text, '[比心]');
+		// 带名字的表情也要把图推给模型 —— 否则她只看得到一行 [比心]、看不到图，收藏无从谈起
+		{
+			const e = nd({ type: 'emoji', media: { name: '比心', src: 'https://p3-sign.douyinpic.com/obj/im-resource/x' } });
+			assert.deepEqual([e.text, e.images], ['[比心]', [{ url: 'https://p3-sign.douyinpic.com/obj/im-resource/x' }]]);
+		}
 		assert.equal(nd({ type: 'voice', media: { seconds: 3 } }).text, '【语音 3 秒（听不了）】');
 		assert.deepEqual([nd({ text: '看看', shareAweme: '7300000000000000009' }).text, nd({ text: '看看', shareAweme: '7300000000000000009' }).links], ['【分享视频】看看', ['https://www.douyin.com/video/7300000000000000009']]);
 		assert.equal(nd({ text: '我发的', fromMe: true }), null); assert.equal(nd({ text: '你撤回了一条消息', system: true }), null); assert.equal(nd({ text: '  ' }), null);
@@ -190,6 +195,18 @@ export async function run(t) {
 	cs = await call('GET', '/channels/state');
 	assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId.startsWith('douyin:')).map((c) => c.channelId).sort(), ['douyin:主人抖音', 'douyin:阿二抖音']);
 	ok('抖音自动回复：主人 / 白名单回、陌生人只记；分享的视频先看；名字=QQ 号并到同一个人；按段发，[表情名] 发表情（没有就当文字），webp 转 png');
+
+	// 33b 对方发表情：图要真进管线（她能"看见"），正文里 [名字] 要触发收藏提示
+	{
+		const dataUrl = `data:image/png;base64,${Buffer.from('89504e470d0a1a0a', 'hex').toString('base64')}`;
+		const nEmoji = host.followups.filter((f) => f.msg.source.channelId === 'douyin:主人抖音').length;
+		dyPush('主人抖音', '', { type: 'emoji', media: { name: '比心', src: dataUrl } });
+		const fe = await waitFor(() => host.followups.filter((f) => f.msg.source.channelId === 'douyin:主人抖音')[nEmoji], 9000);
+		assert.ok(fe, '表情消息也该转进会话');
+		assert.equal(fe.msg.content[0].text, '[比心]', '表情的正文还是名字');
+		assert.ok(fe.msg.content.some((c) => c.type === 'image'), '表情的图也推进了会话（她能看见）');
+		assert.match(context.text(at(fe.id)), /\[收藏表情\]/, '抖音半角 [比心] 也要提示她可以收藏');
+	}
 
 	// 34 「回所有能私信她的人」：陌生人也回
 	await call('POST', '/channels/douyin-config', { replyAll: true });

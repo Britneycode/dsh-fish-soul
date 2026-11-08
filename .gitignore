@@ -37,6 +37,8 @@ scripts/probe-douyin-webp-upload.mjs
 scripts/probe-douyin-send-capture.mjs
 scripts/probe-douyin-conv-id.mjs
 scripts/probe-douyin-conv-raw.mjs
+scripts/probe-douyin-send-image.mjs
+scripts/probe-douyin-webp-convert.mjs
 scripts/probe-douyin-open.mjs
 scripts/probe-group-api.mjs
 scripts/probe-group-at.mjs

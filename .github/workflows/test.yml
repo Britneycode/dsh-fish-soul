@@ -42,7 +42,13 @@ jobs:
         with:
           node-version: 22
 
-      # 并行 runner：从 package.json 解析全部 38 个套件，并发 4 跑（ubuntu-latest 4 vCPU）
+      # 并行 runner：从 package.json 解析全部套件，并发 4 跑（ubuntu-latest 4 vCPU）
       # 串行 npm test 的命令保留在 package.json，本地照样可用
+      #
+      # FISH_SOUL_CDP_WAIT_MS：douyin-browser 那套要真启 Chromium，等 CDP 端口默认 30 秒。
+      # 并发 4 时它可能和 smoke / comment-video 这类长任务撞在同一批（4 vCPU 被抢满），
+      # Chromium 冷启动就会超 30 秒 → 报「端口没响应」。CI 上放宽到 90 秒（本地不受影响）。
       - run: node test/parallel.mjs 4
         if: steps.docs.outputs.only != '1'
+        env:
+          FISH_SOUL_CDP_WAIT_MS: '90000'

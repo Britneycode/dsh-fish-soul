@@ -328,6 +328,8 @@ function dyPush(name, text, { fromMe = false, type = 'text', media } = {}) {
 	Object.assign(c, { time, preview: `${text}#${list.length}`, unread: fromMe ? c.unread : c.unread + 1 });
 }
 mod.testHooks.douyin = {
+	// 纯 HTTP 客户端会用 CDP 去抓真浏览器的 cookie —— 测试里必须断开（端口 0 = 不抓）
+	douyinCdpPort: 0,
 	detect: async () => [{ kind: 'edge', name: 'Microsoft Edge', version: '130.0', path: '/fake/msedge.exe' }],
 	launch: async (opts) => { dy.launches++; dy.launchOpts = opts; dyBrowser.alive = true; return dyBrowser; },
 	driver: () => ({

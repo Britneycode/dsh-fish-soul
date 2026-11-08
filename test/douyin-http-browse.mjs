@@ -213,7 +213,7 @@ const keepAlive = setTimeout(() => {}, 120_000);
 		db,
 		clock: { now: () => Date.now() },
 		host: { running: false, loggedIn: false, browser: null, exclusive: async (_l, fn) => fn() },
-		getConfig: () => ({ browse: { enabled: true, perDay: 3, videosPerSession: 3, like: true, share: false, mode: 'http' } }),
+		getConfig: () => ({ browse: { enabled: true, perDay: 3, videosPerSession: 3, like: true, likeApi: true, share: false, mode: 'http' } }),
 		callLlm: async () => '好看 [点赞]',
 		persona: () => ({ name: '鱼', brief: '' }),
 		worker: { enqueueRealtime: () => {} },
@@ -227,6 +227,30 @@ const keepAlive = setTimeout(() => {}, 120_000);
 			digg: async (id, o) => { diggCalls.push([id, o]); return { ok: true, statusCode: 0, statusMsg: '' }; },
 		},
 	});
+	// 默认关：likeApi 没开会话时，就算模型说点赞也不调接口
+	const diggCalls2 = [];
+	const browseOff = new DouyinBrowser({
+		db,
+		clock: { now: () => Date.now() },
+		host: { running: false, loggedIn: false, browser: null, exclusive: async (_l, fn) => fn() },
+		getConfig: () => ({ browse: { enabled: true, perDay: 3, videosPerSession: 3, like: true, share: false, mode: 'http' } }),
+		callLlm: async () => '好看 [点赞]',
+		persona: () => ({ name: '鱼', brief: '' }),
+		worker: { enqueueRealtime: () => {} },
+		log: () => {},
+		dwellMs: [1, 2],
+		http: {
+			jar: new Map([['sessionid', 'S']]), isLoggedIn: () => true, lastError: '', ensureCookies: async () => true,
+			feed: async () => ({ ok: true, list: [] }),
+			detail: async () => ({ ok: true, detail: { desc: '文案', author: { nickname: '作者' }, text_extra: [] } }),
+			comments: async () => ({ ok: true, list: [] }),
+			digg: async (id, o) => { diggCalls2.push([id, o]); return { ok: true, statusCode: 0, statusMsg: '' }; },
+		},
+	});
+	const w3 = await browseOff.watch({ id: '777', title: 't', author: 'a' }, true, false);
+	assert.deepEqual(diggCalls2, [], 'likeApi 默认关：没开就不该调点赞接口');
+	assert.equal(w3.liked, false);
+
 	const w2 = await browse.watch({ id: '888', title: 't', author: 'a' }, true, false);
 	assert.deepEqual(diggCalls, [['888', { diggType: 1 }]], '模型说点赞就去点赞（digg_type=1）');
 	assert.equal(w2.liked, true, '点赞成功要记下来');

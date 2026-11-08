@@ -138,11 +138,13 @@ const keepAlive = setTimeout(() => {}, 120_000);
 	db.exec(`CREATE TABLE IF NOT EXISTS douyin_seen (aweme_id TEXT PRIMARY KEY, title TEXT, author TEXT, impression TEXT, skipped INTEGER, liked INTEGER, memory_id INTEGER, seen_at INTEGER, seen_real_at INTEGER)`);
 
 	let promptSeen = '';
+	const diggCalls = [];
 	const http = {
 		jar: new Map([['sessionid', 'S']]), isLoggedIn: () => true, lastError: '', ensureCookies: async () => true,
 		feed: async () => ({ ok: true, list: [] }),
 		detail: async () => ({ ok: true, detail: { desc: '文案在这', author: { nickname: '作者甲' }, text_extra: [{ hashtag_name: '话题一' }, { hashtag_name: '话题二' }] } }),
 		comments: async () => ({ ok: true, list: [{ text: '热评第一条', user: { nickname: '路人' } }] }),
+		digg: async (id, o) => { diggCalls.push([id, o]); return { ok: true, statusCode: 0, statusMsg: '' }; },
 	};
 	const browse = new DouyinBrowser({
 		db,
@@ -160,12 +162,76 @@ const keepAlive = setTimeout(() => {}, 120_000);
 	const w = await browse.watch({ id: '999', title: '标题', author: '作者甲' }, false, false);
 	assert.equal(w.id, '999');
 	assert.equal(w.author, '作者甲');
-	assert.equal(w.liked, false, '纯 HTTP 这条路还不点赞');
+	assert.equal(w.liked, false, '没开点赞开关就不点赞');
+	assert.deepEqual(diggCalls, [], '没开点赞开关就不该调点赞接口');
 	assert.ok(promptSeen.includes('热评第一条'), '热评要进提示词');
 	assert.ok(promptSeen.includes('话题一'), '话题要进提示词');
 	const row = db.prepare('SELECT title, author, impression FROM douyin_seen WHERE aweme_id = ?').get('999');
 	assert.ok(row !== undefined, '看过的要记进 douyin_seen');
 	assert.equal(row.impression, '挺有意思，看完想点赞');
+	db.close();
+}
+
+// ── 5. 点赞走接口（commit/item/digg）──
+{
+	const { DouyinBrowser } = await import('../lib/douyin-browse.js');
+	const { DouyinHttp } = await import('../lib/douyin-http.js');
+	const { DatabaseSync } = await import('node:sqlite');
+	const home = tmpHome('dsh-dyhttp3-');
+	const prevHome = process.env.DSH_HOME;
+	process.env.DSH_HOME = home;
+	const { openDatabase } = await import('../lib/db.js');
+	const db = openDatabase();
+	process.env.DSH_HOME = prevHome;
+	db.exec(`CREATE TABLE IF NOT EXISTS douyin_seen (aweme_id TEXT PRIMARY KEY, title TEXT, author TEXT, impression TEXT, skipped INTEGER, liked INTEGER, memory_id INTEGER, seen_at INTEGER, seen_real_at INTEGER)`);
+
+	// 接口层：a_bogus 的 preimage 只能是业务参数（含公共参数会被拒 403）
+	const calls = [];
+	const http = new DouyinHttp({ cdpPort: 1 });
+	http.jar = new Map([['sessionid', 'S'], ['UIFID', 'UF']]);
+	http.loaded = true;
+	http.fetch = async (url, init) => {
+		calls.push({ url, init });
+		return { status: 200, ok: true, text: async () => JSON.stringify({ status_code: 0 }) };
+	};
+	const d = await http.digg('1234567890123456789', { diggType: 1 });
+	assert.equal(d.ok, true, 'status_code 0 就是点赞成功');
+	assert.equal(calls.length, 1);
+	assert.ok(calls[0].url.includes('/aweme/v1/web/commit/item/digg/'), '走的是点赞端点');
+	assert.ok(calls[0].url.includes('a_bogus='), '要带 a_bogus');
+	assert.ok(calls[0].url.includes('aweme_id=1234567890123456789'), '业务参数要进 query');
+	assert.ok(calls[0].url.includes('digg_type=1'), 'digg_type 要进 query');
+	assert.equal(calls[0].init.method, 'POST', '点赞是 POST');
+	assert.ok(String(calls[0].init.body).includes('aweme_id=1234567890123456789'), 'body 里也要有业务参数');
+	// preimage 只含业务参数：签名不能被公共参数污染（a_bogus= 的值应当只由业务参数决定）
+	const signed = calls[0].url.slice(calls[0].url.indexOf('a_bogus='));
+	assert.ok(!/device_platform/.test(signed), 'URL 里 a_bogus 后面不该再出现公共参数');
+
+	// 浏览层：模型说 [点赞] 且开了点赞 → 调接口 liked=true
+	const diggCalls = [];
+	const browse = new DouyinBrowser({
+		db,
+		clock: { now: () => Date.now() },
+		host: { running: false, loggedIn: false, browser: null, exclusive: async (_l, fn) => fn() },
+		getConfig: () => ({ browse: { enabled: true, perDay: 3, videosPerSession: 3, like: true, share: false, mode: 'http' } }),
+		callLlm: async () => '好看 [点赞]',
+		persona: () => ({ name: '鱼', brief: '' }),
+		worker: { enqueueRealtime: () => {} },
+		log: () => {},
+		dwellMs: [1, 2],
+		http: {
+			jar: new Map([['sessionid', 'S']]), isLoggedIn: () => true, lastError: '', ensureCookies: async () => true,
+			feed: async () => ({ ok: true, list: [] }),
+			detail: async () => ({ ok: true, detail: { desc: '文案', author: { nickname: '作者' }, text_extra: [] } }),
+			comments: async () => ({ ok: true, list: [] }),
+			digg: async (id, o) => { diggCalls.push([id, o]); return { ok: true, statusCode: 0, statusMsg: '' }; },
+		},
+	});
+	const w2 = await browse.watch({ id: '888', title: 't', author: 'a' }, true, false);
+	assert.deepEqual(diggCalls, [['888', { diggType: 1 }]], '模型说点赞就去点赞（digg_type=1）');
+	assert.equal(w2.liked, true, '点赞成功要记下来');
+	const row2 = db.prepare('SELECT liked FROM douyin_seen WHERE aweme_id = ?').get('888');
+	assert.equal(row2.liked, 1, 'douyin_seen 要记 liked');
 	db.close();
 }
 

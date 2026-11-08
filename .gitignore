@@ -26,6 +26,7 @@ scripts/parse-uid-map.mjs
 scripts/parse-uid-precise.mjs
 scripts/probe-douyin-chatdom.mjs
 scripts/probe-douyin-feed-http.mjs
+scripts/probe-douyin-digg.mjs
 scripts/probe-douyin-group.mjs
 scripts/probe-douyin-list-dom.mjs
 scripts/probe-douyin-open.mjs

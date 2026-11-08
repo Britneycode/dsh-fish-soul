@@ -24,6 +24,8 @@ QQ 交流群：**1125962189**
 
 ## 安装
 
+**第一次装、想照着一步步走**：[从零跑起来](https://github.com/Britneycode/dsh-fish-soul/blob/main/docs/QUICKSTART.md) —— 五步到她在 QQ 里回你第一句话，每步都写了怎么确认成功、卡住了是什么原因。
+
 需要 Node ≥ 22.5。抖音专用浏览器需要一台常开的 Windows 桌面。
 
 从 npm：

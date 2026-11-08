@@ -1,4 +1,4 @@
-// #59 ③ 诊断页一键自检：只读 GET /diagnose，六项结果（版本 / 通道 / QQ 登录 / 记忆条数 / 今日次数 / 补丁）。
+// #59 ③ 诊断页一键自检：只读 GET /diagnose，七项结果（版本 / 通道 / QQ 登录 / 抖音登录 / 记忆条数 / 今日次数 / 补丁）。
 // 约定：查不动的那一项自己标红并带原因，整个接口照常 200，不抛 500。
 import assert from 'node:assert/strict';
 import { tmpHome } from './_tmp.mjs';
@@ -50,13 +50,14 @@ const deps = {
 	log: () => {}
 };
 
-// ── 1. 六项都在，字段齐 ──
+// ── 1. 各项都在，字段齐 ──
+//    v0.15.27 加了第七项「抖音登录」（sid_guard 剩多久），契约跟着从六项变七项。
 {
 	const handler = mount(deps);
 	const res = await call(handler, '/diagnose');
 	assert.equal(res.ok, true, '整体成功');
-	assert.equal(res.items.length, 6, '六项');
-	assert.deepEqual(res.items.map((x) => x.key), ['version', 'channels', 'qq', 'memory', 'today', 'patch'], '六项的顺序与名字');
+	assert.equal(res.items.length, 7, '七项');
+	assert.deepEqual(res.items.map((x) => x.key), ['version', 'channels', 'qq', 'douyin-session', 'memory', 'today', 'patch'], '七项的顺序与名字');
 	for (const it of res.items) {
 		assert.equal(typeof it.label, 'string', `${it.key} 有名字`);
 		assert.equal(typeof it.ok, 'boolean', `${it.key} 有红绿`);
@@ -128,4 +129,4 @@ const deps = {
 }
 
 db.close();
-console.log('✓ #59 ③ 诊断自检：六项齐、红的带原因、db 坏了也不 500、只读');
+console.log('✓ #59 ③ 诊断自检：七项齐、红的带原因、db 坏了也不 500、只读');

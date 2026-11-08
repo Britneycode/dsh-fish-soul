@@ -82,6 +82,11 @@ const { DouyinBrowser } = await import('../lib/douyin-browse.js');
 		assert.ok(withImg, '要真的把图送给模型看');
 		const mainPrompt = prompts.find((x) => !x.hasImg);
 		assert.match(mainPrompt.p, /画面：一个穿蓝裙子的人在跳舞/, '画面要进感受的提示词');
+		// 画面还要**存进记忆** —— 不然抽帧只有当轮一次性作用，第二天想起这条就只剩文案了。
+		// 这是真机跑出来才发现的：配额记了 2 次，记忆里却一条画面都没有。
+		const mem = db.prepare("SELECT content FROM memory WHERE channel_id = 'douyin:video:e2'").get();
+		assert.ok(mem, '要写记忆');
+		assert.match(mem.content, /（画面：一个穿蓝裙子的人在跳舞）/, '画面必须写进记忆，不能只喂提示词');
 		// 配额落库
 		const key = b.framesDayKey();
 		const n = Number(db.prepare('SELECT value FROM kv WHERE key = ?').get(key)?.value ?? 0);

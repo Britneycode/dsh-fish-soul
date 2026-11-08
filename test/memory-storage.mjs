@@ -39,7 +39,10 @@ try{
  let sent;const deps={db,clock:{now:()=>now},worker:{},backup,getConfig,saveConfig,storage,chatArchive:chats};
  const route=async(method,path,payload={},allowed=true)=>{let url=new URL('http://localhost'+path);sent=null;await handleSoulRoute({method,path:url.pathname,url,req:{},res:{},send:(status,body)=>sent={status,...body},readBody:async()=>JSON.stringify(payload),sameOrigin:()=>allowed,deps});return sent;};
  assert.equal((await route('POST','/chat-archive/config',{enabled:true,channels:['private:a'],days:30},false)).status,403);
- assert.equal((await route('POST','/chat-archive/config',{enabled:true,channels:[],days:30})).ok,false);
+ // 2026-11-08 契约变更：channels 留空不再是错误 —— 留空 = 记所有会话（Dream 要靠原文核对记忆）。
+ // 仍然拒绝的：格式不对的会话 ID。
+ assert.equal((await route('POST','/chat-archive/config',{enabled:true,channels:[],days:30})).ok,true, '留空 = 全记，允许');
+ assert.equal((await route('POST','/chat-archive/config',{enabled:true,channels:['乱写的'],days:30})).ok,false, '填了就要合法');
  assert.equal((await route('POST','/chat-archive/config',{enabled:true,channels:['private:1'],days:30})).ok,true);
  assert.equal((await route('POST','/storage/config',{warnMB:1})).ok,false);
  assert.equal((await route('GET','/chat-archive/list?channel=private%3Aa')).items.length,1);

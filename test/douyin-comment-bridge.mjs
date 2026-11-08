@@ -44,13 +44,25 @@ assert.ok(mod.COMMENT_BRIDGE_VERSION >= 1, '版本号从 1 起');
     preloadScripts: [],
     addPreloadScript(s) { this.preloadScripts.push(s); },
     async send(method, params) { sent.push([method, params]); return {}; },
-    async eval() { return 1; },
+    // 装完要回读版本号：装之前的查询返回 0（=没有桥），装之后返回当前版本
+    async eval(expr) {
+      const s = String(expr);
+      if (/__fishComment \? window\.__fishComment\.version/.test(s)) return this.afterInstall ? mod.COMMENT_BRIDGE_VERSION : 0;
+      if (/^window\.__fishComment|COMMENT_BRIDGE/.test(s) || s.length > 200) { this.afterInstall = true; }
+      return mod.COMMENT_BRIDGE_VERSION;
+    },
   };
   const r = await mod.installCommentBridge(fake);
   assert.equal(r.ok, true, '装桥返回 ok');
   assert.equal(fake.preloadScripts.length, 1, '桥进了 preload（每次导航都装）');
   assert.ok(sent.some(([m]) => m === 'Page.addScriptToEvaluateOnNewDocument'), '也注册了 addScriptToEvaluateOnNewDocument');
-  ok('抖音评论桥：装桥（preload + 当前页）');
+  // 「eval 没抛异常 ≠ 装好了」：页面不是真抖音时 eval 会静静什么都不做，
+  // 所以要回读版本号确认（fake 里装之前返回 0，装之后返回当前版本）
+  const dead = { sessionId: 'S2', preloadScripts: [], addPreloadScript() {}, async send() { return {}; }, async eval() { return 0; } };
+  const r2 = await mod.installCommentBridge(dead);
+  assert.equal(r2.ok, false, '装完验不到桥要明确失败（不能假装成功）');
+  assert.match(r2.error, /装完验不到桥/);
+  ok('抖音评论桥：装桥（preload + 当前页 + 装完验版本）');
 }
 
 // ── callBridge：结果透传、异常不外抛 ──

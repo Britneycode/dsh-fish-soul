@@ -174,12 +174,20 @@ const { DouyinBrowser } = await import('../lib/douyin-browse.js');
 	const { COMMENT_BRIDGE_SOURCE } = await import('../lib/channels/vendor/douyin-bridge/douyin-comment.js');
 	const src = String(COMMENT_BRIDGE_SOURCE);
 	assert.match(src, /async collect\(/, '桥里要有 collect');
-	assert.ok(src.includes('/aweme/v1/web/commit/collect/'), '走收藏端点');
-	assert.ok(src.includes('collect_stat'), '以 collect_stat 为准');
+	// 2026-11-08 真机实测：正确端点是 aweme/collect，猜成 commit/collect 会 404 Janus
+	assert.ok(src.includes('/aweme/v1/web/aweme/collect/'), '走收藏端点（aweme/collect，不是 commit/collect）');
+	assert.ok(!src.includes('/aweme/v1/web/commit/collect/'), '不能用猜出来的 commit/collect（会 404 Janus）');
+	assert.ok(src.includes('collects_flag'), '以 collects_flag 为准');
 	assert.ok(/action/.test(src), '要带 action');
-	const http = (await import('node:fs')).readFileSync(new URL('../lib/douyin-http.js', import.meta.url), 'utf8');
-	assert.ok(http.includes('/aweme/v1/web/commit/collect/'), '纯 HTTP 侧也要有');
-	assert.ok(http.includes("aBogusScope: 'business'"), '收藏和点赞一样用业务参数签');
+	const httpSrc = (await import('node:fs')).readFileSync(new URL('../lib/douyin-http.js', import.meta.url), 'utf8');
+	assert.ok(httpSrc.includes('/aweme/v1/web/aweme/collect/'), '纯 HTTP 侧也要用正确端点');
+	assert.ok(httpSrc.includes("aBogusScope: 'business'"), '收藏和点赞一样用业务参数签');
+	// 端点必须带完整公共参数（只传 aweme_id+action 会回 status_code 4）
+	assert.ok(/baseQuery/.test(src), '桥要靠 baseQuery 带公共参数');
+	// 版本号必须 ≥2：v1 里 collect 还是 commit/collect（404）。页面里的旧桥不会自动更新，
+	// 号不变就永远跑旧代码 —— 2026-11-08 踩过一次（改了端点但请求还是旧的）。
+	const { COMMENT_BRIDGE_VERSION } = await import('../lib/channels/vendor/douyin-bridge/douyin-comment.js');
+	assert.ok(COMMENT_BRIDGE_VERSION >= 2, '改了桥源码必须升版本号，否则页面里跑的还是旧桥');
 }
 
 // ── ⑥ http 模式的收藏真的会调（不能只写个变量没人用）──
@@ -203,9 +211,9 @@ const { DouyinBrowser } = await import('../lib/douyin-browse.js');
 	const off = await mk({ collect: false }).watch({ id: 'h1', title: 't', author: 'a' }, false, false);
 	assert.equal(calls.length, 0, 'collect 关着不该调');
 	assert.equal(off.collected, false);
-	// 开着：调一次，按 status_code 0 算成功
+	// 开着但**浏览器没跑**：退回纯 HTTP（这条 mock 的 host.running=false）
 	const on = await mk({ collect: true }).watch({ id: 'h2', title: 't', author: 'a' }, false, false);
-	assert.deepEqual(calls, [['h2', { collect: true }]], '开着要真的调一次收藏（不重试）');
+	assert.deepEqual(calls, [['h2', { collect: true }]], '浏览器没跑时退回接口（不重试）');
 	assert.equal(on.collected, true, 'status_code 0 就算收藏上了');
 	// 服务端回 status_code 8（没登录 / 缺 msToken）：不能假装成功
 	calls.length = 0;
@@ -213,6 +221,21 @@ const { DouyinBrowser } = await import('../lib/douyin-browse.js');
 	b3.http.collect = async (id, o) => { calls.push([id, o]); return { ok: false, statusCode: 8, statusMsg: '用户未登录' }; };
 	const r3 = await b3.watch({ id: 'h3', title: 't', author: 'a' }, false, false);
 	assert.equal(r3.collected, false, 'status_code 8 不能算收藏成功');
+	// 浏览器在跑：优先走页面桥（页面里发才不需要 msToken），不该再打纯 HTTP
+	calls.length = 0;
+	const b4 = mk({ collect: true });
+	b4.host = {
+		running: true, loggedIn: true, exclusive: async (_l, fn) => fn(),
+		browser: { eval: async (expr) => {
+			const s = String(expr);
+			if (/__fishComment\.collect\b/.test(s)) return { ok: true, collected: true, confirmed: false };
+			if (/__fishComment\.version/.test(s)) return 999;
+			return true;
+		} },
+	};
+	const r4 = await b4.watch({ id: 'h4', title: 't', author: 'a' }, false, false);
+	assert.equal(r4.collected, true, '浏览器在跑时收藏成功');
+	assert.equal(calls.length, 0, '走了桥就不该再打纯 HTTP（会重复请求写接口）');
 }
 
 db.close();

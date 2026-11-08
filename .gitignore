@@ -34,6 +34,9 @@ scripts/probe-douyin-emoji-names.mjs
 scripts/probe-douyin-dm-image-format.mjs
 scripts/probe-douyin-diag.mjs
 scripts/probe-douyin-webp-upload.mjs
+scripts/probe-douyin-send-capture.mjs
+scripts/probe-douyin-conv-id.mjs
+scripts/probe-douyin-conv-raw.mjs
 scripts/probe-douyin-open.mjs
 scripts/probe-group-api.mjs
 scripts/probe-group-at.mjs

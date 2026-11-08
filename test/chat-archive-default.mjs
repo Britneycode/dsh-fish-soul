@@ -56,6 +56,24 @@ const { ChatArchive } = await import('../lib/chat-archive.js');
 	archive.stop();
 }
 
+// ── ③b 右端是闭区间：写入和取样同一毫秒也要取得到 ──
+// CI 上红过一次：`at < until` 会把「刚说完话就整理」的最新那句漏掉。
+{
+	process.env.DSH_HOME = tmpHome('dsh-ca3b-');
+	const archive = new ChatArchive({ getConfig: () => ({ chatArchive: { enabled: true, channels: [], days: 30 } }), log: () => {} });
+	archive.add('qq:10001', { who: '10001', text: '刚说完的这句' });
+	// 关键：until **精确等于**那条消息的 at（不靠 Date.now() 碰运气，本机毫秒够慢会碰不上）
+	const { DatabaseSync } = await import('node:sqlite');
+	const { fishSoulDir } = await import('../lib/db.js');
+	const { join } = await import('node:path');
+	const raw = new DatabaseSync(join(fishSoulDir(), 'chat-archive.db'), { readOnly: true });
+	const at = raw.prepare('SELECT at FROM chat_text LIMIT 1').get().at;
+	raw.close();
+	const rows = archive.sample({ since: 0, until: at, limit: 10 });
+	assert.equal(rows.length, 1, 'until 正好等于消息时间也不能漏（右端闭区间）');
+	archive.stop();
+}
+
 // ── ④ 关掉就一条都不记 ──
 {
 	process.env.DSH_HOME = tmpHome('dsh-ca4-');

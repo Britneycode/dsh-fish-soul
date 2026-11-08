@@ -190,6 +190,9 @@ try {
 		dwellMs: [200, 300], settleMs: 1000,
 		readDetail: async ({ browser, id }) => { await browser.goto(`https://www.douyin.com/video/${id}`, { settleMs: 1000 }); return { ok: true, desc: feed.find((f) => f.id === id).desc, author: feed.find((f) => f.id === id).author }; }
 	});
+	// 这个套件用的是本地假 www.douyin.com（没有抖音的 secSDK），所以页面内的接口桥装不上 ——
+	// 正好用来验「桥跑不起来就退回点 DOM 按钮」这条兜底。真实站点上桥是能用的（见 douyin-digg-bridge.mjs）。
+	const origBridgeReady = await import('../lib/channels/vendor/douyin-bridge/douyin-comment.js');
 	const rr = await b.run({});
 	assert.equal(rr.ok, true);
 	assert.deepEqual(rr.watched.map((w) => [w.id, w.author, w.liked]), [['7300000000000000032', '饭博主', false], ['7300000000000000034', '山博主', false], ['7300000000000000035', '猫博主', true]]);

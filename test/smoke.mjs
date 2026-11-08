@@ -299,7 +299,12 @@ const dyBrowser = {
 		if (expr === 'location.href') return 'https://www.douyin.com/';
 		if (expr === ACTIVE_VIDEO_JS) { const v = dy.feed[dy.feedAt]; return v ? { ok: true, live: false, ad: false, author: '', ...v } : { ok: false }; }
 		if (/video-switch-next-arrow/.test(expr)) { dy.feedAt++; return true; }
+		// 点赞改走页面内的接口桥（`window.__fishComment.digg`）——mock 要认这个，
+		// 否则「模型说点赞 → dy.likes+1」这条契约就测不到（DOM 那条现在只是兜底）。
+		if (/__fishComment\.digg\b/.test(expr)) { dy.likes++; return { ok: true, digged: true, confirmed: true }; }
+		if (/__fishComment\.version/.test(expr)) return 999; // 桥当已安装
 		if (/video-player-digg/.test(expr)) { dy.likes++; return true; }
+		if (/__fishComments*=|COMMENT_BRIDGE|window.__fishComments*=s*{/.test(expr)) return { ok: true };
 		if (/createImageBitmap/.test(expr)) return png.toString('base64');
 		return null;
 	},

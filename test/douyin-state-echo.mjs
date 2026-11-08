@@ -23,7 +23,7 @@ const st = (douyin) => douyinState({
     masterName: '主人', allowList: ['a'], links: ['x=1'], groups: ['g'], callNames: ['鱼'],
     window: 'visible',
     browser: { kind: 'chrome', customPath: '/x/y.exe' },
-    browse: { enabled: true, perDay: 7, videosPerSession: 4, like: true, share: false, shareInDm: false },
+    browse: { enabled: true, perDay: 7, videosPerSession: 4, like: true, share: false, shareInDm: false, mode: 'browser' },
     post: { enabled: true, perDay: 3 },
     comments: { enabled: true, perHour: 9, emoji: true },
   };
@@ -45,6 +45,7 @@ const st = (douyin) => douyinState({
   assert.equal(s.browse.like, true);
   assert.equal(s.browse.share, false);
   assert.equal(s.browse.shareInDm, false);
+  assert.equal(s.browse.mode, 'browser', '刷视频走哪条路要能读回来（写侧读了但回显漏了 = 开关点不动）');
   assert.equal(s.post.enabled, true);
   assert.equal(s.post.perDay, 3);
   assert.equal(s.comments.enabled, true);
@@ -60,6 +61,7 @@ const st = (douyin) => douyinState({
   assert.equal(s.comments.enabled, false);
   assert.equal(s.comments.perHour, 4);
   assert.equal(s.browse.share, true, '默认分享');
+  assert.equal(s.browse.mode, 'http', '没配过时默认走接口');
   assert.equal(s.window, 'background');
   ok('抖音配置：默认值是明确的 false/undefined 语义');
 }

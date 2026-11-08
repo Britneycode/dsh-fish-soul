@@ -23,7 +23,7 @@ const st = (douyin) => douyinState({
     masterName: '主人', allowList: ['a'], links: ['x=1'], groups: ['g'], callNames: ['鱼'],
     window: 'visible',
     browser: { kind: 'chrome', customPath: '/x/y.exe' },
-    browse: { enabled: true, perDay: 7, videosPerSession: 4, like: true, share: false, shareInDm: false, mode: 'browser' },
+    browse: { enabled: true, perDay: 7, videosPerSession: 4, like: true, likeApi: true, collect: true, frames: true, framesPerDay: 9, share: false, shareInDm: false, mode: 'browser' },
     post: { enabled: true, perDay: 3 },
     comments: { enabled: true, perHour: 9, emoji: true },
   };
@@ -46,6 +46,11 @@ const st = (douyin) => douyinState({
   assert.equal(s.browse.share, false);
   assert.equal(s.browse.shareInDm, false);
   assert.equal(s.browse.mode, 'browser', '刷视频走哪条路要能读回来（写侧读了但回显漏了 = 开关点不动）');
+  // 收藏 / 抽帧 / 接口点赞：同一形态 —— 只写回显一边，界面开关点完刷新就弹回去
+  assert.equal(s.browse.collect, true, '「喜欢就收藏」要能读回来');
+  assert.equal(s.browse.frames, true, '「抽帧看画面」要能读回来');
+  assert.equal(s.browse.framesPerDay, 9, '抽帧配额要能读回来');
+  assert.equal(s.browse.likeApi, true, '「接口点赞」要能读回来');
   assert.equal(s.post.enabled, true);
   assert.equal(s.post.perDay, 3);
   assert.equal(s.comments.enabled, true);

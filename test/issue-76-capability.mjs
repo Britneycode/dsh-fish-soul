@@ -93,7 +93,11 @@ process.env.DSH_HOME = prevHome;
 {
 	const fs = await import('node:fs');
 	const src = fs.readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
-	assert.ok(src.includes('capabilityStaleTag(m.content)'), '注入时给能力类记忆加时效标注（#76）');
+	// 逻辑搬到 lib/memory-label.js 了（抽出去才测得动），所以查两处：
+	// index.js 把 capabilityStaleTag 传进去，模块里真的用了它
+	assert.ok(src.includes('capabilityStaleTag'), '注入时要把能力判定接进去（#76）');
+	const labelSrc = fs.readFileSync(new URL('../lib/memory-label.js', import.meta.url), 'utf8');
+	assert.ok(labelSrc.includes('staleTag(m.content)'), '注入时给能力类记忆加时效标注（#76）');
 	const capSrc = fs.readFileSync(new URL('../lib/capability.js', import.meta.url), 'utf8');
 	assert.ok(capSrc.includes('可能已过时'), '标注文案要在');
 }

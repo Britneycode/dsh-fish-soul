@@ -29,6 +29,10 @@ scripts/probe-douyin-feed-http.mjs
 scripts/probe-douyin-digg.mjs
 scripts/probe-douyin-group.mjs
 scripts/probe-douyin-list-dom.mjs
+scripts/probe-douyin-dm-emoji.mjs
+scripts/probe-douyin-emoji-names.mjs
+scripts/probe-douyin-dm-image-format.mjs
+scripts/probe-douyin-diag.mjs
 scripts/probe-douyin-open.mjs
 scripts/probe-group-api.mjs
 scripts/probe-group-at.mjs

@@ -79,5 +79,12 @@ const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
 	assert.match(routes, /isDreamRunning/, '并发时要拒绝');
 }
 
+// ── ⑤ 观测点：整理记录里要看得到「这次带了几行原文」──
+{
+	// 加了开关却没有观测点 = 开了有没有生效只能靠猜（表情包那轮踩过）
+	const lifeSrc = readFileSync(new URL('../lib/life.js', import.meta.url), 'utf8');
+	assert.match(lifeSrc, /transcriptLines:\s*transcriptLines === ''/, 'dream.log 里要记下带了几行原文');
+}
+
 db.close();
 console.log('✓ Dream 原文接线：真接上了、延迟取值成立、手动入口走同一条路');

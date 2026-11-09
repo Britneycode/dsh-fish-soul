@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { 抠正文图 } from '../lib/channels/vendor/qq-bridge.js';
 import { tmpHome } from './_tmp.mjs';
 import { readResponseBounded } from '../lib/bounded-response.js';
@@ -78,4 +79,34 @@ test('file:// 图片按实际读取量限额，边界可读，超限和目录拒
   truncateSync(file, 10 * 1024 * 1024 + 1);
   assert.equal((await fetchImageBytes({ url: pathToFileURL(file).href })) === null, true, '超限必须拒绝');
   assert.equal(await fetchImageBytes({ url: pathToFileURL(dir).href }), null);
+});
+
+
+test('图片允许目录都不可用时拒绝发送并记录警告', () => {
+  const prev = process.env.DSH_HOME;
+  const isolated = join(home, 'missing-roots-home');
+  process.env.DSH_HOME = isolated;
+  try {
+    const logs = [];
+    const gateway = Object.assign(Object.create(ChatGateway.prototype), { log: (...args) => logs.push(args) });
+    const missingWorkspace = join(isolated, 'workspace');
+    assert.equal(gateway.localImagePath('x.png', missingWorkspace), null);
+    assert.equal(gateway.resolveImageFile('x.png', missingWorkspace), null);
+    assert.equal(logs.length, 2);
+    assert.ok(logs.every(([level, message]) => level === 'warn' && message.includes('图片允许目录不可用')));
+  } finally { process.env.DSH_HOME = prev; }
+});
+
+// Linux 的无写入端 FIFO 在阻塞 open 时会卡住，使用子进程超时防止回归时挂住整个套件。
+if (process.platform === 'linux') test('入站 file:// 的 FIFO 不阻塞且不作为普通图片读取', () => {
+  const fifo = join(home, 'image-fifo');
+  const made = spawnSync('mkfifo', [fifo], { encoding: 'utf8', timeout: 5000 });
+  assert.equal(made.status, 0, `创建 FIFO 失败: ${made.error ?? made.stderr}`);
+  const moduleUrl = pathToFileURL(join(process.cwd(), 'lib/gateway-util.js')).href;
+  const script = `import { fetchImageBytes } from ${JSON.stringify(moduleUrl)};
+const result = await fetchImageBytes({ url: ${JSON.stringify(pathToFileURL(fifo).href)} });
+if (result !== null) process.exit(2);`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 5000 });
+  assert.equal(child.error, undefined, `FIFO 读取被阻塞: ${child.error}`);
+  assert.equal(child.status, 0, `FIFO 应被拒绝: ${child.stderr}`);
 });

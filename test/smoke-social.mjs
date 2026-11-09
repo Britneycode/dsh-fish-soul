@@ -257,6 +257,18 @@ export async function run(t) {
 		assert.equal(pickRecommendedSong('', ['晚风心里吹']), '');
 		assert.equal(pickRecommendedSong('晚风心里吹', []), '');
 		assert.ok(locks.includes('发抖音图文'), '在浏览器锁里发');
+		// 自定义 driver 没有 closeMusicPanel 时，finally 里的收尾不能盖掉真正的失败原因
+		{
+			const noClose = { ...driver };
+			delete noClose.closeMusicPanel;
+			const s2 = new DouyinSocial({
+				db, clock, host, driver: noClose, getConfig: () => dcfg, callLlm: async (p) => (/背景音乐/.test(p) ? '' : '一条内容'),
+				persona: () => ({ name: '鱼' }), cardDir: join(home, 'cards')
+			});
+			const r2 = await s2.post({ force: true });
+			assert.equal(r2.ok, false);
+			assert.match(r2.error, /没有选出推荐歌曲/, '收尾方法缺失不能把真实原因盖成 TypeError');
+		}
 		assert.equal(db.prepare("SELECT COUNT(*) AS n FROM social_post WHERE platform = 'douyin'").get().n, 1, '只有配乐成功的作品记为发布');
 		assert.ok(db.prepare("SELECT 1 FROM memory WHERE owner_id = 'self' AND content LIKE '我在抖音发了条图文：%'").get());
 		assert.equal(dsocial.postState(clock.getRoleDateParts().dateStr).count, 1, '只有成功发布才计数，和 B站 分开');

@@ -214,14 +214,14 @@ export async function run(t) {
 		// 抖音 / B站私信发不了语音：主人要的转到主人 QQ 私聊，别人的去掉标记当文字发
 		{
 			const n0 = sent.length;
-			assert.equal(gw.voiceRelayTarget('douyin:测试主人'), 'private:10001');
+			assert.equal(gw.voiceRelayTarget('douyin:测试主人'), '', '昵称未经验证，不可转发');
 			assert.equal(gw.voiceRelayTarget('bili:555'), 'private:10001');
 			assert.equal(gw.voiceRelayTarget('douyin:路人'), '', '不是主人');
-			let left = await gw.relayDmVoice({ channel_id: 'douyin:测试主人', title: '抖音·测试主人（主人）' }, '好呀\n\n[语音] 给你听听\n\nQQ 上发你了');
+			let left = await gw.relayDmVoice({ channel_id: 'bili:555', title: 'B站·主人' }, '好呀\n\n[语音] 给你听听\n\nQQ 上发你了');
 			assert.equal(left, '好呀\n\nQQ 上发你了', '语音那段不在抖音里发');
 			assert.equal(sent.length, n0 + 1);
 			assert.equal(sent.at(-1)[0], 'private:10001'); assert.equal(sent.at(-1)[1][0].type, 'record');
-			assert.ok(gw.decisions.some((d) => d.kind === 'sent' && /抖音里要的语音，发到 QQ 私聊/.test(d.reason) && d.text === '🔊给你听听'));
+			assert.ok(gw.decisions.some((d) => d.kind === 'sent' && /B站里要的语音，发到 QQ 私聊/.test(d.reason) && d.text === '🔊给你听听'));
 			left = await gw.relayDmVoice({ channel_id: 'douyin:路人', title: '抖音·路人' }, '[语音] 你好呀');
 			assert.equal(left, '你好呀', '别人：当文字发');
 			assert.equal(sent.length, n0 + 1);

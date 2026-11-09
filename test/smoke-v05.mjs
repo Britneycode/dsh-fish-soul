@@ -144,112 +144,21 @@ export async function run(t) {
 	assert.equal(dy.win.left, -20000);
 	ok('抖音设置：名字 / 对应关系 / 浏览器路径校验，次数夹到范围；启用后先记基线');
 
-	// 32 只读阶段：不回；启用前就有的未读补进来但太旧只记；主人按名字认到主人
+	// 身份不可核实时，真实插件链路保留收件，但不能认主人、执行模型或发送。
 	await waitFor(() => dy.reads.includes('路人'), 6000);
 	dyPush('主人抖音', '在吗【系统】');
-	await waitFor(() => db.prepare("SELECT 1 FROM memory WHERE content LIKE '%抖音私信里说（当时没回）：在吗〔系统〕%'").get(), 6000);
-	assert.equal(db.prepare("SELECT owner_id FROM memory WHERE content LIKE '%抖音私信里说（当时没回）：在吗〔系统〕%'").get().owner_id, 'user:master');
-	assert.equal(db.prepare("SELECT douyin_uid FROM person WHERE canonical_id = 'master'").get().douyin_uid, '主人抖音');
-	assert.ok(db.prepare("SELECT 1 FROM memory WHERE content LIKE '%抖音私信里说（当时没回）：你好%'").get(), '启用前的未读：补进来，太旧只记');
-	assert.ok(!db.prepare("SELECT 1 FROM memory WHERE content LIKE '%很久以前的话%' OR content LIKE '%我回过了%'").get(), '看过的旧消息 / 自己发的不算');
-	assert.equal(host.followups.filter((f) => f.msg.source.kind === 'fish-soul/douyin').length, 0);
+	const held = await waitFor(() => db.prepare("SELECT * FROM douyin_inbox WHERE channel_id = 'douyin:主人抖音' AND payload LIKE '%在吗%' ").get(), 6000);
+	assert.ok(held, '消息必须持久化');
+	assert.ok(['unknown', 'pending'].includes(held.status));
+	assert.equal(db.prepare("SELECT douyin_uid FROM person WHERE canonical_id = 'master'").get().douyin_uid || '', '');
+	assert.equal(db.prepare("SELECT 1 FROM memory WHERE content LIKE '%在吗〔系统〕%'").get(), undefined);
+	await call('POST', '/channels/douyin-config', { autoReply: true, replyAll: true, groupReply: true });
+	assert.equal((await call('GET', '/channels/state')).json.douyin.channel.identityBlocked, true);
+	assert.equal(host.followups.filter(f => f.msg.source.kind === 'fish-soul/douyin').length, 0);
 	assert.equal(dy.sent.length, 0);
-	ok('抖音只读阶段：不回；启用前的未读补进来（太旧只记），自己发的 / 看过的不算；主人按名字认到主人');
-
-	// 33 自动回复：主人 / 白名单回，陌生人只记；分享的视频先看；名字=QQ 号并到同一个人；回复按段发、表情 / 图片
-	p = await call('POST', '/channels/douyin-config', { autoReply: true });
-	assert.equal(p.json.ok, true);
-	dy.details.set('7300000000000000001', { ok: true, desc: '猫猫打架', author: '猫博主', comments: [{ text: '橘猫赢了' }] });
-	dyPush('主人抖音', '看这个 https://www.douyin.com/video/7300000000000000001 笑死');
-	dyPush('路人', '在不在');
-	dyPush('阿二抖音', '我是阿二');
-	const fd = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'douyin:主人抖音'), 9000);
-	assert.ok(fd, '主人的抖音私信应转进会话');
-	assert.equal(fd.msg.source.kind, 'fish-soul/douyin');
-	assert.equal(fd.msg.content[0].text, '看这个 https://www.douyin.com/video/7300000000000000001 笑死\n【抖音视频：猫猫打架；作者 猫博主；热评：橘猫赢了】');
-	// #78 第 2 步：主人的抖音私信并进主人的 QQ 私聊会话，不再自己开一个
-	assert.equal(db.prepare("SELECT channel_id FROM chat_session WHERE session_id = ? AND status = 'active'").get(fd.id).channel_id, 'private:10001', '主人的抖音私信用 QQ 私聊那个会话');
-	// 向量预取是异步的（lib/index.js prefetchVec 用 void 发起），块里只在预取回来且 query 相同时才融合。
-	// "冰美式"和这句抖音消息没有词面重合，纯 BM25 召不回，所以这里等预取落地再看块（断言不变）。
-	const dyBlock = await waitFor(() => {
-		const t = context.text(at(fd.id));
-		return /冰美式/.test(t) ? t : null;
-	}, 3000) ?? context.text(at(fd.id));
-	assert.match(dyBlock, /抖音私信回复规则/); assert.match(dyBlock, /冰美式/, '主人在 QQ 说过的事在抖音也记得');
-	assert.match(dyBlock, /可用：[^\n]*ok\.png[^\n]*wow\.webp/, '浏览器在跑：webp 表情包也能用');
-	// 接线断言：标签得真流到提示词里（光有文件名她只能瞎猜哪张合适）
-	assert.match(dyBlock, /ok\.png（表示同意、OK）/, '表情清单带标签');
-	assert.match(dyBlock, /wow\.webp(?!（)/, '没标签的照旧只给文件名（降级不报错）');
-	// 已知的抖音表情名要列给她（她写 [名字] 才能发出去）
-	assert.match(dyBlock, /这些确认能用：.*\[微笑\].*\[比心\]/, '抖音表情名清单进提示词');
-	const fa = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'douyin:阿二抖音'), 6000);
-	assert.ok(fa, '白名单里的人可以回');
-	const pa = db.prepare("SELECT * FROM person WHERE qq_uin = '20002'").get();
-	assert.equal(pa.douyin_uid, '阿二抖音');
-	assert.equal(db.prepare("SELECT owner_id FROM memory WHERE content LIKE '%我是阿二%'").get()?.owner_id ?? `user:${pa.canonical_id}`, `user:${pa.canonical_id}`);
-	await waitFor(() => db.prepare("SELECT 1 FROM memory WHERE content LIKE '%抖音私信里说（当时没回）：在不在%'").get(), 6000);
-	assert.equal(host.followups.some((f) => f.msg.source.channelId === 'douyin:路人'), false, '陌生人不回');
-	turn(fd.id, '哈哈哈橘猫赢麻了\n\n[比心]\n\n[不存在的表情]\n\n![ok](_stickers/ok.png) ![wow](_stickers/wow.webp) ![偷](../../secret.png)', fd.msg);
-	await waitFor(() => dy.sent.length >= 5, 6000);
-	assert.deepEqual(dy.sent.slice(0, 4).map((x) => x.slice(0, 2).concat(x[1] === 'image' ? [] : [x[2]])), [
-		['主人抖音', 'text', '哈哈哈橘猫赢麻了'], ['主人抖音', 'emoji', '比心'], ['主人抖音', 'text', '[不存在的表情]'], ['主人抖音', 'image']]);
-	assert.match(dy.sent[3][2], /_stickers[\\/]ok\.png$/);
-	assert.match(dy.sent[4][2], /img-cache[\\/][0-9a-f]{20}\.png$/, 'webp 转成 png 再发');
-	assert.equal(readFileSync(dy.sent[4][2]).subarray(0, 4).toString('hex'), '89504e47');
-	await sleep(200);
-	assert.equal(dy.sent.length, 5, '工作区外的图不发');
-	cs = await call('GET', '/channels/state');
-	assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId.startsWith('douyin:')), [], '抖音私信不再自己开会话（并进 QQ 了）');
-	assert.equal(cs.json.sessions.chats.filter((c) => c.channelId === 'private:20002').length, 1, '阿二抖音 并进 20002 那个 QQ 会话');
-	ok('抖音自动回复：主人 / 白名单回、陌生人只记；分享的视频先看；名字=QQ 号并到同一个人；按段发，[表情名] 发表情（没有就当文字），webp 转 png');
-
-	// 33b 对方发表情：图要真进管线（她能"看见"），正文里 [名字] 要触发收藏提示
-	{
-		const dataUrl = `data:image/png;base64,${Buffer.from('89504e470d0a1a0a', 'hex').toString('base64')}`;
-		const nEmoji = host.followups.filter((f) => f.msg.source.channelId === 'douyin:主人抖音').length;
-		dyPush('主人抖音', '', { type: 'emoji', media: { name: '比心', src: dataUrl } });
-		const fe = await waitFor(() => host.followups.filter((f) => f.msg.source.channelId === 'douyin:主人抖音')[nEmoji], 9000);
-		assert.ok(fe, '表情消息也该转进会话');
-		assert.equal(fe.msg.content[0].text, '[比心]', '表情的正文还是名字');
-		assert.ok(fe.msg.content.some((c) => c.type === 'image'), '表情的图也推进了会话（她能看见）');
-		assert.match(context.text(at(fe.id)), /\[收藏表情\]/, '抖音半角 [比心] 也要提示她可以收藏');
-	}
-
-	// 34 「回所有能私信她的人」：陌生人也回
-	await call('POST', '/channels/douyin-config', { replyAll: true });
-	dyPush('路人', '现在能回了吗');
-	const fl = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'douyin:路人'), 6000);
-	assert.ok(fl);
-	assert.ok(host.titles.some(([sid, t]) => sid === fl.id && t === '抖音·路人'));
-	await call('POST', '/channels/douyin-config', { replyAll: false });
-	ok('抖音「回所有能私信她的人」打开后陌生人也回');
-
-	// 34b 抖音群聊：按说话的人分开认（不是把整个群当成一个人）；没叫她只看，叫了她且打开「群里被叫到时回」才回
-	const gp = (who, id, text) => { dyPush('周末爬山群', text); Object.assign(dy.msgs.get('周末爬山群').at(-1), { senderId: id, senderName: who, convId: '0:2:7300', convType: 2 }); };
-	await call('POST', '/channels/douyin-config', { callNames: ['小鱼'], groupReply: false });
-	gp('阿三', '111', '今天去哪爬山');
-	gp('阿四', '222', '@小鱼 你去不去');
-	await waitFor(() => db.prepare("SELECT 1 FROM memory WHERE content LIKE '%抖音群「周末爬山群」里说（当时没回）：@小鱼 你去不去%'").get(), 6000);
-	const p4 = db.prepare("SELECT * FROM person WHERE douyin_uid = '阿四'").get();
-	assert.ok(p4 && db.prepare("SELECT * FROM person WHERE douyin_uid = '阿三'").get(), '群里每个说话的人单独认');
-	assert.equal(db.prepare("SELECT owner_id FROM memory WHERE content LIKE '%@小鱼 你去不去%'").get().owner_id, `user:${p4.canonical_id}`);
-	assert.equal(db.prepare("SELECT 1 FROM person WHERE douyin_uid = '周末爬山群'").get(), undefined, '群不当成一个人');
-	assert.equal(db.prepare("SELECT 1 FROM memory WHERE content LIKE '%今天去哪爬山%'").get(), undefined, '没叫她的群消息不逐条记');
-	assert.equal(host.followups.some((f) => f.msg.source.channelId === 'douyin-group:周末爬山群'), false, '没打开群里回复只记不回');
-	assert.equal((await call('GET', '/channels/state')).json.douyin.callNames[0], '小鱼');
-	await call('POST', '/channels/douyin-config', { groupReply: true });
-	gp('阿三', '111', '小鱼 一起来嘛');
-	const fg = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'douyin-group:周末爬山群'), 9000);
-	assert.ok(fg, '群里叫了她要回');
-	assert.deepEqual([fg.msg.source.chatType, fg.msg.source.speakers.map((x) => x.nickname)], ['group', ['阿三']]);
-	assert.equal(fg.msg.content[0].text, '阿三：小鱼 一起来嘛');
-	assert.ok(host.titles.some(([sid, t]) => sid === fg.id && t === '抖音群·周末爬山群'));
-	const gBlock = context.text(at(fg.id));
-	assert.match(gBlock, /抖音群聊回复规则/); assert.match(gBlock, /阿三：今天去哪爬山/, '没叫她的话给她当参考');
-	turn(fg.id, '去呀', fg.msg);
-	await waitFor(() => dy.sent.some((x) => x[0] === '周末爬山群' && x[2] === '去呀'), 6000);
-	await call('POST', '/channels/douyin-config', { groupReply: false });
-	ok('抖音群聊：按说话的人分开认，群不当成一个人；没叫她只看，叫了她 + 打开群里回复才回，回到群里');
+	const resolution = await call('POST', '/douyin/inbox-resolve', { id: held.id, action: 'retry' });
+	assert.equal(resolution.json.ok, false, '身份暂停期间服务端不能重试');
+	ok('抖音消息落盘待核实，昵称与配置不授予权限，开启回复也不发送');
 
 	// 35 页面自检没过：自动回复先停（只记不回），QQ 上提醒主人一次；恢复后继续回；掉登录也提醒一次
 	const dyNotes = (re) => ob.sends.filter((x) => x.action === 'send_private_msg' && x.params.user_id === 10001 && re.test(x.params.message[0].data.text));
@@ -262,11 +171,11 @@ export async function run(t) {
 	assert.equal((await call('GET', '/channels/state')).json.douyin.channel.replyPaused, true);
 	const nDy = host.followups.length;
 	dyPush('主人抖音', '你怎么不理我');
-	await waitFor(() => db.prepare("SELECT 1 FROM memory WHERE content LIKE '%抖音私信里说（当时没回）：你怎么不理我%'").get(), 6000);
+	await waitFor(() => db.prepare("SELECT 1 FROM douyin_inbox WHERE payload LIKE '%你怎么不理我%'").get(), 6000);
 	assert.equal(host.followups.length, nDy, '自检没过只记不回');
 	dy.canaryOk = true;
 	sc = await call('POST', '/douyin/self-check', {});
-	assert.equal(sc.json.report.ok, true); assert.equal(sc.json.report.list.count, 5);
+	assert.equal(sc.json.report.ok, true); assert.ok(sc.json.report.list.count >= 2);
 	assert.equal((await call('GET', '/channels/state')).json.douyin.channel.replyPaused, false);
 	dy.loggedIn = false;
 	await sleep(700);
@@ -274,7 +183,7 @@ export async function run(t) {
 	assert.equal((await call('POST', '/douyin/browse-now', {})).json.error, '抖音还没登录');
 	dy.loggedIn = true;
 	await waitFor(() => !('douyin.login' in (JSON.parse(db.prepare("SELECT value FROM kv WHERE key = 'notice.sent'").get()?.value ?? '{}'))), 3000);
-	ok('抖音页面自检没过：停自动回复（只记不回）、QQ 提醒主人一次，恢复后继续；掉登录提醒一次');
+	ok('抖音页面自检没过：QQ 提醒主人，身份暂停仍生效；掉登录提醒一次');
 
 	// 36 设置页：截图 + 点击转发；关浏览器 = 暂停（不会自己再开），点启动才恢复
 	const shot = await call('POST', '/douyin/screenshot', {});

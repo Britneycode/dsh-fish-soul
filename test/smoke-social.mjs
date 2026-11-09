@@ -198,8 +198,9 @@ export async function run(t) {
 		const driver = {
 			renderCard: async (text, foot, theme) => { dyd.card = [text, foot, theme]; return Buffer.from('89504e470d0a1a0a', 'hex'); },
 			prepareNote: async (x) => { dyd.prepped.push({ ...x, png: existsSync(x.file) ? readFileSync(x.file).subarray(0, 4).toString('hex') : '' }); return dyd.prepareResult; },
-			listRecommendedMusic: async () => dyd.recommended,
-			publishNote: async (x) => { dyd.published.push(x); return dyd.publishResult; },
+			listRecommendedMusic: async () => dyd.recommended.length ? { ok: true, songs: dyd.recommended } : { ok: false, error: '音乐面板没有加载出推荐歌曲' },
+			closeMusicPanel: async () => {},
+			publishNote: async (x) => { dyd.published.push(x); if (dyd.publishResult.ok) await x.beforeSubmit(); return dyd.publishResult; },
 			listWorks: async () => dyd.works,
 			openWork: async (w) => { dyd.opened++; return { ok: dyd.comments.has(w.id) }; },
 			listComments: async () => (dyd.comments.get('7001') ?? []).map((c, i) => ({ i, canReply: true, isAuthor: false, ...c })),
@@ -216,29 +217,35 @@ export async function run(t) {
 			replyGapMs: 0, postRealGapMs: 0, random: () => 0.9, cardDir: join(home, 'cards')
 		});
 		let r = await dsocial.post({ force: true });
-		assert.equal(r.ok, true, r.error);
+		assert.equal(r.ok, false, '挑歌 LLM 没输出不能发布');
+		assert.match(r.error, /模型没有选出推荐歌曲/);
+		assert.equal(dyd.published.length, 0);
 		assert.ok(prompts.some((p) => /文字卡片/.test(p)), '文案 prompt 还在发');
 		assert.equal(dyd.card[0], '下雨天适合躺着\n什么都不想干');
 		assert.match(dyd.card[1], /^\d{4}\.\d{2}\.\d{2}$/);
 		assert.deepEqual([dyd.prepped[0].title, dyd.prepped[0].text, dyd.prepped[0].png], ['下雨天适合躺着', '下雨天适合躺着\n什么都不想干', '89504e47']);
-		assert.equal(dyd.published[0].music, '', '挑歌 LLM 没输出：不配音乐，发布照常');
 		assert.ok(prompts.some((p) => /背景音乐/.test(p) && /晚风心里吹/.test(p)), '推荐歌名喂给模型了');
-		// 心情映射卡片主题；歌只能从推荐列表里挑
+		dyd.recommended = [];
+		r = await dsocial.post({ force: true });
+		assert.equal(r.ok, false, '没有推荐歌曲不能发布');
+		assert.match(r.error, /没有加载出推荐歌曲/);
+		assert.equal(dyd.published.length, 0);
+		dyd.recommended = ['晚风心里吹', '人间烟火', '小美满'];
 		dyMoodOut = '```json\n{"mood":"blue","reason":"有点丧"}\n```';
 		dyMusicOut = '晚风心里吹';
 		dyd.prepped.length = 0;
+		dyd.publishResult = { ok: false, code: 'MUSIC_FAILED', error: '配乐失败，未发布：未确认显示歌名' };
+		r = await dsocial.post({ force: true });
+		assert.equal(r.ok, false, '配乐未确认不能发布');
+		assert.match(r.error, /未确认/);
+		assert.equal(db.prepare("SELECT COUNT(*) AS n FROM social_post WHERE platform = 'douyin'").get().n, 0);
 		dyd.published.length = 0;
+		dyd.publishResult = { ok: true, musicPicked: true };
 		r = await dsocial.post({ force: true });
 		assert.equal(r.ok, true, r.error);
 		assert.equal(dyd.published[0].music, '晚风心里吹', '从推荐歌里挑一首');
 		assert.equal(dyd.card[2], 1, 'blue → 浅蓝主题');
-		assert.ok(dnotes.some(([k, x]) => k === 'post' && /配了首《晚风心里吹》/.test(x.reason)));
-		dyd.publishResult = { ok: true, musicPicked: false };
-		dyd.published.length = 0;
-		r = await dsocial.post({ force: true });
-		assert.equal(r.ok, true, '配歌失败不影响发布');
-		assert.ok(dnotes.some(([k, x]) => k === 'post' && /没配上/.test(x.reason)));
-		dyd.publishResult = { ok: true };
+		assert.ok(dnotes.some(([k, x]) => k === 'post' && /已确认配乐《晚风心里吹》/.test(x.reason)));
 		// pickMoodTheme：宽容解析 + 认不出就随机主题
 		assert.deepEqual(pickMoodTheme('垃圾输出没有 JSON', () => 0.9), { theme: 4, reason: '' });
 		assert.equal(pickMoodTheme('{"mood":"dream"}').theme, 2);
@@ -250,9 +257,9 @@ export async function run(t) {
 		assert.equal(pickRecommendedSong('', ['晚风心里吹']), '');
 		assert.equal(pickRecommendedSong('晚风心里吹', []), '');
 		assert.ok(locks.includes('发抖音图文'), '在浏览器锁里发');
-		assert.equal(db.prepare("SELECT COUNT(*) AS n FROM social_post WHERE platform = 'douyin'").get().n, 3, 'force 发了 3 次（含配歌两次）');
+		assert.equal(db.prepare("SELECT COUNT(*) AS n FROM social_post WHERE platform = 'douyin'").get().n, 1, '只有配乐成功的作品记为发布');
 		assert.ok(db.prepare("SELECT 1 FROM memory WHERE owner_id = 'self' AND content LIKE '我在抖音发了条图文：%'").get());
-		assert.equal(dsocial.postState(clock.getRoleDateParts().dateStr).count, 3, '和 B站 分开计数');
+		assert.equal(dsocial.postState(clock.getRoleDateParts().dateStr).count, 1, '只有成功发布才计数，和 B站 分开');
 		// 创作者中心没登录：提醒主人；要验证：6 小时内不再试
 		dyd.publishResult = { ok: false, code: 'NOT_LOGGED_IN', error: '创作者中心没登录' };
 		r = await dsocial.post({ force: true });
@@ -265,7 +272,7 @@ export async function run(t) {
 		assert.equal(dsocial.ready, false);
 		assert.match((await dsocial.post({ force: true })).error, /验证/);
 		dsocial.blockedUntil = 0;
-		dyd.publishResult = { ok: true };
+		dyd.publishResult = { ok: true, musicPicked: true };
 
 		// 评论：关着不看；第一次只记；之后回新的
 		assert.equal((await dsocial.pollComments()).ok, false);
@@ -286,7 +293,8 @@ export async function run(t) {
 		r = await dsocial.pollComments();
 		assert.deepEqual([r.replied, r.skipped], [2, 1], '每小时 2 条：主人 + 路人丙，营销号不回，路人丁等下次');
 		assert.deepEqual(dyd.replies, [['主人抖音', '嗯嗯知道啦'], ['路人丙', '哈哈谢谢']]);
-		assert.match(prompts.findLast((p) => /早点睡/.test(p)), /是你的主人/);
+		assert.match(prompts.findLast((p) => /早点睡/.test(p)), /身份未验证/);
+		assert.doesNotMatch(prompts.findLast((p) => /早点睡/.test(p)), /是你的主人/);
 		assert.match(prompts.findLast((p) => /早点睡/.test(p)), /在你的图文《晚饭吃了泡面》下面/);
 		assert.ok(!prompts.some((p) => /我自己说的/.test(p)), '作者自己的不回');
 		// 额度恢复后：页面被换掉了就重开再回；要验证就停下、不记，验证完再回
@@ -470,9 +478,9 @@ export async function run(t) {
 		dyConnected = true;
 		assert.equal(await gw.triggerProactive('douyin:主人抖音', 'x', { origin: 'idle' }), false, '不是分享不主动');
 		assert.equal(await gw.triggerProactive('douyin:别人', 'x', { origin: 'share' }), false, '只发给主人');
-		await assert.rejects(gw.triggerProactive('douyin:主人抖音', 'x', { origin: 'share' }), /到建会话这一步了/);
+		assert.equal(await gw.triggerProactive('douyin:主人抖音', 'x', { origin: 'share' }), false, '昵称无法验证时分享也不能发');
 	}
-	ok('抖音刷到的分享：发到抖音私信里的主人（连不上就发 QQ）；抖音私信只放行分享');
+	ok('分享引擎可配置目标；网关阻止未验证的抖音目标');
 
 	// 4. 设置页：保存开关和数量，状态里带出来
 	if (call) {

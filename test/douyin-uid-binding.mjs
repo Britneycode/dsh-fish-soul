@@ -105,49 +105,17 @@ const msg = (extra = {}) => ({
 	ok('改名后仍是同一行 —— 这是改成 ID 绑定最大的收益');
 }
 
-// ── ⑤ 老昵称键平滑迁到 ID 键 ──
+// 昵称不能安全迁移成 ID：上层必须隔离，旧记录原样保留。
 {
-	tmpHome('migrate');
-	// 模拟老库：douyin_uid 存的是昵称「未云」，而且还挂着主人身份
-	const db = openDatabase();
-	db.prepare(`INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at)
-		VALUES ('master', '3630958828', '未云', '未云', 'close', 5, 1, 1)`).run();
-	db.prepare(`INSERT INTO memory (character_id, owner_id, channel, channel_id, kind, content, keywords, importance, emotion, source_session, created_at, updated_at, status)
-		VALUES ('feiyu', 'user:master', 'douyin', 'douyin:未云', 'fact', '主人喜欢喝冰美式', '', 3, 0, '', 1, 1, 'active')`).run();
-
-	// 老键查得到
-	assert.ok(findPersonByDouyin(db, '未云') !== null, '老昵称键能查到人');
-
-	// 迁移逻辑（跟 resolveDouyinPerson 里那段一致）：新键没人用就搬过去
-	const NEW_ID = 'uid:7702399256389125000';
-	const byOld = findPersonByDouyin(db, '未云');
-	const byNew = findPersonByDouyin(db, NEW_ID);
-	assert.ok(byOld !== null && byNew === null, '迁移前：老键有、新键无');
-	db.prepare('UPDATE person SET douyin_uid = ? WHERE canonical_id = ?').run(NEW_ID, byOld.canonical_id);
-
-	// 迁移后：新键能找到人，而且是 master 那行
-	const migrated = findPersonByDouyin(db, NEW_ID);
-	assert.ok(migrated !== null, '迁移后新键能查到');
-	assert.equal(migrated.canonical_id, 'master', '主人身份没丢');
-	assert.equal(findPersonByDouyin(db, '未云'), null, '老键已经让位');
-
-	// 记忆还在，owner 没变
-	const mem = db.prepare("SELECT * FROM memory WHERE content LIKE '%冰美式%'").get();
-	assert.ok(mem !== undefined, '记忆没丢');
-	assert.equal(mem.owner_id, 'user:master', '记忆还挂在主人身上');
-	ok('老昵称键 → ID 键：主人身份和记忆都不丢');
-}
-
-// ── ⑥ 上层判定用的是会话名（不能跟着变成 uid:）──
-{
-	const { readFileSync } = await import('node:fs');
-	const gw = readFileSync(new URL('../lib/gateway-media.js', import.meta.url), 'utf8');
-	// 主人 / 白名单 / 找会话 都必须是 peer（会话名），不是 m.userId
-	assert.match(gw, /const peer = m\.peerName \|\| m\.userId/, '要取出会话名');
-	assert.match(gw, /peer === cfg\.masterName/, '判主人要按会话名');
-	assert.match(gw, /cfg\.allowList\.includes\(peer\)/, '白名单要按会话名');
-	assert.match(gw, /this\.douyinLinks\(\)\.get\(peer\)/, '「抖音名=QQ号」对照要按会话名');
-	ok('上层：判主人 / 白名单 / 对照表都用会话名，只有认人用 ID');
+ tmpHome('no-migrate'); const db = openDatabase();
+ db.prepare("INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master','123','未云','未云','close',5,1,1)").run();
+ const { ChatGateway } = await import('../lib/gateway.js');
+ const gw = new ChatGateway({ctx:{get:()=>undefined},db,clock:{now:()=>Date.now()},getConfig:()=>({masterQqUin:'123',douyin:{masterName:'未云',links:['未云=123']}}),log:()=>{},channel:{},soul:{}});
+ assert.match((await gw.onDouyinMessage({channelId:'douyin:未云',peerName:'未云',userId:'uid:7702399256389125000'})).review,/身份/);
+ assert.equal(findPersonByDouyin(db,'未云').canonical_id,'master');
+ assert.equal(findPersonByDouyin(db,'uid:7702399256389125000'),null);
+ assert.equal(gw.isMasterChannel('douyin:未云'),false);
+ db.close(); ok('旧昵称记录不被自动迁移，也不授予主人权限');
 }
 
 console.log('\ndouyin-uid-binding ok');

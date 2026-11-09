@@ -17,6 +17,30 @@ assert.match(main, /class Boundary extends react\.Component/);
 assert.match(main, /h\(Boundary, \{ name: "版本" \}, h\(UpdateBar/);
 console.log('  ✓ client：普通函数没被当组件用；版本条 / 引导 / 每页都有出错兜底');
 
+// #82：useConfirm() 返回 [confirm, confirmNode] 两件东西，confirm() 只是把待确认的那件事存进 state，
+// 真正画出对话框的是 confirmNode。组件里只解构不渲染，点「删除这张卡」就什么都不发生——界面无反应、
+// Promise 永不 settle。凡是用 useConfirm 的组件，必须把 confirmNode 挂进它返回的那棵树。
+const confirmHoles = [];
+let confirmUsers = 0;
+for (const f of readdirSync(dir).filter((x) => /^client(\..+)?\.js$/.test(x))) {
+	const src = readFileSync(join(dir, f), 'utf8');
+	const marks = [];
+	const re = /^\t\tfunction (\w+)\(/gm;
+	let m;
+	while ((m = re.exec(src)) !== null) marks.push([m[1], m.index]);
+	marks.forEach(([name, start], i) => {
+		const block = src.slice(start, i + 1 < marks.length ? marks[i + 1][1] : src.length);
+		const destructure = /const \[confirm, confirmNode\] = useConfirm\(\);/.exec(block);
+		if (destructure === null) return;
+		confirmUsers += 1;
+		const rest = block.slice(0, destructure.index) + block.slice(destructure.index + destructure[0].length);
+		if (!/\bconfirmNode\b/.test(rest)) confirmHoles.push(`${f} ${name}`);
+	});
+}
+assert.deepEqual(confirmHoles, [], `这些组件调了 confirm() 却没把对话框挂出去，点了没反应：\n${confirmHoles.join('\n')}`);
+assert(confirmUsers >= 5, `只找到 ${confirmUsers} 个用 useConfirm 的组件，检查逻辑可能失效了`);
+console.log(`  ✓ 确认对话框：${confirmUsers} 个组件都把 confirmNode 挂出去了（#82）`);
+
 // 窄容器导航在宿主内部滚动列中吸顶，保持单行并允许横向滚动。
 const css = readFileSync(join(dir, 'panel.css'), 'utf8');
 const narrow = css.slice(css.indexOf('@container (max-width:720px)'));

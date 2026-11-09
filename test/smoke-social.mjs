@@ -200,7 +200,7 @@ export async function run(t) {
 			prepareNote: async (x) => { dyd.prepped.push({ ...x, png: existsSync(x.file) ? readFileSync(x.file).subarray(0, 4).toString('hex') : '' }); return dyd.prepareResult; },
 			listRecommendedMusic: async () => dyd.recommended.length ? { ok: true, songs: dyd.recommended } : { ok: false, error: '音乐面板没有加载出推荐歌曲' },
 			closeMusicPanel: async () => {},
-			publishNote: async (x) => { dyd.published.push(x); return dyd.publishResult; },
+			publishNote: async (x) => { dyd.published.push(x); if (dyd.publishResult.ok) await x.beforeSubmit(); return dyd.publishResult; },
 			listWorks: async () => dyd.works,
 			openWork: async (w) => { dyd.opened++; return { ok: dyd.comments.has(w.id) }; },
 			listComments: async () => (dyd.comments.get('7001') ?? []).map((c, i) => ({ i, canReply: true, isAuthor: false, ...c })),
@@ -305,7 +305,8 @@ export async function run(t) {
 		r = await dsocial.pollComments();
 		assert.deepEqual([r.replied, r.skipped], [2, 1], '每小时 2 条：主人 + 路人丙，营销号不回，路人丁等下次');
 		assert.deepEqual(dyd.replies, [['主人抖音', '嗯嗯知道啦'], ['路人丙', '哈哈谢谢']]);
-		assert.match(prompts.findLast((p) => /早点睡/.test(p)), /是你的主人/);
+		assert.match(prompts.findLast((p) => /早点睡/.test(p)), /身份未验证/);
+		assert.doesNotMatch(prompts.findLast((p) => /早点睡/.test(p)), /是你的主人/);
 		assert.match(prompts.findLast((p) => /早点睡/.test(p)), /在你的图文《晚饭吃了泡面》下面/);
 		assert.ok(!prompts.some((p) => /我自己说的/.test(p)), '作者自己的不回');
 		// 额度恢复后：页面被换掉了就重开再回；要验证就停下、不记，验证完再回
@@ -489,9 +490,9 @@ export async function run(t) {
 		dyConnected = true;
 		assert.equal(await gw.triggerProactive('douyin:主人抖音', 'x', { origin: 'idle' }), false, '不是分享不主动');
 		assert.equal(await gw.triggerProactive('douyin:别人', 'x', { origin: 'share' }), false, '只发给主人');
-		await assert.rejects(gw.triggerProactive('douyin:主人抖音', 'x', { origin: 'share' }), /到建会话这一步了/);
+		assert.equal(await gw.triggerProactive('douyin:主人抖音', 'x', { origin: 'share' }), false, '昵称无法验证时分享也不能发');
 	}
-	ok('抖音刷到的分享：发到抖音私信里的主人（连不上就发 QQ）；抖音私信只放行分享');
+	ok('分享引擎可配置目标；网关阻止未验证的抖音目标');
 
 	// 4. 设置页：保存开关和数量，状态里带出来
 	if (call) {

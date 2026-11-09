@@ -50,13 +50,11 @@ const gw = new ChatGateway({
 
 const ok = (msg) => { console.log('  ✓ ' + msg); };
 
-// 1. 抖音能发出去
+// 1. 抖音目标不能核验时，转达必须拒绝，不能调用底层发送。
 {
-	const r = await gw.relayTo('douyin', '晚安呀');
-	assert.equal(r.ok, true, '抖音转达：ok 应为 true');
-	assert.equal(r.delivered, true, '抖音转达：delivered 应为 true');
-	assert.deepEqual(calls.at(-1), ['douyin', '未云', [{ type: 'text', text: '晚安呀' }]], '抖音 send 应收到（会话名, 文本段）');
-	ok('抖音私信发得出去');
+ const r = await gw.relayTo('douyin','晚安呀');
+ assert.equal(r.ok,false); assert.equal(r.delivered,false); assert.match(r.reason,/身份/);
+ assert.equal(calls.length,0); ok('抖音目标未验证时停止转达');
 }
 
 // 2. B站能发出去
@@ -70,19 +68,9 @@ const ok = (msg) => { console.log('  ✓ ' + msg); };
 
 // 3. 出站进了聊天日志
 {
-	assert.ok(journaled.some(([c, t]) => c === 'douyin:未云' && t === '晚安呀'), '抖音那条应进聊天日志');
+	assert.ok(!journaled.some(([c]) => c.startsWith('douyin:')), '未发送不写成功日志');
 	assert.ok(journaled.some(([c, t]) => c === 'bili:555' && t === '来了'), 'B站那条应进聊天日志');
 	ok('发出去的消息都记进了聊天日志');
-}
-
-// 4. 抖音被风控吞了要如实报（ok 还是 true，delivered 必须是 false）
-{
-	dyResult = { ok: true, delivered: false, parts: [] };
-	const r = await gw.relayTo('douyin', '在吗');
-	assert.equal(r.ok, true, '风控吞消息时 ok 仍是 true');
-	assert.equal(r.delivered, false, '风控吞消息时 delivered 必须是 false');
-	dyResult = { ok: true, delivered: true, parts: [] };
-	ok('风控静默吞消息时如实报 delivered=false');
 }
 
 // 5. B站没填 UID
@@ -113,23 +101,11 @@ const ok = (msg) => { console.log('  ✓ ' + msg); };
 	ok('平台写错时直接拒绝');
 }
 
-// 8. 发送抛错不外泄
-{
-	dyThrows = new Error('boom');
-	const r = await gw.relayTo('douyin', '炸了');
-	dyThrows = null;
-	assert.equal(r.ok, false, '底层抛错要收成 ok:false');
-	assert.equal(r.delivered, false, '底层抛错要收成 delivered:false');
-	// 异常在 sendDouyin 内部就被收走了（它负责写日志），所以错误详情看日志，reason 指向日志
-	assert.ok(logs.some(([level, msg]) => level === 'error' && msg.includes('boom')), '底层错误要落进日志，不能静默');
-	ok('发送抛错不外泄，错误落进日志');
-}
-
 // 9. 主人闸门
 {
 	assert.equal(gw.isMasterChannel('private:10001'), true, '主人 QQ 私聊算主人');
 	assert.equal(gw.isMasterChannel('group:991'), false, '群聊不算主人');
-	assert.equal(gw.isMasterChannel('douyin:未云'), true, '主人的抖音会话算主人');
+	assert.equal(gw.isMasterChannel('douyin:未云'), false, '昵称不能授予主人权限');
 	ok('只有主人的私聊算主人');
 }
 
@@ -143,4 +119,4 @@ const ok = (msg) => { console.log('  ✓ ' + msg); };
 }
 
 db.close();
-console.log('✓ 跨平台转达：抖音 / B站 都发得出去、出站进日志、风控吞了如实报、没配置 / 没连上 / 平台写错 / 空内容都拦住');
+console.log('✓ 抖音转达安全暂停，B站转达及错误边界正常');

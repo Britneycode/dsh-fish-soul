@@ -61,8 +61,8 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 	// 2. 抖音 也是同一条规则（名字对上 QQ 号就并）
 	const gw = gateway(cfg);
 	const agent = await gw.ensureSession({ channelId: 'douyin:小鱼干', chatType: 'private', targetId: '小鱼干', title: '' });
-	assert.equal(gw.chatForSession(agent.id).channel_id, 'private:12345678');
-	ok('抖音 私信对上 QQ 号 → 并进 QQ 会话');
+	assert.equal(gw.chatForSession(agent.id).channel_id, 'douyin:小鱼干');
+	ok('未经验证的昵称不并进 QQ 会话');
 }
 
 {
@@ -138,11 +138,11 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 	// 9. 主人不用配对应表：B站 主人 UID / 抖音 主人名字 就是 masterQqUin 那个人
 	const gw = gateway({ qq: { enabled: true }, masterQqUin: '5550001', bili: { enabled: true, masterUid: '4242', links: [] }, douyin: { enabled: true, masterName: '主人', links: [] } });
 	assert.equal(gw.personKeyOf(biliChat('4242')), 'user:5550001');
-	assert.equal(gw.personKeyOf({ channelId: 'douyin:主人', chatType: 'private' }), 'user:5550001');
+	assert.equal(gw.personKeyOf({ channelId: 'douyin:主人', chatType: 'private' }), '');
 	assert.equal(gw.personKeyOf(biliChat('4243')), '', '不是主人、又没配对应表 → 算不出是谁');
 	const agent = await gw.ensureSession(biliChat('4242'));
 	assert.equal(gw.chatForSession(agent.id).channel_id, 'private:5550001');
-	ok('主人不用配对应表：B站 主人 UID / 抖音 主人名字 直接并进主人的 QQ 私聊');
+	ok('只有 B站 主人 UID 可以按已有配置并到 QQ');
 }
 
 {
@@ -151,12 +151,12 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 		.run(Date.now(), Date.now());
 	const gw = gateway(cfg);
 	const renamed = { channelId: 'douyin:新昵称', chatType: 'private', targetId: '新昵称', title: '', userId: 'uid:7702399256389125000' };
-	assert.equal(gw.personKeyOf(renamed), 'user:12345678', '对应表没这个名字，但记忆里这个人挂着 QQ 号');
+	assert.equal(gw.personKeyOf(renamed), '', '未经验证的 ID 不能映射到 QQ');
 	const agent = await gw.ensureSession(renamed);
-	assert.equal(gw.chatForSession(agent.id).channel_id, 'private:12345678', '还是并进同一个人');
+	assert.equal(gw.chatForSession(agent.id).channel_id, 'douyin:新昵称', '未经验证的 ID 不并到 QQ');
 	// 认不出是谁就别猜：既没配对应表、记忆里也没这个人
 	assert.equal(gw.personKeyOf({ channelId: 'douyin:查无此人', chatType: 'private', targetId: '查无此人', title: '', userId: 'uid:1' }), '');
-	ok('抖音改了昵称也能并（跟着记忆里那个人的 QQ 号走），认不出就还是不并');
+	ok('未经验证的抖音 ID 不并进 QQ');
 }
 
 console.log('shared-session ok');

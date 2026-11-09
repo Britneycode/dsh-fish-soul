@@ -68,4 +68,159 @@ assert.equal(box.size(), 0);
 assert.match(gaveUp.at(-1)[1], /重发 5 次都没成功/);
 
 box.stop();
-console.log('✓ QQ 重发队列：没连上排队 / 连上按顺序补发 / 超时放弃 / 可能已发出不重发 / 重试用完放弃');
+
+// 断线且已到期时不能用零延迟循环；重连时仍能强制立即发送。
+{
+ const db2 = new DatabaseSync(':memory:');
+ const c = { connected: false, async send() { return 'ok'; } };
+ const q = new Outbox({ db: db2, channel: c, windowMs: () => 600_000, now: () => 100_000 });
+ q.enqueue({ channelId: 'private:2', segs: seg('offline') });
+ db2.prepare("UPDATE outbox SET next_at = ?").run(1);
+ let delay;
+ q.schedule = (d) => { delay = d; };
+ await q.flush();
+ assert.ok(delay >= 1000, `断线后不应忙等，delay=${delay}`);
+ c.connected = true;
+ await q.flush({ force: true });
+ assert.equal(q.size(), 0);
+ q.stop(); db2.close();
+}
+// 重启时 sending 是未知结果，绝不可自动重发。
+{
+ const db2 = new DatabaseSync(':memory:');
+ let sends = 0; const warnings = [];
+ const c = { connected: true, async send() { sends++; return 'id'; } };
+ const q1 = new Outbox({ db: db2, channel: c, windowMs: () => 600_000, now: () => 100_000 });
+ q1.enqueue({ channelId: 'private:3', segs: seg('possibly sent'), text: 'possibly sent' });
+ db2.prepare("UPDATE outbox SET status = 'sending'").run(); q1.stop();
+ const q2 = new Outbox({ db: db2, channel: c, windowMs: () => 600_000, now: () => 100_000, onGiveUp: (item, reason) => warnings.push([item.text, reason]) });
+ await q2.flush({ force: true });
+ assert.equal(sends, 0);
+ assert.equal(db2.prepare('SELECT status FROM outbox').get().status, 'unknown');
+ assert.match(warnings[0][1], /可能已经发出/);
+ q2.stop(); db2.close();
+}
+// 发送完成回调出错不能将已发送消息重新标为可重试。
+{
+ const db2 = new DatabaseSync(':memory:');
+ const q = new Outbox({ db: db2, channel: { connected: true, async send() { return 'id'; } }, windowMs: () => 600_000, now: () => 100_000, onSent() { throw Error('未连接'); } });
+ q.enqueue({ channelId: 'private:4', segs: seg('sent') });
+ await q.flush({ force: true });
+ assert.equal(db2.prepare('SELECT status FROM outbox').get().status, 'sent');
+ q.stop(); db2.close();
+}
+
+// 真实子进程在发送过程中退出，磁盘数据库重开后不可重发。
+{
+ const { mkdtempSync, rmSync } = await import('node:fs');
+ const { tmpdir } = await import('node:os');
+ const { join } = await import('node:path');
+ const { spawnSync } = await import('node:child_process');
+ const dir = mkdtempSync(join(tmpdir(), 'fish-outbox-crash-'));
+ const path = join(dir, 'test.db');
+ try {
+  const script = `import { DatabaseSync } from 'node:sqlite';
+   import { Outbox } from './lib/outbox.js';
+   const db = new DatabaseSync(process.argv[1]);
+   const q = new Outbox({ db, channel: { connected: true, async send() { process.exit(0); } }, windowMs: () => 600000 });
+   q.enqueue({ channelId: 'private:5', segs: [{ type: 'text', data: { text: 'x' } }] });
+   await q.flush({ force: true });`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script, path], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.equal(child.status, 0, child.stderr);
+  const db2 = new DatabaseSync(path);
+  assert.equal(db2.prepare('SELECT status FROM outbox').get().status, 'sending');
+  let sends = 0;
+  const q = new Outbox({ db: db2, channel: { connected: true, async send() { sends++; } }, windowMs: () => 600_000 });
+  await q.flush({ force: true });
+  assert.equal(sends, 0);
+  assert.equal(db2.prepare('SELECT status FROM outbox').get().status, 'unknown');
+  q.stop(); db2.close();
+ } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+// 重发 await 期间同聊天的新消息也应排队，避免插队。
+{
+ const db2 = new DatabaseSync(':memory:');
+ let release; const waiting = new Promise((resolve) => { release = resolve; });
+ const q = new Outbox({ db: db2, channel: { connected: true, async send() { await waiting; return 'id'; } }, windowMs: () => 600_000 });
+ q.enqueue({ channelId: 'private:6', segs: seg('first') });
+ const pending = q.flush({ force: true });
+ assert.equal(q.hasQueued('private:6'), true);
+ release(); await pending;
+ q.stop(); db2.close();
+}
+
+// 写库失败不能让异常冒出去：flush 的两个调用点都是 void（定时器、宿主的 onConnected），
+// 仓库里没有 unhandledRejection 兜底，冒出去就是宿主进程退出。
+{
+ const db2 = new DatabaseSync(':memory:');
+ let sends = 0;
+ const warnings = [];
+ const q = new Outbox({ db: db2, channel: { connected: true, async send() { sends++; return 'id'; } },
+  windowMs: () => 600_000, now: () => 100_000, log: (_l, m) => warnings.push(m) });
+ q.enqueue({ channelId: 'private:8', segs: seg('x') });
+ db2.prepare('UPDATE outbox SET next_at = 1').run();
+ const real = db2.prepare.bind(db2);
+ let marks = 0;
+ db2.prepare = (sql) => {
+  const st = real(sql);
+  if (sql.includes("SET status = ?, attempts")) {
+   return { run: (...a) => { marks++; if (marks === 1) throw new Error('disk I/O error'); return st.run(...a); } };
+  }
+  return st;
+ };
+ // 关键：不 catch，异常一旦冒出来这个 await 就会 reject
+ await q.flush({ force: true });
+ db2.prepare = real;
+ assert.equal(sends, 0, '标不上「发送中」就不发（发了记不住，重启会重发刷屏）');
+ assert.equal(db2.prepare('SELECT status FROM outbox').get().status, 'queued', '这条留在队列里等下次');
+ assert.ok(warnings.some((m) => /重发状态写入失败/.test(m)), '要留一条 warn');
+ q.stop(); db2.close();
+}
+// 发送成功但「记成功」写库失败：不能崩，也不能让这个聊天永久排队。
+{
+ const db2 = new DatabaseSync(':memory:');
+ let sends = 0; const gaveUp = [];
+ const q = new Outbox({ db: db2, channel: { connected: true, async send() { sends++; return 'id'; } },
+  windowMs: () => 600_000, now: () => 100_000, onGiveUp: (item, reason) => gaveUp.push([item.channel_id, reason]) });
+ q.enqueue({ channelId: 'private:9', segs: seg('x') });
+ db2.prepare('UPDATE outbox SET next_at = 1').run();
+ const real = db2.prepare.bind(db2);
+ let marks = 0;
+ db2.prepare = (sql) => {
+  const st = real(sql);
+  if (sql.includes("SET status = ?, attempts")) {
+   return { run: (...a) => { marks++; if (marks === 2) throw new Error('disk I/O error'); return st.run(...a); } };
+  }
+  return st;
+ };
+ await q.flush({ force: true }); // 不 catch：修复前这里会抛
+ assert.equal(sends, 1, '消息真的发出去了');
+ db2.prepare = real;
+ assert.equal(db2.prepare('SELECT status FROM outbox').get().status, 'sending', '记账失败先停在 sending');
+ // 下一轮必须把它收成 unknown，否则 hasQueued 永远为真 → 这个聊天所有回复都进队列干等
+ await q.flush({ force: true });
+ assert.equal(db2.prepare('SELECT status FROM outbox').get().status, 'unknown');
+ assert.equal(q.hasQueued('private:9'), false, '卡住的记录回收后不再堵这个聊天');
+ assert.ok(gaveUp.some(([cid, reason]) => cid === 'private:9' && /核实/.test(reason)), '要提示人工核实');
+ q.stop(); db2.close();
+}
+// 清理过期记录写失败也只是卫生工作失败，不能带崩整轮重发。
+{
+ const db2 = new DatabaseSync(':memory:');
+ let sends = 0;
+ const q = new Outbox({ db: db2, channel: { connected: true, async send() { sends++; return 'id'; } }, windowMs: () => 600_000, now: () => 100_000 });
+ q.enqueue({ channelId: 'private:10', segs: seg('x') });
+ db2.prepare('UPDATE outbox SET next_at = 1').run();
+ const real = db2.prepare.bind(db2);
+ db2.prepare = (sql) => {
+  if (sql.includes('DELETE FROM outbox')) throw new Error('disk I/O error');
+  return real(sql);
+ };
+ await q.flush({ force: true }); // 修复前这里会抛
+ db2.prepare = real;
+ assert.equal(sends, 1, '清理失败不影响正常重发');
+ assert.equal(db2.prepare('SELECT status FROM outbox').get().status, 'sent');
+ q.stop(); db2.close();
+}
+
+console.log('✓ QQ 重发队列：退避、顺序、重连、崩溃恢复及未知状态保护');

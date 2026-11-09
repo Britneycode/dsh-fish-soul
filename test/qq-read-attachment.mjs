@@ -190,3 +190,38 @@ test('fileId 路线：没有 fetchFile 通道时保留占位', async () => {
 	const r = await applyAttachments('【文件：note.txt】', [{ name: 'note.txt', path: '', url: '', size: 24, fileId: 'ID:-123', fileHash: '' }], opts());
 	assert.equal(r.text, '【文件：note.txt】', '没有下载通道保留占位');
 });
+
+// 合并 #84 与 #85 后的取舍：fetchQqFile 不再走全局 fetch，而是交给 safe-download
+// （它自己做 DNS 固定 + 私网拒绝 + 按实际字节限额）。所以 #84 那个「用全局 fetch 桩
+// 假装虚报 Content-Length」的测试在这里已经不成立 —— 那条保证现在由
+// test/safe-download.mjs 的「按实际流量限额：无长度、虚报、小于和等于边界」守着。
+// 这里保留的是 #85 的接线断言：上限真的传到了下载器。
+test('网关下载：把上限传给安全下载器', async () => {
+ const calls = [];
+ const gw = { channel: { call: async () => ({ url: 'https://example.test/file' }) },
+  attachmentDownload: async (url, opts) => { calls.push({url, ...opts}); return Buffer.from('abcd'); } };
+ const m = { chatType: 'private', userId: '1', channelId: 'private:1' };
+ assert.equal((await ChatGateway.prototype.fetchQqFile.call(gw, m, { fileId: 'f', url: '', maxBytes: 4 })).toString(), 'abcd');
+ assert.equal(calls[0].maxBytes, 4);
+ assert.equal(calls[0].timeoutMs, 20000, '超时要一起传下去');
+ // 上限夹紧：调用方传错值也不能超过 32MB
+ await ChatGateway.prototype.fetchQqFile.call(gw, m, { fileId: 'f', url: '', maxBytes: 999 * 1024 * 1024 });
+ assert.equal(calls.at(-1).maxBytes, 32 * 1024 * 1024);
+ await ChatGateway.prototype.fetchQqFile.call(gw, m, { fileId: 'f', url: '', maxBytes: -1 });
+ assert.equal(calls.at(-1).maxBytes, 0);
+});
+
+test('远程附件：按类别传下载上限，关闭时不下载', async () => {
+ const calls = [];
+ const fetchFile = async (args) => { calls.push(args); return Buffer.from('text'); };
+ const txt = { name: 'note.txt', path: '', fileId: 'x' };
+ const pdf = { name: 'a.pdf', path: '', fileId: 'y' };
+ await applyAttachments('【文件：note.txt】', [txt], opts({ fetchFile }));
+ assert.equal(calls.at(-1).maxBytes, 256 * 1024);
+ await applyAttachments('【文件：a.pdf】', [pdf], opts({ fetchFile, saveBinary: true }));
+ assert.equal(calls.at(-1).maxBytes, 32 * 1024 * 1024);
+ const n = calls.length;
+ await applyAttachments('【文件：note.txt】', [txt], opts({ fetchFile, readText: false }));
+ await applyAttachments('【文件：a.pdf】', [pdf], opts({ fetchFile, saveBinary: false }));
+ assert.equal(calls.length, n);
+});

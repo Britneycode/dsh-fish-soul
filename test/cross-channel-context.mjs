@@ -84,7 +84,8 @@ function journal() {
 {
 	// 接线：注入点必须在私聊分支、必须排除当前通道、必须只用真实钟比时间
 	const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
-	assert.match(src, /if \(!inGroup && known\.length === 1 && session\.channelId !== ''\) \{[\s\S]{0,400}recentAcrossChannels\(/, '只在私聊、只对认出来的那一个人注入');
+	assert.match(src, /if \(!sharedSession && !inGroup && known\.length === 1 && session\.channelId !== ''\) \{[\s\S]{0,400}recentAcrossChannels\(/, '只在私聊、只对认出来的那一个人注入');
+	assert.match(src, /const sharedSession = boundChannel !== '' && boundChannel !== session\.channelId/, '会话已经共享了就别再搬（那些话本来就在同一个会话里）');
 	assert.match(src, /except: session\.channelId/, '当前通道要排除');
 	assert.match(src, /now: Date\.now\(\)/, '通道活跃时间是真实钟，不能用虚拟钟');
 	assert.match(src, /endsWith\('group'\)/, '群通道不能搬');

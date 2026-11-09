@@ -9,7 +9,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const MP3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(64, 1)]);
 
 export async function run(t) {
-	const { assert, ok, call, sleep, waitFor, context, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod } = t;
+	const { assert, ok, call, sleep, waitFor, context, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod, conn } = t;
 	const { setKv, getKv } = await import('../lib/db.js');
 	const llmMod = await import('../lib/llm.js');
 	const voiceMod = await import('../lib/voice.js');
@@ -511,6 +511,12 @@ export async function run(t) {
 		p = await call('POST', '/voice/test', { text: '试听一下' });
 		assert.equal(p.json.ok, true); assert.equal(Buffer.from(p.json.base64, 'base64').subarray(0, 3).toString(), 'ID3');
 		assert.equal(vreq[0][1], 'Bearer sk-voice-abcd1234'); assert.match(vreq[0][2], /"input":"试听一下"/);
+		// 语音规则只在 QQ 侧给。主人的 QQ 会话现在跟抖音共享一个（#78 第 2 步），缓存里留着抖音那一轮 ——
+		// 再走一条 QQ 私信，让这一轮的通道回到 QQ，再看提示词
+		const nBefore = host.followups.filter((f) => f.msg.source.channelId === 'private:10001').length;
+		conn.push({ post_type: 'message', message_type: 'private', sub_type: 'friend', user_id: 10001, message_id: 90210,
+			sender: { nickname: '主人' }, message: [{ type: 'text', data: { text: '发条语音听听' } }] });
+		await waitFor(() => host.followups.filter((f) => f.msg.source.channelId === 'private:10001').length > nBefore, 6000);
 		assert.match(context.text(at(sid)), /开头写 \[语音\]/, 'sometimes：QQ 会话里告诉她可以发语音');
 		// 听 / 说各配一套：设置页两组输入框；没单独填的那侧沿用公用的 key（打码、不回传）
 		p = await call('POST', '/voice/config', { sttBaseURL: 'https://stt.example/v1', sttApiKey: 'sk-stt-wxyz9876', ttsApiKey: 'sk-••••••••0000' });

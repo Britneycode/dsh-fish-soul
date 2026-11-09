@@ -830,7 +830,8 @@ const fb = await waitFor(() => host.followups.find((f) => f.msg.source.channelId
 assert.ok(fb, '主人的 B站私信应转进会话');
 assert.equal(fb.msg.source.kind, 'fish-soul/bili');
 assert.match(fb.msg.content[0].text, /^看这个 BV1Ab411c7Zz 笑死\n【视频 BV1Ab411c7Zz：《猫咪打架实录》UP主 猫UP；简介：两只猫打起来了；字幕节选：大家好，今天两只猫打起来了；热评：橘猫赢了】$/);
-assert.ok(host.titles.some(([sid, t]) => sid === fb.id && t === 'B站·主人B站（主人）'));
+// #78 第 2 步：主人的 B站 私信并进主人的 QQ 私聊会话，不再自己开一个
+assert.equal(db.prepare("SELECT channel_id FROM chat_session WHERE session_id = ? AND status = 'active'").get(fb.id).channel_id, 'private:10001', '主人的 B站 私信用 QQ 私聊那个会话');
 const biliBlock = context.text(at(fb.id));
 assert.match(biliBlock, /B站私信回复规则/); assert.match(biliBlock, /冰美式/, '主人在 QQ 说过的事在 B站也记得');
 const f888 = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'bili:888'), 6000);
@@ -855,7 +856,8 @@ assert.equal(bm.sent[0].f['msg[receiver_id]'], '777'); assert.equal(bm.sent[0].q
 assert.equal(bm.sent[0].q.w_dev_id, bm.sent[0].f['msg[dev_id]']);
 assert.deepEqual(bm.badWbi, [], 'WBI 签名全部验过');
 cs = await call('GET', '/channels/state');
-assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId.startsWith('bili:')).map((c) => c.channelId).sort(), ['bili:777', 'bili:888']);
+assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId.startsWith('bili:')), [], 'B站 私信不再自己开会话（并进 QQ 了）');
+assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId === 'private:20002').length, 1, '互关的 888 并进 20002 那个 QQ 会话');
 // DSH 在我们的消息后面追加 runtime-context（也是 user/message）：B站回复照样要发出去
 {
 	const n = bm.sent.length;
@@ -961,7 +963,7 @@ await (await import('./smoke-v06.mjs')).run({
 
 // 50–55 v0.7：按功能选模型 / 用量、语音、收藏表情包、学群里的说法、上网查、首次引导（在 smoke-v07.mjs）
 await (await import('./smoke-v07.mjs')).run({
-	assert, ok, call, sleep, waitFor, context, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod
+	assert, ok, call, sleep, waitFor, context, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod, conn
 });
 
 // 80–84 v0.8：记忆考试（时间标签 / 检索带上下文 / 关系 / 聊完自动记 / 隐私 / 印象 / 生日 / 遗忘曲线，在 smoke-v08.mjs）

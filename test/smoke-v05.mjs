@@ -167,7 +167,8 @@ export async function run(t) {
 	assert.ok(fd, '主人的抖音私信应转进会话');
 	assert.equal(fd.msg.source.kind, 'fish-soul/douyin');
 	assert.equal(fd.msg.content[0].text, '看这个 https://www.douyin.com/video/7300000000000000001 笑死\n【抖音视频：猫猫打架；作者 猫博主；热评：橘猫赢了】');
-	assert.ok(host.titles.some(([sid, t]) => sid === fd.id && t === '抖音·主人抖音（主人）'));
+	// #78 第 2 步：主人的抖音私信并进主人的 QQ 私聊会话，不再自己开一个
+	assert.equal(db.prepare("SELECT channel_id FROM chat_session WHERE session_id = ? AND status = 'active'").get(fd.id).channel_id, 'private:10001', '主人的抖音私信用 QQ 私聊那个会话');
 	// 向量预取是异步的（lib/index.js prefetchVec 用 void 发起），块里只在预取回来且 query 相同时才融合。
 	// "冰美式"和这句抖音消息没有词面重合，纯 BM25 召不回，所以这里等预取落地再看块（断言不变）。
 	const dyBlock = await waitFor(() => {
@@ -198,7 +199,8 @@ export async function run(t) {
 	await sleep(200);
 	assert.equal(dy.sent.length, 5, '工作区外的图不发');
 	cs = await call('GET', '/channels/state');
-	assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId.startsWith('douyin:')).map((c) => c.channelId).sort(), ['douyin:主人抖音', 'douyin:阿二抖音']);
+	assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId.startsWith('douyin:')), [], '抖音私信不再自己开会话（并进 QQ 了）');
+	assert.equal(cs.json.sessions.chats.filter((c) => c.channelId === 'private:20002').length, 1, '阿二抖音 并进 20002 那个 QQ 会话');
 	ok('抖音自动回复：主人 / 白名单回、陌生人只记；分享的视频先看；名字=QQ 号并到同一个人；按段发，[表情名] 发表情（没有就当文字），webp 转 png');
 
 	// 33b 对方发表情：图要真进管线（她能"看见"），正文里 [名字] 要触发收藏提示

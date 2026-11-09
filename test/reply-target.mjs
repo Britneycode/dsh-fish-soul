@@ -87,4 +87,17 @@ const bind = (gw) => {
 	ok('记忆出处：刷视频记的不再被标成「没回的消息」');
 }
 
+{
+	// 6. 共享会话 + 插件重启后宿主重放消息：本轮通道从消息来源里补回来，否则会回错平台
+	sent.length = 0;
+	const gw = bind(gateway());
+	gw.onSessionEvent({ id: 'sess-1' }, { type: 'user/message', data: { message: { id: 'm1', content: [{ type: 'text', text: '在吗' }], source: { kind: 'fish-soul/bili', channelId: 'bili:172195454' } } } });
+	gw.onSessionEvent({ id: 'sess-1' }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '在呢' }] } } });
+	gw.onSessionEvent({ id: 'sess-1' }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+	await new Promise((r) => setTimeout(r, 50));
+	assert.equal(sent.length, 1);
+	assert.equal(sent[0][0], 'bili:172195454', '消息来源带着通道就按它回，别落到会话绑定的 QQ');
+	ok('重启后重放的消息：按消息来源里的通道回复，不回错平台');
+}
+
 console.log('reply-target ok');

@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { 抠正文图 } from '../lib/channels/vendor/qq-bridge.js';
 import { tmpHome } from './_tmp.mjs';
 import { readResponseBounded } from '../lib/bounded-response.js';
 import { fetchImageBytes } from '../lib/gateway-util.js';
@@ -30,14 +32,50 @@ test('入站图片的两个远程字段都在下载中限流', async () => {
   } finally { globalThis.fetch = original; }
 });
 
-test('外发图片允许工作区真实文件，但拒绝符号链接或 junction 指向外部', (t) => {
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+
+test('QQ 和 B站/抖音私信都拒绝越界链接，正常图片继续可发', async () => {
   const ws = join(home, 'ws'); const outside = join(home, 'outside');
   mkdirSync(ws, { recursive: true }); mkdirSync(outside, { recursive: true });
-  writeFileSync(join(ws, 'ok.png'), 'inside'); writeFileSync(join(outside, 'secret.png'), 'secret');
-  const gateway = { log() {} };
-  const resolveImage = (p) => ChatGateway.prototype.resolveImageFile.call(gateway, p, ws);
-  assert.equal(Buffer.from(resolveImage('ok.png').data.file.slice(9), 'base64').toString(), 'inside');
+  writeFileSync(join(ws, 'ok.png'), PNG); writeFileSync(join(outside, 'secret.png'), PNG);
+  const gateway = Object.assign(Object.create(ChatGateway.prototype), { log() {}, canvasConvert: null });
+  const resolveImage = (p) => gateway.resolveImageFile(p, ws);
+  assert.deepEqual(Buffer.from(resolveImage('ok.png').data.file.slice(9), 'base64'), PNG);
+  assert.ok(gateway.localImagePath('ok.png', ws));
   assert.equal(resolveImage(join(outside, 'secret.png')), null);
-  try { symlinkSync(outside, join(ws, 'escape'), 'junction'); } catch (e) { t.skip(`无法创建链接: ${e.code}`); return; }
+  assert.equal(gateway.localImagePath(join(outside, 'secret.png'), ws), null);
+  const neighbor = join(home, 'ws-neighbor'); mkdirSync(neighbor); writeFileSync(join(neighbor, 'x.png'), PNG);
+  assert.equal(gateway.localImagePath(join(neighbor, 'x.png'), ws), null);
+  const dataDir = join(home, 'fish-soul'); mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, 'data.png'), PNG);
+  assert.ok(gateway.localImagePath(join(dataDir, 'data.png'), ws));
+  assert.ok(resolveImage(join(dataDir, 'data.png')));
+  // Unix 普通符号链接 / Windows junction：创建失败就失败，不允许静默跳过。
+  symlinkSync(outside, join(ws, 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.equal(resolveImage('escape/secret.png'), null);
+  assert.equal(gateway.localImagePath('escape/secret.png', ws), null);
+  if (process.platform !== 'win32') {
+    symlinkSync(join(outside, 'secret.png'), join(ws, 'linked.png'), 'file');
+    assert.equal(resolveImage('linked.png'), null);
+    assert.equal(gateway.localImagePath('linked.png', ws), null);
+  }
+  assert.equal(gateway.localImagePath('missing.png', ws), null);
+  mkdirSync(join(ws, 'directory.png'));
+  assert.equal(gateway.localImagePath('directory.png', ws), null);
+  const escaped = 抠正文图('![x](escape/secret.png)').图;
+  assert.equal((await gateway.dmImages({ workspace_path: ws }, escaped, { images: [] })).length, 0);
+  const allowed = 抠正文图('![x](ok.png)').图;
+  const images = await gateway.dmImages({ workspace_path: ws }, allowed, { images: [] });
+  assert.equal(images.length, 1);
+  assert.deepEqual(images[0].bytes, PNG);
+});
+
+test('file:// 图片按实际读取量限额，边界可读，超限和目录拒绝', async () => {
+  const dir = join(home, 'local'); mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'local.png'); writeFileSync(file, '');
+  truncateSync(file, 10 * 1024 * 1024);
+  assert.equal((await fetchImageBytes({ url: pathToFileURL(file).href })).length, 10 * 1024 * 1024);
+  truncateSync(file, 10 * 1024 * 1024 + 1);
+  assert.equal((await fetchImageBytes({ url: pathToFileURL(file).href })) === null, true, '超限必须拒绝');
+  assert.equal(await fetchImageBytes({ url: pathToFileURL(dir).href }), null);
 });

@@ -62,6 +62,10 @@ dsh plugin --profile desktop add dsh-fish-soul
 | `fish-soul/backups/` | 每日 `VACUUM INTO` 备份 |
 | `fish-soul/img-cache/` | webp → png 缓存 |
 
+## 开发与审查
+
+修改代码或审查 PR 前，请阅读 [工程经验与 PR 准入](docs/engineering-lessons.md)。
+
 ## 目录
 
 ```

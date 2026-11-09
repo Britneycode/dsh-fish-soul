@@ -34,6 +34,19 @@ assert.equal(cleanNotes('   \n\n  ').length, 0);
 const capped = cleanNotes(Array.from({ length: 50 }, (_, i) => `第${i}行`).join('\n'), 60);
 assert.ok(capped.join('').length <= 80, '太长的说明要截断');
 assert.match(capped[capped.length - 1], /Release 页面/);
+// 一整行就超长（CHANGELOG 常常是几百字一个自然段）：必须截断后仍然有内容，
+// 不能返回 0 行 —— 那会让公告写「这次没写更新说明」（v0.15.25/.27/.28 都踩过）
+{
+	const oneLine = '先说第一件事。然后说第二件事，这里啰嗦一点凑长度。最后是第三件事。';
+	const got = cleanNotes(oneLine, 20);
+	assert.ok(got.length > 0, '单行超长不能整行丢掉');
+	assert.ok(got[0].length <= 20, '单行超长也要压在字数上限内');
+	assert.ok(got.some((l) => /Release 页面/.test(l)), '截断了要指路到 Release');
+	// 切点离句末够近就切在句末，不停在半句话上（20 字切不到，30 字能切到第一个句号后）
+	assert.match(cleanNotes(oneLine, 30)[0], /。$/, '能在句末切就切在句末');
+	// 没被截断时不该冒出「后面还有」
+	assert.ok(!cleanNotes('短说明。', 100).some((l) => /Release 页面/.test(l)), '没截断就不用指路');
+}
 // CHANGELOG 里那一段（规则跟 release.yml 的 awk 一样）
 const cl = [
 	'（暂无）',

@@ -138,7 +138,7 @@ function makeChannel(driverFor) {
 
 	const media = readFileSync(new URL('../lib/gateway-media.js', import.meta.url), 'utf8');
 	assert.match(media, /delivered: false, parts: \[\]/, 'sendDouyin 要有结构化的失败返回');
-	assert.match(media, /typeof r === 'boolean'/, '老返回（布尔）要兼容');
+	assert.match(media, /抖音收件人身份无法验证/, '未核实目标不能发送');
 	ok('上层：sent / unconfirmed / failed 三态齐全，UI 认得新 kind');
 }
 

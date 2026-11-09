@@ -24,13 +24,12 @@ test('下载按实际字节限流：无长度、伪造长度、边界和超限',
   assert.equal((await readResponseBounded(response([]), 4)).length, 0);
 });
 
-test('入站图片的两个远程字段都在下载中限流', async () => {
-  const original = globalThis.fetch;
-  try {
-    globalThis.fetch = async () => new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(33 * 1024 * 1024)); c.close(); } }));
-    assert.equal(await fetchImageBytes({ url: 'https://example.test/image' }), null);
-    assert.equal(await fetchImageBytes({ file: 'https://example.test/image' }), null);
-  } finally { globalThis.fetch = original; }
+test('入站图片的两个远程字段都传递限额，不能读取本地 URL', async () => {
+  const calls = [];
+  const download = async (url, opts) => { calls.push({ url, ...opts }); return null; };
+  assert.equal(await fetchImageBytes({ url: 'https://example.test/image' }, download), null);
+  assert.equal(await fetchImageBytes({ file: 'https://example.test/image' }, download), null);
+  assert.deepEqual(calls.map(x => x.maxBytes), [10 * 1024 * 1024, 10 * 1024 * 1024]);
 });
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
@@ -71,16 +70,13 @@ test('QQ 和 B站/抖音私信都拒绝越界链接，正常图片继续可发',
   assert.deepEqual(images[0].bytes, PNG);
 });
 
-test('file:// 图片按实际读取量限额，边界可读，超限和目录拒绝', async () => {
+test('入站 file:// 无论大小均拒绝，不能读取本地敏感文件', async () => {
   const dir = join(home, 'local'); mkdirSync(dir, { recursive: true });
-  const file = join(dir, 'local.png'); writeFileSync(file, '');
-  truncateSync(file, 10 * 1024 * 1024);
-  assert.equal((await fetchImageBytes({ url: pathToFileURL(file).href })).length, 10 * 1024 * 1024);
-  truncateSync(file, 10 * 1024 * 1024 + 1);
-  assert.equal((await fetchImageBytes({ url: pathToFileURL(file).href })) === null, true, '超限必须拒绝');
+  const file = join(dir, 'local.png'); writeFileSync(file, PNG);
+  assert.equal(await fetchImageBytes({ url: pathToFileURL(file).href }), null);
+  assert.equal(await fetchImageBytes({ file: pathToFileURL(file).href }), null);
   assert.equal(await fetchImageBytes({ url: pathToFileURL(dir).href }), null);
 });
-
 
 test('图片允许目录都不可用时拒绝发送并记录警告', () => {
   const prev = process.env.DSH_HOME;

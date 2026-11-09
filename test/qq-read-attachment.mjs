@@ -191,17 +191,13 @@ test('fileId 路线：没有 fetchFile 通道时保留占位', async () => {
 	assert.equal(r.text, '【文件：note.txt】', '没有下载通道保留占位');
 });
 
-test('网关下载：按实际流量限制，不能信任 Content-Length', async () => {
- const oldFetch = globalThis.fetch;
- try {
-  globalThis.fetch = async () => new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(6)); c.close(); } }), { headers: { 'content-length': '1' } });
-  const gw = { channel: { call: async () => ({ url: 'https://example.test/file' }) } };
-  const m = { chatType: 'private', userId: '1', channelId: 'private:1' };
-  const result = await ChatGateway.prototype.fetchQqFile.call(gw, m, { fileId: 'f', fileHash: '', url: '', maxBytes: 4 });
-  assert.equal(result, null);
-  globalThis.fetch = async () => new Response('abcd');
-  assert.equal((await ChatGateway.prototype.fetchQqFile.call(gw, m, { fileId: 'f', url: '', maxBytes: 4 })).toString(), 'abcd');
- } finally { globalThis.fetch = oldFetch; }
+test('网关下载：把上限传给安全下载器', async () => {
+ const calls = [];
+ const gw = { channel: { call: async () => ({ url: 'https://example.test/file' }) },
+  attachmentDownload: async (url, opts) => { calls.push({url, ...opts}); return Buffer.from('abcd'); } };
+ const m = { chatType: 'private', userId: '1', channelId: 'private:1' };
+ assert.equal((await ChatGateway.prototype.fetchQqFile.call(gw, m, { fileId: 'f', url: '', maxBytes: 4 })).toString(), 'abcd');
+ assert.equal(calls[0].maxBytes, 4);
 });
 
 test('远程附件：按类别传下载上限，关闭时不下载', async () => {

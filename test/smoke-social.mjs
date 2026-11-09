@@ -200,7 +200,7 @@ export async function run(t) {
 			prepareNote: async (x) => { dyd.prepped.push({ ...x, png: existsSync(x.file) ? readFileSync(x.file).subarray(0, 4).toString('hex') : '' }); return dyd.prepareResult; },
 			listRecommendedMusic: async () => dyd.recommended.length ? { ok: true, songs: dyd.recommended } : { ok: false, error: '音乐面板没有加载出推荐歌曲' },
 			closeMusicPanel: async () => {},
-			publishNote: async (x) => { dyd.published.push(x); return dyd.publishResult; },
+			publishNote: async (x) => { dyd.published.push(x); if (dyd.publishResult.ok) await x.beforeSubmit(); return dyd.publishResult; },
 			listWorks: async () => dyd.works,
 			openWork: async (w) => { dyd.opened++; return { ok: dyd.comments.has(w.id) }; },
 			listComments: async () => (dyd.comments.get('7001') ?? []).map((c, i) => ({ i, canReply: true, isAuthor: false, ...c })),

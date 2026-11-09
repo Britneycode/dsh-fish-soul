@@ -118,4 +118,40 @@ test('首次未读超过补收上限时明确提示可能遗漏', async () => {
  assert.ok(short.inbox.status().gaps.some(x=>x.channelId==='douyin:unread-empty'));
 });
 
+test('一条待核实会挡住同会话后面所有消息，必须有「全部忽略」的出口', () => {
+ const box = new DouyinInbox(db);
+ const ch = 'douyin:blocked';
+ box.record('blocked-cursor', {}, [
+  { ...norm('b1'), channelId: ch }, { ...norm('b2'), channelId: ch }, { ...norm('b3'), channelId: ch }
+ ]);
+ const first = box.next(); box.start(first.id); box.settle([first.id], false);
+ // 身份暂停期间不能重试，所以后面两条永远轮不到
+ assert.equal(box.next(), null, '被 unknown 挡住');
+ assert.equal(box.blockedBehind(first.id), 2, '要看得出后面还压着几条');
+ // 前面的测试块也留下过 unknown（共用库），所以这里断言的是「全局都清掉」这个语义
+ assert.ok(box.dismissAllUnknown() >= 1, '一次把所有 unknown 标成已忽略');
+ assert.equal(box.status().unknownTotal, 0, '清完之后一条 unknown 都不剩');
+ assert.equal(JSON.parse(box.next().payload).messageId, 'b2', '忽略之后队列能继续走');
+});
+
+test('收件表有保留期：只清已了结的，待处理和待核实的不能删', () => {
+ const box = new DouyinInbox(db);
+ const ch = 'douyin:prune';
+ box.record('prune-cursor', {}, [
+  { ...norm('p-done'), channelId: ch }, { ...norm('p-dismiss'), channelId: ch },
+  { ...norm('p-unknown'), channelId: ch }, { ...norm('p-pending'), channelId: ch }
+ ]);
+ const ids = db.prepare("SELECT id, message_id FROM douyin_inbox WHERE channel_id=? ORDER BY id").all(ch);
+ const byMsg = Object.fromEntries(ids.map((r) => [r.message_id, r.id]));
+ box.start(byMsg['p-done']); box.settle([byMsg['p-done']], true);
+ box.start(byMsg['p-dismiss']); box.settle([byMsg['p-dismiss']], false);
+ box.resolve(byMsg['p-dismiss'], 'dismiss');
+ box.start(byMsg['p-unknown']); box.settle([byMsg['p-unknown']], false);
+ // 把已了结的两条改成很旧
+ db.prepare("UPDATE douyin_inbox SET updated_at=1 WHERE id IN (?,?)").run(byMsg['p-done'], byMsg['p-dismiss']);
+ box.prune();
+ const left = db.prepare('SELECT message_id FROM douyin_inbox WHERE channel_id=? ORDER BY id').all(ch).map((r) => r.message_id);
+ assert.deepEqual(left, ['p-unknown', 'p-pending'], '只清 done / dismissed');
+});
+
 test.after(()=>{db.close();rmSync(home,{recursive:true,force:true});});

@@ -175,7 +175,9 @@ export async function run(t) {
 	assert.equal(host.followups.length, nDy, '自检没过只记不回');
 	dy.canaryOk = true;
 	sc = await call('POST', '/douyin/self-check', {});
-	assert.equal(sc.json.report.ok, true); assert.ok(sc.json.report.list.count >= 2);
+	// 精确值：mock 里这时正好 3 个会话（主人抖音 / 路人 / 空名系统通知）。
+	// 用 >= 2 拦不住「只列出 2 个」这种退化。
+	assert.equal(sc.json.report.ok, true); assert.equal(sc.json.report.list.count, 3);
 	assert.equal((await call('GET', '/channels/state')).json.douyin.channel.replyPaused, false);
 	dy.loggedIn = false;
 	await sleep(700);

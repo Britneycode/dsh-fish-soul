@@ -871,6 +871,30 @@ assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId === 'private:2
 }
 ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先"看"一眼；按段发回（带签名和 csrf），表情包传图床后发图；UID=QQ 合并到同一个人');
 
+// #78 第 3 步：共享会话里回复发到哪。默认「哪边问的就回哪边」；设成「一律回 QQ」后，
+// B站 进来的话回复落到 QQ，提示词里的回复规则也要跟着换成 QQ 的（B站 的小表情码发到 QQ 是一串方括号）
+{
+	assert.equal((await call('GET', '/channels/state')).json.sessions.replyTarget, 'source', '默认按来源回');
+	assert.equal((await call('POST', '/sessions/reply-target', { replyTarget: '由她决定' })).json.ok, false, '乱填不接受');
+	await call('POST', '/sessions/reply-target', { replyTarget: 'qq' });
+	const nF = host.followups.filter((f) => f.msg.source.channelId === 'bili:777').length;
+	const nQ = ob.sends.length;
+	const nB = bm.sent.length;
+	biliPush(777, '这条回哪');
+	const fq = await waitFor(() => host.followups.filter((f) => f.msg.source.channelId === 'bili:777')[nF], 6000);
+	assert.ok(fq, 'B站 这条照样要进会话');
+	assert.match(context.text(at(fq.id)), /QQ 回复规则/, '一律回 QQ：回复规则按 QQ 给');
+	assert.doesNotMatch(context.text(at(fq.id)), /B站私信回复规则/);
+	handlers['session/event']({ id: fq.id }, { type: 'user/message', data: fq.msg });
+	handlers['session/event']({ id: fq.id }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '回你 QQ 了' }] } } });
+	handlers['session/event']({ id: fq.id }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
+	await waitFor(() => ob.sends.length > nQ, 6000);
+	assert.equal(ob.sends.at(-1).params.user_id, 10001, 'B站 问的、回复发到 QQ');
+	assert.equal(bm.sent.length, nB, '不再发回 B站');
+	await call('POST', '/sessions/reply-target', { replyTarget: 'source' });
+	ok('#78 第 3 步：回复发到哪可设；一律回 QQ 时回复和提示词规则都跟 QQ 走');
+}
+
 // 26 自己刷视频：关注优先 → 推荐；[划走] 不记、[点赞] 才点；看过的不再看；推荐被风控就看热门
 {
 	const prompts = [];

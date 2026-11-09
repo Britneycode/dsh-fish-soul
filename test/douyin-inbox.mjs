@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { DouyinInbox } from '../lib/douyin-inbox.js';
 import { DouyinChannel, messageFingerprint } from '../lib/channels/douyin.js';
 import { ChatGateway, SOURCE_DOUYIN } from '../lib/gateway.js';
@@ -69,6 +71,51 @@ test('网关收到回合完成信号后才确认，失败/投递不确定需核�
  const emit=(id,reason)=>{gw.onSessionEvent({id:'s'},{type:'user/message',data:{message:{id:'msg',source:{kind:SOURCE_DOUYIN,channelId:'douyin:x',inboxIds:[id]}}}});gw.onSessionEvent({id:'s'},{type:'turn/end',data:{reason:{kind:reason}}});};
  emit(a.id,'completed');await new Promise(r=>setImmediate(r));assert.equal(row(a.id).status,'done');
  emit(b.id,'failed');assert.equal(row(b.id).status,'unknown');
+});
+
+test('读取失败或入库事务失败时保留缺口或读取意图，不推进游标', async () => {
+ const ch=new DouyinChannel({db,host:{},getConfig:()=>({}),driver:{read:async()=>({ok:false,error:'failed'})},onMessage:async()=>({done:true})});
+ await ch.readConversation({c:{time:''},name:'failed-read',key:'failed-read-key',st:null,sig:'1',unread:true});
+ assert.equal(getKv(db,'failed-read-key',null),null);
+ assert.equal(db.prepare("SELECT count(*) n FROM douyin_inbox_read_intent WHERE cursor_key='failed-read-key'").get().n,0);
+ assert.ok(ch.inbox.status().gaps.some(x=>x.channelId==='douyin:failed-read'));
+ db.exec("CREATE TRIGGER abort_read_insert BEFORE INSERT ON douyin_inbox WHEN NEW.channel_id='douyin:db-failed' BEGIN SELECT RAISE(ABORT,'fail'); END;");
+ ch.driver.read=async()=>({ok:true,messages:[msg('9001')]});
+ await assert.rejects(ch.readConversation({c:{time:''},name:'db-failed',key:'db-failed-key',st:null,sig:'1',unread:true}));
+ db.exec('DROP TRIGGER abort_read_insert');
+ assert.equal(getKv(db,'db-failed-key',null),null);
+ assert.equal(db.prepare("SELECT count(*) n FROM douyin_inbox_read_intent WHERE cursor_key='db-failed-key'").get().n,1);
+ const recovered=new DouyinInbox(db);
+ assert.ok(recovered.status().gaps.some(x=>x.channelId==='douyin:db-failed'));
+ assert.equal(db.prepare("SELECT count(*) n FROM douyin_inbox_read_intent WHERE cursor_key='db-failed-key'").get().n,0);
+});
+
+test('进程在读取中被强杀后，重启能看到可能遗漏警告', async () => {
+ const dir=mkdtempSync(join(tmpdir(),'fish-crash-read-'));
+ const script=`import {openDatabase} from './lib/db.js'; import {DouyinChannel} from './lib/channels/douyin.js';
+ const db=openDatabase(); const ch=new DouyinChannel({db,host:{},getConfig:()=>({}),driver:{read:async()=>{process.stdout.write('reading\\n');return new Promise(()=>{});}},onMessage:async()=>({done:true})});
+ void ch.readConversation({c:{},name:'crashed',key:'crash-key',st:null,sig:'1',unread:true}); setInterval(()=>{},1000);`;
+ const child=spawn(process.execPath,['--input-type=module','-e',script],{cwd:process.cwd(),env:{...process.env,DSH_HOME:dir},stdio:['ignore','pipe','pipe']});
+ try {
+  const [out]=await Promise.race([once(child.stdout,'data'),new Promise((_,reject)=>{ const timer=setTimeout(()=>reject(Error('child did not reach read')),5000); timer.unref(); })]);
+  assert.match(String(out),/reading/); child.kill('SIGKILL'); await once(child,'exit');
+  const prev=process.env.DSH_HOME;process.env.DSH_HOME=dir; const reopened=openDatabase();process.env.DSH_HOME=prev;
+  const box=new DouyinInbox(reopened);const gaps=box.status().gaps;
+  assert.ok(gaps.some(x=>x.channelId==='douyin:crashed' && /中断/.test(x.reason)));
+  assert.equal(getKv(reopened,'crash-key',null),null);
+  const gap=gaps.find(x=>x.channelId==='douyin:crashed');assert.equal(box.acknowledgeGap(gap.id),true);
+  assert.equal(new DouyinInbox(reopened).status().gaps.some(x=>x.channelId==='douyin:crashed'),false);
+  reopened.close();
+ } finally { if(child.exitCode===null && child.signalCode===null)child.kill('SIGKILL');rmSync(dir,{recursive:true,force:true}); }
+});
+
+test('首次未读超过补收上限时明确提示可能遗漏', async () => {
+ const ch=new DouyinChannel({db,host:{},getConfig:()=>({}),driver:{read:async()=>({ok:true,messages:[msg('991'),msg('992'),msg('993'),msg('994')]})},onMessage:async()=>({done:true})});
+ await ch.readConversation({c:{time:'',unread:4},name:'truncated',key:'truncated-key',st:null,sig:'1',unread:true});
+ assert.ok(ch.inbox.status().gaps.some(x=>x.channelId==='douyin:truncated'));
+ const short=new DouyinChannel({db,host:{},getConfig:()=>({}),driver:{read:async()=>({ok:true,messages:[]})},onMessage:async()=>({done:true})});
+ await short.readConversation({c:{time:'',unread:1},name:'unread-empty',key:'unread-empty-key',st:null,sig:'1',unread:true});
+ assert.ok(short.inbox.status().gaps.some(x=>x.channelId==='douyin:unread-empty'));
 });
 
 test.after(()=>{db.close();rmSync(home,{recursive:true,force:true});});

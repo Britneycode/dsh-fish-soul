@@ -78,3 +78,23 @@ test('真实 HTTP 流：分块上限、超时和跳转到内网', async () => {
   assert.equal(await download('http://cdn.test/hang',{maxBytes:4,timeoutMs:50}),null);
  } finally {server.closeAllConnections();await new Promise(r=>server.close(r));}
 });
+
+test('真实 TLS：验证原始域名和信任链，错误证书拒绝', async (t) => {
+ const {mkdtempSync,readFileSync,rmSync}=await import('node:fs');
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const {spawnSync}=await import('node:child_process');const https=await import('node:https');
+ const dir=mkdtempSync(join(tmpdir(),'fish-tls-'));const keyPath=join(dir,'key.pem'),certPath=join(dir,'cert.pem');
+ const gen=spawnSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-keyout',keyPath,'-out',certPath,'-days','1','-subj','/CN=cdn.test','-addext','subjectAltName=DNS:cdn.test'],{stdio:'ignore'});
+ if(gen.status!==0){rmSync(dir,{recursive:true,force:true});t.skip('openssl 不可用');return;}
+ const key=readFileSync(keyPath),cert=readFileSync(certPath);const seen=[];
+ const server=https.createServer({key,cert},(req,res)=>{seen.push({sni:req.socket.servername,host:req.headers.host});res.end('ok');});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;
+ const make=(trust)=>createSafeDownload({lookup:async()=>[{address:'8.8.8.8',family:4}],request:(_url,opts,cb)=>https.request({...opts,hostname:'127.0.0.1',port,...(trust?{ca:cert}:{})},cb)});
+ try {
+  assert.equal((await make(true)('https://cdn.test/file',{maxBytes:5})).toString(),'ok');
+  assert.deepEqual(seen,[{sni:'cdn.test',host:'cdn.test'}]);
+  assert.equal(await make(true)('https://wrong.test/file',{maxBytes:5}),null,'证书与目标域名不匹配');
+  assert.equal(await make(false)('https://cdn.test/file',{maxBytes:5}),null,'不信任的证书必须拒绝');
+  assert.equal(seen.length,1,'握手失败不能到达应用');
+ } finally {server.closeAllConnections();await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});}
+});

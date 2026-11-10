@@ -17,6 +17,14 @@ const PEER = '123';
 const CONV = `0:1:${SELF}:${PEER}`;
 const OTHER = '0:1:999:555';
 
+// 通道里的 sleep 是 unref 的（不拖住宿主退出）。CI 上 4 vCPU 被别的套件抢满时，
+// 事件循环会认为「没事可做」直接结束 → 测试里的 await 永远不 resolve →
+// 「Promise resolution is still pending but the event loop has already resolved」。
+// 光靠 typingMs=[1,1] 不够（那只是让 timer 非 0，仍然 unref）。
+// 这里挂一个**非 unref** 的 keep-alive，把事件循环钉住，让结论只取决于代码逻辑。
+const keepAlive = setInterval(() => {}, 1000);
+test.after(() => { clearInterval(keepAlive); db.close(); });
+
 /** 造一个通道，把驱动收到的参数全记下来。 */
 function makeChannel() {
 	const calls = [];
@@ -95,4 +103,3 @@ test('目标会话换了就发不出去（模拟驱动层拒绝）', async () =>
 	assert.equal(r.delivered, false);
 });
 
-test.after(() => db.close());

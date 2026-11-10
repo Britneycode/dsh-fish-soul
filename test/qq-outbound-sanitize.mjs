@@ -14,6 +14,11 @@ ok(stripModelTags(`前面${openTag}想一下${closeTag}后面`).text === '前面
 ok(stripModelTags(`正文${tr}继续`).text === '正文继续', '成对工具响应块被剥掉');
 ok(stripModelTags(`正文${openTag}没写完的思考`).text === '正文', '未闭合思考块整段丢弃');
 ok(stripModelTags('干干净净的一句话').changed === false, '干净文本不动');
+// 模型把内部的完成标记漏进正文：<json> 块整块剥掉，前面的话留着。
+// 2026-11-11 真机：QQ 回复末尾多了一段 {"action":"completion","taskCompletion":"..."} 原文。
+const jsonBlock = ['<', 'json', '>', '{"action":"completion","taskCompletion":"记一笔"}', '</', 'json', '>'].join('');
+ok(stripModelTags(`存在插件自己的数据那块${jsonBlock}`).text === '存在插件自己的数据那块', 'json 完成块整块剥掉，正文留着');
+ok(stripModelTags(`前面${jsonBlock}后面`).text === '前面后面', 'json 块夹在中间也剥掉');
 
 // QQ 出站兜底单元测试：剥模型模板标签 / 段内复读去重 / 超长单段按空格分条 / 跨条复读守卫
 const rep = `第一段草稿 就这样吧\n\n第一段草稿 就这样吧\n\n第一段草稿 就这样`;

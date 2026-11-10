@@ -158,13 +158,14 @@ export async function run(t) {
 		} });
 		const stickers = new stMod.StickerBox({ db, getConfig: () => stMod.stickerConfig({}) });
 		const seen = [];
+		const logs = [];
 		const slang = { observe: (...a) => seen.push(a) };
 		const qq = { enabled: true, allGroups: true, batchMs: 30, followUpCount: 3, followUpSeconds: 120 };
 		const sent = []; const turns = []; const chCalls = [];
 		const reg = { create: async (path, title) => ({ path, title, attachSession: async () => {} }), list: () => [{ path: wsDir, title: 'v07', sessionIds: [] }] };
 		const ctx4 = { get: (n) => (n === 'workspaceRegistry' ? reg : services[n]), agents, workspaceRegistry: reg, tools: { get: () => ({}) } };
 		const gw = new gwMod.ChatGateway({
-			ctx: ctx4, db, clock: { now: () => Date.now() }, getConfig: () => ({ qq, masterQqUin: '10001', sessions: { workspacePath: wsDir }, douyin: { masterName: '测试主人' }, bili: { masterUid: '555' } }), log: () => {},
+			ctx: ctx4, db, clock: { now: () => Date.now() }, getConfig: () => ({ qq, masterQqUin: '10001', sessions: { workspacePath: wsDir }, douyin: { masterName: '测试主人' }, bili: { masterUid: '555' } }), log: (lv, msg) => logs.push([lv, msg]),
 			channel: {
 				connected: true, selfId: '1000', isFriend: () => true, groupName: async () => '测试群', getMessage: async () => null,
 				send: async (cid, segs) => { sent.push([cid, segs]); return String(8800 + sent.length); },
@@ -205,6 +206,9 @@ export async function run(t) {
 		await waitFor(() => fups('private:70007').length === 2);
 		const f2 = fups('private:70007')[1];
 		assert.match(f2.msg.content[0].text, /【语音（暂时听不了）】/);
+		// 「听不到」必须能从日志分出是哪一种：被配置挡掉 / 取不到音频 / 识别失败。
+		// 没有这行的话，用户只能看到一句「听不了」，完全不知道去改哪儿。
+		assert.ok(logs.some(([, msg]) => /收到语音但「听」没就绪/.test(msg)), '语音关着时要留下「没就绪」的原因');
 		reply(f2, '[语音] 听不清诶');
 		await waitFor(() => sent.length === 3);
 		assert.deepEqual(sent[2][1], [{ type: 'text', data: { text: '听不清诶' } }]);

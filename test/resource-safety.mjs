@@ -16,6 +16,16 @@ const { openDatabase } = await import('../lib/db.js');
 const { VoiceService, voiceConfig, scrubSecrets } = await import('../lib/voice.js');
 const db = openDatabase();
 
+// 🔴 钉住事件循环。
+//    这个套件里有几个测试靠 setTimeout 计时（读 body 的超时、会话串行的等待），
+//    而 readBodyLimited 里的定时器是 **unref** 的（不能因为它把宿主钉住）。
+//    CI 的 4 vCPU 被真启 Chromium 的套件抢满时，事件循环会认为「没事可做」直接结束
+//    → 测试里的 await 永不 resolve → 报
+//    `Promise resolution is still pending but the event loop has already resolved`
+//    （本地串行 / 并行都复现不出来，只能靠「0.1s 就挂 + 这个文案」认）。
+//    所以这里挂一个**非 unref** 的 interval，`test.after` 里清掉。
+const keepAlive = setInterval(() => {}, 1000);
+
 const MP3 = Buffer.from('fff3840000000000', 'hex');
 
 function svc(cfg, fetchImpl) {
@@ -199,5 +209,5 @@ test('会话链用完会清掉（会话多时不泄漏 Map）', async () => {
   assert.equal(gw.sessionChains.size, 0, '跑完要清掉，否则 Map 随会话数无限长');
 });
 
-test.after(() => db.close());
+test.after(() => { clearInterval(keepAlive); db.close(); });
 console.log('resource-safety ok');

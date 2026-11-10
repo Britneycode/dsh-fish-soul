@@ -552,14 +552,18 @@ export async function run(t) {
 			// 配置里的秒数真的进了定时器（不是还留着 20 秒那个常量）
 			const localVoice = new voiceMod.VoiceService({ db, getConfig: () => voiceMod.voiceConfig({ enabled: true, apiKey: 'sk-t', timeoutSec: 300 }), fetchImpl: async () => new Response(MP3, { status: 200 }) });
 			const realSetTimeout = globalThis.setTimeout;
-			let waited = -1;
-			globalThis.setTimeout = (fn, ms) => { waited = ms; return { unref() {} }; };
+			// 记录**所有**被挂上的定时器，不只最后一次：
+			// 合成一次会挂多个定时器（请求总超时 + 读响应体的超时），
+			// 「最后一次」取决于内部实现顺序，拿它当判据太脆。
+			// 真正要断言的是「请求总超时用了配置里的秒数」= 出现过一个 300000ms 的定时器。
+			const waits = [];
+			globalThis.setTimeout = (fn, ms) => { waits.push(ms); return { unref() {} }; };
 			try {
 				assert.ok(await localVoice.synthesize('试一下等待上限'), '合成成功（假 fetch 直接回 mp3）');
 			} finally {
 				globalThis.setTimeout = realSetTimeout;
 			}
-			assert.equal(waited, 300000, `定时器用的是设置里的秒数，实测 ${waited}ms`);
+			assert.ok(waits.includes(300000), `定时器用的是设置里的秒数（实测挂过这些：${waits.join(', ')}ms）`);
 		}
 		await call('POST', '/voice/config', { timeoutSec: 60 });
 		await call('POST', '/voice/config', { enabled: false });

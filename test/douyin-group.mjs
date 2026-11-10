@@ -24,9 +24,19 @@ assert.deepEqual(groupSender({}), { userId: '', nickname: '' });
 const g = normalizeDouyinMessage({ text: '你好', senderName: '阿三' }, { name: '爬山群', timeMs: 1, messageId: 'm1', group: true });
 assert.deepEqual([g.chatType, g.channelId, g.targetId, g.groupId, g.userId, g.nickname, g.mentioned], ['group', 'douyin-group:爬山群', '爬山群', '爬山群', '阿三', '阿三', false]);
 assert.equal(normalizeDouyinMessage({ text: '你好' }, { name: '爬山群', timeMs: 1, messageId: 'm1', group: true }), null, '认不出是谁说的不当成群本身');
-const pv = normalizeDouyinMessage({ text: '你好', senderName: '阿三' }, { name: '阿二', timeMs: 1, messageId: 'm1' });
-assert.deepEqual([pv.chatType, pv.channelId, pv.userId], ['private', 'douyin:阿二', '阿二'], '私信不变');
-ok('群消息按发言的人归一化；认不出的丢掉；私信不变');
+// 🔴 契约变更（2026-11-10）：私信的 userId 不再用昵称。
+//
+//    以前是 `userId: '阿二'`（会话名 = 昵称），于是「主人是谁」靠昵称比对 ——
+//    主人改昵称就认不出，别人起同名就能冒充。现在私信认人只认会话 ID 推出来的
+//    对方 uid（`douyin:<对方uid>`）；昵称只作展示（`nickname` / `peerName`）。
+//    没有会话身份时返回 null（见下一条断言），不再退回昵称。
+const pv = normalizeDouyinMessage({ text: '你好', senderName: '阿三' }, {
+	name: '阿二', timeMs: 1, messageId: 'm1', identity: 'douyin:777', convId: '0:1:999:777'
+});
+assert.deepEqual([pv.chatType, pv.channelId, pv.userId, pv.nickname, pv.convId],
+	['private', 'douyin:阿二', 'douyin:777', '阿二', '0:1:999:777'], '私信认人用会话身份，昵称只作展示');
+assert.equal(normalizeDouyinMessage({ text: '你好' }, { name: '阿二', timeMs: 1, messageId: 'm1' }), null, '没有会话身份就不猜（不退回昵称）');
+ok('群消息按发言的人归一化；认不出的丢掉；私信按会话身份认人');
 
 // DOM 认出的昵称补到接口消息上
 const merged = mergeMessages([{ fromMe: false, text: '今天去哪', senderId: '1', seq: 5 }], [{ fromMe: false, type: 'text', text: '今天去哪', senderName: '阿三' }]);

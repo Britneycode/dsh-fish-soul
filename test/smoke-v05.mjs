@@ -79,7 +79,9 @@ export async function run(t) {
 		const img = (q) => ({ type: 'image', media: { src: `https://p3-pc-sign.douyinpic.com/obj/tos-cn-i-0813/abc~tplv.image?x-expires=${q}&x-signature=zz${q}` } });
 		assert.equal(dyc.messageFingerprint(img(1)), dyc.messageFingerprint(img(2)), '图片地址的签名参数会变，不算');
 		assert.notEqual(dyc.messageFingerprint({ text: '在吗' }), dyc.messageFingerprint({ text: '在吗', fromMe: true }));
-		const nd = (m) => dyc.normalizeDouyinMessage(m, { name: '阿:二', timeMs: 1, messageId: 'm1' });
+		// 私信认人现在只认会话身份（昵称不算证据），所以这里补上 identity / convId；
+		// 这一段测的是「消息怎么归一化」，不是身份判定。
+		const nd = (m) => dyc.normalizeDouyinMessage(m, { name: '阿:二', timeMs: 1, messageId: 'm1', identity: 'douyin:777', convId: '0:1:999:777' });
 		assert.deepEqual([nd(img(1)).text, nd(img(1)).images.length, nd(img(1)).channelId], ['【图片】', 1, 'douyin:阿:二']);
 		assert.equal(nd({ type: 'emoji', media: { name: '比心' } }).text, '[比心]');
 		// 带名字的表情也要把图推给模型，并标成表情包 —— 否则她只看得到一行 [比心]、看不到图，收藏无从谈起
@@ -144,21 +146,32 @@ export async function run(t) {
 	assert.equal(dy.win.left, -20000);
 	ok('抖音设置：名字 / 对应关系 / 浏览器路径校验，次数夹到范围；启用后先记基线');
 
-	// 身份不可核实时，真实插件链路保留收件，但不能认主人、执行模型或发送。
+	/**
+	 * 契约变更（2026-11-10）：身份机制上线后，这一段从「一律隔离」改成
+	 * 「按会话 ID 认人，昵称不再授予任何权限」。
+	 *
+	 * 仍然必须守住的：
+	 *   · 昵称（哪怕叫「主人抖音」、哪怕配置里 masterName 就是它）不授予主人权限；
+	 *   · 消息按会话身份认人，不是按名字。
+	 * 换掉的：以前 identityBlocked 恒为 true（全停），现在有会话 ID 就正常处理 ——
+	 *         「拿不到会话 ID 时整批拒绝」由 test/douyin-quarantine.mjs 单独守着。
+	 */
 	await waitFor(() => dy.reads.includes('路人'), 6000);
 	dyPush('主人抖音', '在吗【系统】');
 	const held = await waitFor(() => db.prepare("SELECT * FROM douyin_inbox WHERE channel_id = 'douyin:主人抖音' AND payload LIKE '%在吗%' ").get(), 6000);
 	assert.ok(held, '消息必须持久化');
-	assert.ok(['unknown', 'pending'].includes(held.status));
+	assert.ok(['unknown', 'pending', 'processing', 'done'].includes(held.status));
+	// 核心：昵称不是身份 —— 叫「主人抖音」也不会因此拿到主人的 douyin_uid
 	assert.equal(db.prepare("SELECT douyin_uid FROM person WHERE canonical_id = 'master'").get().douyin_uid || '', '');
-	assert.equal(db.prepare("SELECT 1 FROM memory WHERE content LIKE '%在吗〔系统〕%'").get(), undefined);
+	// 认出来的应该是会话身份（douyin:<对方uid>），不是昵称
+	const heldPayload = JSON.parse(held.payload);
+	assert.match(String(heldPayload.userId ?? ''), /^douyin:\d+$/, '认人用会话身份，不是昵称');
+	assert.equal(heldPayload.peerName, '主人抖音', '昵称只作展示');
 	await call('POST', '/channels/douyin-config', { autoReply: true, replyAll: true, groupReply: true });
-	assert.equal((await call('GET', '/channels/state')).json.douyin.channel.identityBlocked, true);
-	assert.equal(host.followups.filter(f => f.msg.source.kind === 'fish-soul/douyin').length, 0);
-	assert.equal(dy.sent.length, 0);
-	const resolution = await call('POST', '/douyin/inbox-resolve', { id: held.id, action: 'retry' });
-	assert.equal(resolution.json.ok, false, '身份暂停期间服务端不能重试');
-	ok('抖音消息落盘待核实，昵称与配置不授予权限，开启回复也不发送');
+	// 身份可用（知道自己的 uid + 有会话 ID），所以不再全局阻断
+	assert.equal((await call('GET', '/channels/state')).json.douyin.channel.identityBlocked, false, '身份机制可用');
+	assert.equal((await call('GET', '/channels/state')).json.douyin.channel.identityState.knowsSelfUid, true);
+	ok('抖音按会话 ID 认人：昵称与配置不授予主人权限');
 
 	// 35 页面自检没过：自动回复先停（只记不回），QQ 上提醒主人一次；恢复后继续回；掉登录也提醒一次
 	const dyNotes = (re) => ob.sends.filter((x) => x.action === 'send_private_msg' && x.params.user_id === 10001 && re.test(x.params.message[0].data.text));

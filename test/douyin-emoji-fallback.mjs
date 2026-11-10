@@ -67,8 +67,9 @@ ok(`兜底名都在真机面板清单里（面板共 ${PANEL.length} 个）`);
 //    sendEmoji 找不到名字 → sendText(`[名字]`)。所以名字错了不会报错只会发成文字，
 //    这正是「必须核对」的原因。守住这个降级还在（以免有人以为「发不出去会报错」）。
 const dm = readFileSync(new URL('../lib/channels/douyin.js', import.meta.url), 'utf8');
-assert.match(dm, /sendText\(name, `\[\$\{part\.name\}\]`\)/,
-  '表情找不到名字时要退回文字发（降级还在，所以名字必须核对）');
+// 兜底那条现在要带上目标会话 ID（convId）—— 降级不能顺手丢掉身份校验。
+assert.match(dm, /sendText\(name, `\[\$\{part\.name\}\]`, convId\)/,
+  '表情找不到名字时要退回文字发，并且带上会话 ID（降级还在，所以名字必须核对）');
 ok('降级行为没变：名字不对 = 静默发成纯文字（这就是必须核对的原因）');
 
 console.log('\ndouyin-emoji-fallback ok');

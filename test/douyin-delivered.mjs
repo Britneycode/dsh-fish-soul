@@ -22,6 +22,10 @@ const { DouyinChannel } = await import('../lib/channels/douyin.js');
 
 const ok = (msg) => console.log(`✓ ${msg}`);
 
+// 发送现在要求目标会话 ID（没有就拒绝发送，见 lib/douyin-conversation.js）。
+// 这个测试关心的是三态回执，不是身份判定，所以给一个固定会话。
+const CONV = '0:1:900001:100001';
+
 // ⚠️ 必须自己保活进程。
 //    douyin.js 里的 sleep 是 `setTimeout(...).unref()` —— unref 的定时器**不让 Node 保活**，
 //    所以「只等这个定时器」的时候 Node 会认为没事可做，直接退出进程，
@@ -47,7 +51,7 @@ function makeChannel(driverFor) {
 // ── ① 回读到了 ──
 {
 	const ch = makeChannel(() => ({ sendText: async () => ({ ok: true, verified: true }) }));
-	const r = await ch.send('某人', [{ type: 'text', text: '你好' }]);
+	const r = await ch.send('某人', [{ type: 'text', text: '你好' }], CONV);
 	assert.equal(r.ok, true, '动作成功');
 	assert.equal(r.delivered, true, '回读到了就是 delivered');
 	ok('driver 回 verified → ok + delivered');
@@ -56,7 +60,7 @@ function makeChannel(driverFor) {
 // ── ② 动作成功但没回读（被风控吞）──
 {
 	const ch = makeChannel(() => ({ sendText: async () => ({ ok: true }) }));
-	const r = await ch.send('某人', [{ type: 'text', text: '这是一条很长的消息' }]);
+	const r = await ch.send('某人', [{ type: 'text', text: '这是一条很长的消息' }], CONV);
 	assert.equal(r.ok, true, '动作确实做了 —— ok 不能是 false');
 	assert.equal(r.delivered, false, '没有回读证据 ⇒ delivered 必须是 false');
 	ok('动作成功但没回读 → ok=true / delivered=false（以前这里会是 true）');
@@ -65,7 +69,7 @@ function makeChannel(driverFor) {
 // ── ③ 报错 ──
 {
 	const ch = makeChannel(() => ({ sendText: async () => ({ ok: false, error: '进不去会话' }) }));
-	const r = await ch.send('某人', [{ type: 'text', text: '你好' }]);
+	const r = await ch.send('某人', [{ type: 'text', text: '你好' }], CONV);
 	assert.equal(r.ok, false, '报错时 ok 是 false');
 	assert.equal(r.delivered, false, '报了错更不可能 delivered');
 	assert.equal(r.parts[0].error, '进不去会话', '错误原因要留下来');
@@ -82,7 +86,7 @@ function makeChannel(driverFor) {
 			return n === 1 ? { ok: true } : { ok: true, verified: true };
 		}
 	}));
-	const r = await ch.send('某人', [{ type: 'text', text: '一' }, { type: 'text', text: '二' }]);
+	const r = await ch.send('某人', [{ type: 'text', text: '一' }, { type: 'text', text: '二' }], CONV);
 	assert.equal(r.ok, true, '两段动作都做了');
 	assert.equal(r.delivered, true, '只要有一段送到就算 delivered');
 	assert.equal(r.parts.length, 2, '两段都要有明细');
@@ -97,7 +101,7 @@ function makeChannel(driverFor) {
 		sendEmoji: async () => ({ ok: true, verified: true, name: '比心' }),
 		sendText: async () => ({ ok: true, verified: true })
 	}));
-	const r = await ch.send('某人', [{ type: 'emoji', name: '比心' }]);
+	const r = await ch.send('某人', [{ type: 'emoji', name: '比心' }], CONV);
 	assert.equal(r.ok, true);
 	assert.equal(r.delivered, true, '表情也有回读（数气泡）');
 	ok('表情：sendEmoji 的 verified 也算 delivered');
@@ -109,7 +113,7 @@ function makeChannel(driverFor) {
 		sendEmoji: async () => ({ ok: false, error: '没有叫「捂脸」的表情' }),
 		sendText: async () => ({ ok: true, verified: true })
 	}));
-	const r = await ch.send('某人', [{ type: 'emoji', name: '捂脸' }]);
+	const r = await ch.send('某人', [{ type: 'emoji', name: '捂脸' }], CONV);
 	assert.equal(r.ok, true, '兜底发文字要算成功');
 	assert.equal(r.delivered, true, '兜底那条也回读了');
 	ok('表情找不到 → 当文字发，回读照样成立');
@@ -119,7 +123,7 @@ function makeChannel(driverFor) {
 {
 	const ch = makeChannel(() => ({}));
 	ch.host = { running: false, exclusive: async (_l, fn) => fn() };
-	await assert.rejects(() => ch.send('某人', [{ type: 'text', text: 'x' }]), /没在运行/);
+	await assert.rejects(() => ch.send('某人', [{ type: 'text', text: 'x' }], CONV), /没在运行/);
 	ok('浏览器没跑 → 明确抛错（不是静默 false）');
 }
 
@@ -138,7 +142,10 @@ function makeChannel(driverFor) {
 
 	const media = readFileSync(new URL('../lib/gateway-media.js', import.meta.url), 'utf8');
 	assert.match(media, /delivered: false, parts: \[\]/, 'sendDouyin 要有结构化的失败返回');
-	assert.match(media, /抖音收件人身份无法验证/, '未核实目标不能发送');
+	// 契约变更（2026-11-10）：不再是「一律不发」，而是「没有目标会话 ID 就不发」。
+	// 真实防线是 sendDouyin 里那条会话 ID 校验（DouyinChannel.send 还会再挡一道）。
+	assert.match(media, /没有确认过这个抖音会话的身份/, '未确认目标不能发送');
+	assert.match(media, /const target = String\(convId/, 'sendDouyin 必须真的用到目标会话 ID');
 	ok('上层：sent / unconfirmed / failed 三态齐全，UI 认得新 kind');
 }
 

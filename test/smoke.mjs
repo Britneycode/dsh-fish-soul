@@ -289,6 +289,8 @@ const mod = await import('../lib/index.js');
 
 // ── 假抖音：专用浏览器和页面驱动都换成假的（真浏览器那部分在 test/douyin-browser.mjs）──
 const { ACTIVE_VIDEO_JS } = await import('../lib/douyin-browse.js');
+// 假抖音账号自己的 uid（真实里从会话 ID 学到，见 learnSelfUid）
+const dySelfUid = '900001';
 const dy = { convs: [], msgs: new Map(), reads: [], sent: [], loggedIn: true, canaryOk: true, canaries: 0, emojis: ['微笑', '比心'],
 	launches: 0, launchOpts: null, quits: 0, feed: [], feedAt: 0, gotos: [], likes: 0, details: new Map(), clicks: [],
 	win: { left: 100, top: 100, width: 1400, height: 1000, windowState: 'normal' } };
@@ -344,11 +346,17 @@ mod.testHooks.douyin = {
 			dy.reads.push(name);
 			const c = dy.convs.find((x) => x.name === name);
 			if (c) c.unread = 0;
-			return { ok: true, messages: (dy.msgs.get(name) ?? []).slice(-20) };
+			// 真实驱动现在必须返回会话 ID（`0:1:我方uid:对方uid`）—— 通道靠它认人，
+			// 拿不到就整批拒绝（见 lib/douyin-conversation.js）。这里按名字造一个稳定的。
+			const peer = String(10_000 + (dy.convs.findIndex((x) => x.name === name) + 1));
+			const convId = `0:1:${dySelfUid}:${peer}`;
+			const msgs = (dy.msgs.get(name) ?? []).slice(-20).map((m) => ({ ...m, convId, senderId: m.fromMe ? dySelfUid : peer }));
+			return { ok: true, convId, messages: msgs };
 		},
-		sendText: async (name, text) => { dy.sent.push([name, 'text', text]); return { ok: true }; },
-		sendImage: async (name, file) => { dy.sent.push([name, 'image', file]); return { ok: true }; },
-		sendEmoji: async (name, e) => (dy.emojis.includes(e) ? (dy.sent.push([name, 'emoji', e]), { ok: true }) : { ok: false, error: '没有这个表情' }),
+		// 第三个参数是目标会话 ID：真驱动靠它校验「打开的是不是这个人的会话」。
+		sendText: async (name, text, convId) => { dy.sent.push([name, 'text', text, convId]); return { ok: true }; },
+		sendImage: async (name, file, convId) => { dy.sent.push([name, 'image', file, convId]); return { ok: true }; },
+		sendEmoji: async (name, e, convId) => (dy.emojis.includes(e) ? (dy.sent.push([name, 'emoji', e, convId]), { ok: true }) : { ok: false, error: '没有这个表情' }),
 		// 已知表情名（真实现是抓过表情面板后攒下来的；测试里直接给 dy.emojis）
 		emojiNames: (limit = 40) => dy.emojis.slice(0, limit),
 		canary: async () => { dy.canaries++; return dy.canaryOk ? { ok: true, broken: [] } : { ok: false, broken: ['私信列表'] }; }

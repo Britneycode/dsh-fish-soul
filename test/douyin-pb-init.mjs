@@ -69,6 +69,17 @@ test('真实 fixture：发送者的 sec_uid / fromMe 能算对（新结构没有
   assert.equal(r.messages.filter((m) => m.fromMe === false).length, 14)
 })
 
+test('真实 fixture：分享视频卡（kind 77）的视频 id 要认出来', () => {
+  const r = parseMessages(FIXTURE, { selfSecUid: SELF_SEC_UID })
+
+  // 新接口的分享卡载荷用 itemId，不是旧接口的 aweme_id。
+  // 认不出就 shareAweme 为空 → filterUseful 把它整条丢掉 → 对方分享的视频永远不入库。
+  const shares = r.messages.filter((m) => m.kind === 77)
+  assert.equal(shares.length, 1, 'fixture 里有一条分享卡')
+  assert.equal(shares[0].shareAweme, String(shares[0].raw.itemId), '视频 id 必须从 itemId 读出来')
+  assert.notEqual(shares[0].shareAweme, '', '空的话这条消息会被当成没内容丢掉')
+})
+
 test('pickMessages 认 get_message_by_init（旧正则漏了这个接口）', () => {
   assert.equal(MESSAGE_URL_RE.test('https://imapi.douyin.com/v1/message/get_message_by_init?x=1'), true)
   assert.equal(MESSAGE_URL_RE.test('https://imapi.douyin.com/v1/message/get_by_conversation?x=1'), true)

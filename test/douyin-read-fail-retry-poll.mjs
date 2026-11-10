@@ -1,6 +1,8 @@
 // 独立进程跑一轮完整 pollInner，验证熔断真的拦住
 import { mkdtempSync } from 'node:fs';
-process.env.DSH_HOME = mkdtempSync('C:/Users/13372/AppData/Local/Temp/dbg-poll-');
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dbg-poll-'));
 const { openDatabase, getKv, setKv } = await import('../lib/db.js');
 const { DouyinChannel } = await import('../lib/channels/douyin.js');
 const db = openDatabase();

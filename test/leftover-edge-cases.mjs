@@ -13,7 +13,7 @@ process.env.DSH_HOME = tmpHome('leftover-');
 const keepAlive = setInterval(() => {}, 1000); // 钉住事件循环（CI 4 vCPU 抢满时防止提前结束）
 
 const { newFrom } = await import('../lib/channels/douyin.js');
-const { openDatabase, setKv } = await import('../lib/db.js');
+const { openDatabase, setKv, getKv } = await import('../lib/db.js');
 const db = openDatabase();
 
 // ── ① newFrom 连发 ──────────────────────────────────────────────────────────
@@ -109,6 +109,22 @@ test('soul-memory 定时器：check 抛错不会变成未处理拒绝', async ()
   } finally {
     globalThis.setInterval = realSetInterval;
   }
+});
+
+test('推送帧的消息 fromMe 是 null 时也能学到自己的 uid', async () => {
+  const { DouyinChannel } = await import('../lib/channels/douyin.js');
+  const { conversationIdentity } = await import('../lib/douyin-conversation.js');
+  const ch = new DouyinChannel({
+    db, host: { running: true, loggedIn: true }, getConfig: () => ({ enabled: true }),
+    log: () => {}, onMessage: async () => ({ queued: true }),
+    driver: { checkLogin: async () => true, list: async () => ({ ok: true, conversations: [] }) },
+  });
+  setKv(db, 'douyin.selfUid', '');
+  const convId = '0:1:2874562949425280:7702399256389125169';
+  // 推送帧解出来的形状：fromMe 是 null（帧里没有 sec_uid 可比对），senderId 是会话一侧
+  ch.learnSelfUid(convId, [{ convId, senderId: '7702399256389125169', fromMe: null, text: '在吗' }]);
+  assert.equal(getKv(db, 'douyin.selfUid', ''), '2874562949425280', '另一侧就是我');
+  assert.equal(conversationIdentity(convId, ch.selfUids()), 'douyin:7702399256389125169', '推出对方身份');
 });
 
 test.after(() => { clearInterval(keepAlive); db.close(); });

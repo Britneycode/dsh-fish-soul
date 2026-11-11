@@ -455,13 +455,14 @@ export async function run(t) {
 
 	// 6. 抖音刷到的分享：能发抖音私信就发给抖音里的主人，不然走 QQ；抖音私信只放行分享
 	{
-		let dyTarget = 'douyin:主人抖音';
+		// 抖音私信目标是一个对象：会话 ID + 主人 uid + 会话名（拿不到就是空串 = 走 QQ）
+		let dyTarget = { channelId: 'douyin:主人抖音', uid: '7702399256389125000', convId: '0:1:10002:7702399256389125000', name: '主人抖音' };
 		const sent = [];
 		const scfg = { masterQqUin: '10001', proactive: { enabled: true, activeHours: [0, 24], shareMaxPerDay: 5 } };
 		const life2 = new LifeEngine({ db, clock, getConfig: () => scfg, callLlm: async () => null, deliver: async (c, reason, meta) => { sent.push([c, meta.origin]); return true; }, douyinShareTarget: () => dyTarget });
 		db.prepare("DELETE FROM pending").run();
 		setKv(db, 'share.day', null);
-		let q = life2.queueShare({ platform: '抖音', title: '猫', author: 'UP', url: 'https://www.douyin.com/video/1', impression: '好笑' });
+		let q = life2.queueShare({ platform: '抖音', title: '猫', author: 'UP', url: 'https://www.douyin.com/video/7300000000000000001', impression: '好笑' });
 		assert.equal(q.ok, true, q.error);
 		const row = db.prepare('SELECT channel, channel_id FROM pending WHERE id = ?').get(q.id);
 		assert.deepEqual([row.channel, row.channel_id], ['douyin-private', 'douyin:主人抖音']);
@@ -472,7 +473,7 @@ export async function run(t) {
 		assert.deepEqual(sent.at(-1), ['douyin:主人抖音', 'share']);
 		db.prepare("DELETE FROM pending").run();
 		dyTarget = '';
-		q = life2.queueShare({ platform: '抖音', title: '狗', author: '', url: 'https://www.douyin.com/video/2', impression: '可爱' });
+		q = life2.queueShare({ platform: '抖音', title: '狗', author: '', url: 'https://www.douyin.com/video/7300000000000000002', impression: '可爱' });
 		assert.equal(db.prepare('SELECT channel_id FROM pending WHERE id = ?').get(q.id).channel_id, 'private:10001', '抖音没连上就发 QQ');
 		db.prepare("DELETE FROM pending").run();
 

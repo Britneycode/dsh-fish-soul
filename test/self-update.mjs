@@ -36,9 +36,9 @@ assert.equal((await applyUpdate({ ctx: { 'plugin-manager': { updateBundle: async
 	assert.match(r.error, /pnpm 锁被占用/);
 }
 
-// 成功
+// 成功：宿主没开 HMR 时返回 restart-required（不是 applied），这是正常成功
 {
-	const ctx = { 'plugin-manager': { updateBundle: async () => ({ from: '0.15.33', to: '0.15.34', step: 'install', result: { application: 'applied', changed: true } }) } };
+	const ctx = { 'plugin-manager': { updateBundle: async () => ({ from: '0.15.33', to: '0.15.34', step: 'install', result: { application: 'restart-required', restartReason: 'no-hmr', changed: true } }) } };
 	const r = await applyUpdate({ ctx, state });
 	assert.deepEqual(r, { ok: true, from: '0.15.33', to: '0.15.34', restart: true });
 }
@@ -69,7 +69,7 @@ assert.equal((await applyUpdate({ ctx: { 'plugin-manager': { updateBundle: async
 	r = await run('POST', '/update/apply', {});
 	assert.equal(r.payload.ok, false);
 	assert.match(r.payload.error, /没有插件管理服务/);
-	r = await run('POST', '/update/apply', { 'plugin-manager': { updateBundle: async () => ({ from: '0.15.33', to: '0.15.34', result: { application: 'applied' } }) } });
+	r = await run('POST', '/update/apply', { 'plugin-manager': { updateBundle: async () => ({ from: '0.15.33', to: '0.15.34', result: { application: 'restart-required', restartReason: 'no-hmr' } }) } });
 	assert.equal(r.payload.ok, true);
 	assert.equal(r.payload.to, '0.15.34');
 	// 跨源拒绝

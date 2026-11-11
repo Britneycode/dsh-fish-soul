@@ -80,6 +80,24 @@ test('三条消息全部进入 processing，没有 unknown（不再一条之后�
   assert.equal(rows.filter((r) => r.status === 'processing').length, 3, '三条都该等 turn/end 回写');
 });
 
+test('超过时限的旧消息标 done（不是 unknown），不挡同会话后续消息', async () => {
+  db.exec('DELETE FROM douyin_inbox');
+  // 一条 1 小时前的旧消息 + 一条刚到的：旧的会被判 stale 只记不回。
+  // 2026-11-11 真机：重启后积压旧消息条条超时限 → 条条落 unknown → 每条都挡住
+  // 下一条，新消息进得来但永远轮不到处理，连 dismiss 六条才放行。
+  const old = Date.now() - 60 * 60 * 1000;
+  const ch = makeChannel([
+    { fromMe: false, senderId: PEER, convId: CONV, type: 'text', text: '旧消息', time: old },
+    { fromMe: false, senderId: PEER, convId: CONV, type: 'text', text: '新消息', time: Date.now() },
+  ]);
+  await ch.readConversation({ c: {}, name: '未云', key: keyOf('未云'), st: null, sig: 'x', unread: true });
+
+  const rows = db.prepare('SELECT status FROM douyin_inbox ORDER BY id').all();
+  assert.equal(rows.length, 2, '两条都入库');
+  assert.equal(rows[0].status, 'done', '超时限旧消息是「确定不处理」，标 done 不标 unknown');
+  assert.equal(rows[1].status, 'processing', '新消息没被挡住，正常交给模型等回写');
+});
+
 // ── ② 出站 ──────────────────────────────────────────────────────────────────
 test('抖音回合的回复要真的发出去（不能无条件早退）', async () => {
   const { ChatGateway } = await import('../lib/gateway.js');

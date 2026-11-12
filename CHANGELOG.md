@@ -1,5 +1,9 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.43：四环校验改两段式等待。
+  - 0.15.42 已经修掉了崩溃（不再 `free(): invalid next size`），但暴露出第二个问题：**单版本端点 6 分钟内就有了，`latest` 标签还没跟上**（CDN 缓存），300 秒等不够，而且失败信息把「包没发出去」和「标签没跟上」混成一句。
+  - 现在分两段等：① 先等 `/<版本>` 出现（证明 npm publish 真成功了）；② 再等 `/latest` 指到这个版本。每段上限 900s。
+  - 失败分三档：`npm-version`（包没发出去）/ `gitHead`（提交不对）/ `npm-latest`（只是标签没跟上，包已经发出去了）—— 三种修法完全不同。
 - v0.15.42：修 CI 的四环校验老是崩。
   - **现象**：release workflow 的「校验四环」连续三次 `free(): invalid next size (normal)` + exit 134（glibc 堆损坏），本地复现不出来。npm publish / tag / Release 都成功了，只有校验这一步挂，把已经发好的版本标成红的。
   - **病根**：拿的是 registry 的**整包文档**（265KB），每轮轮询都让 node 解析一遍、还要经 `curl | node -p` 管道过 stdin。runner 上这条路径不稳。

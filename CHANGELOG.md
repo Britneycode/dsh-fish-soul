@@ -1,5 +1,10 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.40：#78 第二轮 —— 动态页三件事。
+  - **召回条数跟设置走**：`note()` 里写死 `slice(0, 5)`，把「召回条数」调到 10 也只显示 5 条，看起来像设置没生效。现在跟 `topK` 走（硬顶 20）。
+  - **DSH 会话里打字不再一片空白**：两处根因 —— `noteInteraction` 见到 `isOurSession` 直接 return（没有 `beginTurn`），以及 `turn/end` 时 `kind: 'user'` 把 `fromUs` 置 false（`sendReply` 直接返回，`note()` 一条都不写）。现在 DSH 打字仍**不外发**（原契约不变），但记一条 `dsh` 动态，带上这一轮的 `recallAt` / `memories`。
+  - **修 `lib/client.douyin.js` 语法错误**：删死输入框时少留一个括号，宿主报 `loaded without registering`，抖音设置页整页加载失败。新增 `test/client-syntax.mjs` 把 `lib/` 下 88 个脚本全量 `node --check`，这类错误以后先拦在测试里。
+  - 100 套件。
 - v0.15.39：刷过的视频能想起来了（#78 真机复现的两个根因）。
   - **瞬态块窗口只有 1 个虚拟日**：昨天刷的今天就查不到，表现是「她明明刷了却说想不起来」。B站 / 抖音的 `contextLines` 放宽到 2 个虚拟日，默认条数 2 → 3。
   - **`recalledAt` 竞态**：`sendReply` 跑在 `turn/end` 之后，这期间下一轮消息的 `beginTurn` 会把 `sessions` 那条记录整个替换掉（`recalledAt` 归零）→ 误报「没组装记忆」。现在同时记到这一轮的 turn state 上，`turn/end` 把 `st` 直接传给 `recallInfo`。

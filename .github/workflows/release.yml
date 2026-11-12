@@ -79,8 +79,12 @@ jobs:
         #    每次轮询都要 node 解析一遍、还要经管道过一遍 stdin。
         #
         #    现在逻辑只在 scripts/check-rings.mjs 里维护一份（也方便本地手动跑），
-        #    它只用 /latest 端点（约 6KB，一次带 version + gitHead 两个字段），
-        #    不落大字符串、不走 curl | node 管道。
+        #    它只用两个小端点（各约 6KB）：/<版本> 和 /latest。
+        #
+        #    0.15.42 又学一课：单版本端点 6 分钟内就有了，latest 标签还没跟上，
+        #    300s 等不够。所以改成两段式（先等包、再等标签），每段最多 900s，
+        #    失败时也说得出是「包没发出去」还是「标签没跟上」。
         if: steps.v.outputs.skip != '1'
+        timeout-minutes: 35
         run: |
-          node scripts/check-rings.mjs '${{ steps.v.outputs.ver }}' "$GITHUB_SHA" --wait 300
+          node scripts/check-rings.mjs '${{ steps.v.outputs.ver }}' "$GITHUB_SHA" --wait 900

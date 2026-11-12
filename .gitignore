@@ -10,7 +10,6 @@ dsh_fish_soul_ui_design.md
 
 # 抖音抓包原始数据（解出来是真实 uid / sec_uid，别进仓库）
 probe-*/
-probe-gid/
 
 # 抖音群聊实测文档 + 只读探测脚本（含真实群名 / 真实昵称，不进仓库）
 docs/douyin-group-probe.md

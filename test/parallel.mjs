@@ -1,4 +1,4 @@
-// CI 并行测试 runner：把 package.json 里串行 `node test/x && node test/y` 的 38 个套件
+// CI 并行测试 runner：把 package.json 里串行 `node test/x && node test/y` 的全部套件
 // 拆成 N 个并行进程跑。所有测试都用 listen(0) 随机端口 + mkdtemp 临时目录，互不干扰（已核实）。
 // 用法：node test/parallel.mjs [并发数]   默认 4（GitHub ubuntu-latest 是 4 vCPU）
 // 失败任何一个立刻退出非 0，并打出失败套件名。

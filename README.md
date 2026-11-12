@@ -61,6 +61,8 @@ dsh plugin --profile desktop add dsh-fish-soul
 | `fish-soul/workspace/` | 默认专用工作区「鱼」，表情包在 `_stickers/` |
 | `fish-soul/backups/` | 每日 `VACUUM INTO` 备份 |
 | `fish-soul/img-cache/` | webp → png 缓存 |
+| `fish-soul/chat-archive.db` | 聊天存档（默认开，按人/按天） |
+| `fish-soul/archives/` | 聊天存档归档文件 |
 
 ### 抖音私信安全暂停与收件恢复
 
@@ -121,9 +123,28 @@ lib/
   importer.js         记忆导入
   history-import.js   聊天记录导入（txt / jsonl / json / MaiBot）
   backup.js           备份与导出
+  chat-archive.js     聊天存档（默认开）
+  storage.js          存档存储、weekly.js 周记
+  outbox.js           私信出站队列（三态发送、持久化 conv_id）
+  safe-download.js    图片下载护栏、bounded-response.js 响应上限
+  douyin-inbox.js     抖音私信持久化收件箱、douyin-conversation.js 会话身份纯函数
+  douyin-delivery.js  抖音私信发送、douyin-http.js 纯 HTTP 读接口
+  douyin-post-jobs.js 抖音发作品队列、douyin-browse.js 抖音刷视频
+  worldinfo.js        世界书（safeRegexTest 限时）
+  memory-bulk.js      批量记忆、memory-label.js 记忆来源标签
+  config-schema.js / config-platforms.js 配置 schema
+  self-update.js      一键更新、update-check.js 更新检查
+  session-health.js   抖音登录健康、snowluma-token.js SnowLuma token
+  browsers.js         浏览器发现、imageconv.js 图片格式转换
+  video-frames.js     视频抽帧、qq-group-admin.js 群管理
+  time-util.js        sleep / pad2 等共用工具
+  capability.js       能力陈述防误记
+  attachments.js      附件处理、bili-emotes.js B站表情
+  gateway-util.js     网关工具函数、maibot-extras.js MaiBot 导入辅助
   channels/           snowluma / onebot / bilibili / douyin
+  channels/vendor/    抖音页面桥（douyin-bridge/）、qq-bridge.js
   client*.js          设置页（按需加载）
-  routes*.js          HTTP 路由（v07 / v09 / persona / douyin / soul）
+  routes*.js          HTTP 路由（v07 / v09 / persona / douyin / soul / update / worldinfo）
 test/
   smoke.mjs           模拟宿主的主流程（依次跑 smoke-v05 ~ v09、smoke-persona、smoke-social 子套件）
   douyin-browser.mjs  真 Chromium + 假 www.douyin.com

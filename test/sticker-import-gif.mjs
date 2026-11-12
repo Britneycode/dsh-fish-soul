@@ -121,12 +121,13 @@ async function callImport(bytes, mediaType, name) {
 }
 
 {
-	// ⑤ 超过 4MB 的 GIF 要拒绝，而且理由要说清
-	const huge = Buffer.concat([GIF_1PX, Buffer.alloc(4 * 1024 * 1024 + 1024, 0)]);
+	// ⑤ 超过上限的 GIF 要拒绝，而且理由要说清。
+	// 上限从 4MB 提到 20MB（改成原始二进制流式上传后，内存不再是约束）。
+	const huge = Buffer.concat([GIF_1PX, Buffer.alloc(20 * 1024 * 1024 + 1024, 0)]);
 	const r = await callImport(huge, 'image/gif', '超大GIF');
-	assert.equal(r.ok, false, '超过 4MB 要拒绝');
+	assert.equal(r.ok, false, '超过 20MB 要拒绝');
 	assert.match(r.error, /太大/, '理由要说清是太大');
-	ok('超过 4MB 明确拒绝');
+	ok('超过 20MB 明确拒绝');
 }
 
 {

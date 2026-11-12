@@ -18,6 +18,20 @@ const ws = join(home, 'ws');
 mkdirSync(join(ws, '_stickers'), { recursive: true });
 const box = new StickerBox({ db, getConfig: () => stickerConfig({ perDay: 10 }) });
 
+// 假 embedder：按**字**计数（不是子串）。
+// 用子串会踩坑：「想卖个萌」里「卖萌」不是连续子串（想-卖-个-萌），查询向量会退化成全 0，
+// 所有表情同分，排序就成了池子顺序。按字计数才能让它们通过「卖」「萌」共享维度。
+// 这测的是「挑对了哪张」；真模型的排序在本地单独验过（top1 5/6、top3 6/6）。
+const CHARS = ['害', '羞', '卖', '萌', '得', '意', '同', '可', '以', '猫', '爱', '被', '捏', '脸', '个', '想'];
+const fake = {
+	embed: async (texts) => ({
+		vectors: texts.map((t) => {
+			const s = String(t);
+			return CHARS.map((c) => (s.includes(c) ? 1 : 0));
+		})
+	})
+};
+
 // 1. 主人直接放进 _stickers 的图：面板里能看见，但不该写 kv
 writeFileSync(join(ws, '_stickers', '主人放的.png'), PNG);
 {
@@ -135,19 +149,7 @@ assert.equal(imported.ok, true, imported.reason);
 	}
 	db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run('stickers.collected', JSON.stringify(all));
 
-	// 假 embedder：按**字**计数（不是子串）。
-	// 用子串会踩坑：「想卖个萌」里「卖萌」不是连续子串（想-卖-个-萌），查询向量会退化成全 0，
-	// 所有表情同分，排序就成了池子顺序。按字计数才能让它们通过「卖」「萌」共享维度。
-	// 这测的是「挑对了哪张」；真模型的排序在本地单独验过（top1 5/6、top3 6/6）。
-	const CHARS = ['害', '羞', '卖', '萌', '得', '意', '同', '可', '以', '猫', '爱', '被', '捏', '脸', '个', '想'];
-	const fake = {
-		embed: async (texts) => ({
-			vectors: texts.map((t) => {
-				const s = String(t);
-				return CHARS.map((c) => (s.includes(c) ? 1 : 0));
-			})
-		})
-	};
+	// 假 embedder 见文件上方（按字计数）
 
 	const n = await boxF.embedStickers(feelWs, fake, { model: 'fake-1' });
 	assert.equal(n, 4, '四张都打上向量');
@@ -225,6 +227,25 @@ assert.equal(imported.ok, true, imported.reason);
 	assert.equal(imgSent.length, 1, '换出来的图要真的进发送队列');
 	assert.match(imgSent[0], /得意猫\.png$/);
 	assert.ok(!textSent.join('').includes('@'), '@ 不能漏进正文');
+}
+
+// 13. 生产路径要自己补向量：库里贴着标签但没打过向量的表情，出站挑之前要被打上。
+//     （以前 embedStickers 只有测试调，生产没人调 → 「按感觉挑」的池子恒为空，整条路是死的）
+{
+	const autoWs = join(tmpHome('fs-feel-auto-'), 'ws');
+	mkdirSync(join(autoWs, '_stickers'), { recursive: true });
+	const boxA = new StickerBox({ db, getConfig: () => stickerConfig({ perDay: 10 }) });
+	const all = boxA.collected();
+	all.unshift({ file: '得意猫.png', hash: 'h-auto', workspacePath: autoWs, from: '她', summary: '', tags: ['得意', '猫'], tagsBy: 'self', at: Date.now() });
+	db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run('stickers.collected', JSON.stringify(all));
+	assert.equal(boxA.collected().find((x) => x.file === '得意猫.png')?.vec, undefined, '前置：这条还没打过向量');
+
+	// 出站那一步（resolveFeelRefs → pickByFeel）要顺带把向量补上
+	const rr = await boxA.resolveFeelRefs('好呀 ![得意](_stickers/@得意)', autoWs, fake, { model: 'fake-1' });
+	assert.match(rr.text, /!\[得意\]\(_stickers\/得意猫\.png\)/, `库里没向量就挑不出来，实际正文：${rr.text}`);
+	const row = boxA.collected().find((x) => x.file === '得意猫.png');
+	assert.ok(row?.vec, '向量要落进 kv（不能只在内存里挑完就算）');
+	assert.equal(row.vecModel, 'fake-1', '要记下是哪个模型打的');
 }
 
 console.log('✓ 表情包面板：目录里的图看得见、改名、删；导入不占每天收藏的额度；按感觉挑表情（含 sendReply 接线）');

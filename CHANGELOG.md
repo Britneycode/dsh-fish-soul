@@ -1,5 +1,11 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.42：修 CI 的四环校验老是崩。
+  - **现象**：release workflow 的「校验四环」连续三次 `free(): invalid next size (normal)` + exit 134（glibc 堆损坏），本地复现不出来。npm publish / tag / Release 都成功了，只有校验这一步挂，把已经发好的版本标成红的。
+  - **病根**：拿的是 registry 的**整包文档**（265KB），每轮轮询都让 node 解析一遍、还要经 `curl | node -p` 管道过 stdin。runner 上这条路径不稳。
+  - **改法**：只用 `/latest` 端点（约 6KB，一次带 version + gitHead 两个字段）；逻辑抽成 `scripts/check-rings.mjs`，CI 和本地共用一份，不走管道。
+  - **顺带**：失败信息分三档（registry 读不到 / 版本没同步 / gitHead 不对）—— 以前三种都只说「四环没对齐」，修法完全不同。curl 加 `--retry` + `--max-time`。
+  - 新增 `test/check-rings.mjs`（6 项，不依赖网络）。102 套件。
 - v0.15.41：系统页加「运行日志」+ 修分块页注册。
   - **新功能**：系统 → 运行日志。记插件自己的装置层面事件（启动到哪一步、人格卡/瞬态块挂不上、会话新建/恢复/恢复失败、每轮上下文长度）。默认中文时间线方便贴 issue，「看原始」切 JSON 给维护者 grep。只留最近 200 条、不落盘；同一事件 60 秒内重复只累加计数。
   - **明确不做「宿主压缩日志」**：宿主不广播 compaction 事件，插件看不到，做了会是空的。上下文变长从「这一轮上下文长度」看。

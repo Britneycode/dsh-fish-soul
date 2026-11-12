@@ -60,7 +60,7 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           VER='${{ steps.v.outputs.ver }}'
-          CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/dsh-fish-soul/$VER")
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://registry.npmjs.org/dsh-fish-soul/$VER")
           if [ "$CODE" = "200" ]; then
             echo "registry 里已有 $VER，跳过 publish"
             exit 0
@@ -71,29 +71,16 @@ jobs:
           fi
           npm publish --//registry.npmjs.org/:_authToken="$NPM_TOKEN"
       - name: 校验四环
-        # 收尾校验：npm latest 要等于本次版本、gitHead 要等于本次提交。registry 同步有快有慢
-        # （0.12.0 约 2 分钟，0.13.1 超过 3 分钟才挂 latest），最多等 5 分钟。
-        # 轮询从 5s 指数退避到 30s 封顶：同步快时不用白等一个 30s 周期，慢时减少无意义请求。
+        # 收尾校验：npm latest 要等于本次版本、gitHead 要等于本次提交。
+        #
+        # 🔴 2026-11-12：这一步连续三次 `free(): invalid next size (normal)` + exit 134
+        #    （glibc 堆损坏，本地复现不出来，是 runner 上解析大 JSON 的老毛病）。
+        #    病根在拿「整包文档」—— registry.npmjs.org/dsh-fish-soul 那份有 265KB，
+        #    每次轮询都要 node 解析一遍、还要经管道过一遍 stdin。
+        #
+        #    现在逻辑只在 scripts/check-rings.mjs 里维护一份（也方便本地手动跑），
+        #    它只用 /latest 端点（约 6KB，一次带 version + gitHead 两个字段），
+        #    不落大字符串、不走 curl | node 管道。
         if: steps.v.outputs.skip != '1'
         run: |
-          VER='${{ steps.v.outputs.ver }}'
-          latest() { curl -s "https://registry.npmjs.org/dsh-fish-soul" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))['dist-tags'].latest"; }
-          LATEST=$(latest)
-          ELAPSED=0; WAIT=5
-          while [ "$LATEST" != "$VER" ] && [ $ELAPSED -lt 300 ]; do
-            echo "registry latest 还是 $LATEST，等 ${WAIT}s…"
-            sleep $WAIT; ELAPSED=$((ELAPSED+WAIT))
-            [ $WAIT -lt 30 ] && WAIT=$((WAIT*2))
-            [ $WAIT -gt 30 ] && WAIT=30
-            LATEST=$(latest)
-          done
-          if [ "$LATEST" != "$VER" ]; then
-            echo "::error::npm latest 还是 $LATEST（等了 ${ELAPSED}s），四环没对齐"
-            exit 1
-          fi
-          HEAD=$(curl -s "https://registry.npmjs.org/dsh-fish-soul/$VER" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).gitHead")
-          if [ "$HEAD" != "$GITHUB_SHA" ]; then
-            echo "::error::npm 的 gitHead 是 $HEAD，不是本次提交 $GITHUB_SHA"
-            exit 1
-          fi
-          echo "四环对齐：main = tag v$VER = Release = npm $VER ($HEAD)"
+          node scripts/check-rings.mjs '${{ steps.v.outputs.ver }}' "$GITHUB_SHA" --wait 300

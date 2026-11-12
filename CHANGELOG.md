@@ -1,5 +1,11 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.41：系统页加「运行日志」+ 修分块页注册。
+  - **新功能**：系统 → 运行日志。记插件自己的装置层面事件（启动到哪一步、人格卡/瞬态块挂不上、会话新建/恢复/恢复失败、每轮上下文长度）。默认中文时间线方便贴 issue，「看原始」切 JSON 给维护者 grep。只留最近 200 条、不落盘；同一事件 60 秒内重复只累加计数。
+  - **明确不做「宿主压缩日志」**：宿主不广播 compaction 事件，插件看不到，做了会是空的。上下文变长从「这一轮上下文长度」看。
+  - **修** client.diag.js 没按分块页形状注册（loaded without registering）：裸 ES module + 大写 React，宿主只认 __ModuleLoader__.load + require("react")。
+  - **测试加固**：test/client-syntax.mjs 从「只查语法」扩成两关，第二关校验每个 client.*.js 的注册形状（chunk 名、factory、require("react")、不用大写 React、导出 Pane）。今天同一个报错踩了两次，这条检查留着。
+  - 101 套件。
 - v0.15.40：#78 第二轮 —— 动态页三件事。
   - **召回条数跟设置走**：`note()` 里写死 `slice(0, 5)`，把「召回条数」调到 10 也只显示 5 条，看起来像设置没生效。现在跟 `topK` 走（硬顶 20）。
   - **DSH 会话里打字不再一片空白**：两处根因 —— `noteInteraction` 见到 `isOurSession` 直接 return（没有 `beginTurn`），以及 `turn/end` 时 `kind: 'user'` 把 `fromUs` 置 false（`sendReply` 直接返回，`note()` 一条都不写）。现在 DSH 打字仍**不外发**（原契约不变），但记一条 `dsh` 动态，带上这一轮的 `recallAt` / `memories`。

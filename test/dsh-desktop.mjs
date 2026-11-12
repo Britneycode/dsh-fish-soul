@@ -65,5 +65,26 @@ const db = openDatabase();
 	assert.ok(!src.includes('maxTokens = 600,'), '不能再有 600 默认值');
 }
 
-console.log('✓ 桌面端：master 兜底、世界书注入、remember/recall 不被拦、maxTokens 默认值');
+// ── 5. #95 / #78：在 DSH 界面里打开「我们的会话」打字时，说话人仍是主人 ──
+// v0.15.40 的 #78 修复把这条路径的 channel 从 'dsh' 改成了 sessionChannelOf(boundChannel)
+// （如 'qq-private'），而 speakers 里 person 还是 null → ownerId = UNKNOWN_OWNER →
+// speakerView 的 #57 兜底只认 ch === 'dsh' → remember 报「没识别出说话人是谁」。
+// 判据：ours=true 时 person 必须是 master，ownerId 不能是 UNKNOWN_OWNER。
+{
+	const { readFileSync } = await import('node:fs');
+	const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
+	// noteInteraction 里 ours 分支要给 ensureMasterPerson（不能只给 null）
+	const noteBlock = src.slice(src.indexOf('function noteInteraction'), src.indexOf('/** 已经补挂过人格段的 agent id'));
+	assert.ok(
+		/const person = ours \|\| qqUin === '' \? \(ours \? ensureMasterPerson\(db, clock\.now\(\)\) : null\) :/.test(noteBlock),
+		'在 DSH 里打开我们的会话（ours=true）时，说话人要用 ensureMasterPerson 补成主人，不能留 null'
+	);
+	// 且 speakers 传的是这个 person（不是硬写 null）
+	assert.ok(
+		/speakers: \[\{ person, userId: qqUin/.test(noteBlock),
+		'speakers 要把 person 传下去（不能硬写 null），否则 ownerId 会是 UNKNOWN_OWNER'
+	);
+}
+
+console.log('✓ 桌面端：master 兜底、世界书注入、remember/recall 不被拦、maxTokens 默认值、DSH 里打开我们的会话也认主人');
 db.close();

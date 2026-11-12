@@ -408,6 +408,32 @@ ok('#41 人格卡 / 瞬态块不再注册在插件全局 ctx 上');
 	ok('#41 宿主自己的会话拿不到人格 / 瞬态块：我们只注册在自己 agent 的 scope 里');
 }
 
+// 1c #78：在 DSH 界面里打开**我们的会话**直接打字，也要像 QQ 里说话一样调起功能。
+// 真机症状：动态页整片空白，只有 QQ 里说话才正常。
+{
+	// 先在 QQ 侧建出一个我们的会话（换一个群号，避免复用上面已经登记过说话人的会话）
+	inbox('20002', '先建个会话', 779);
+	const ourAgent = [...agentPrompts.keys()].find((k) => k.startsWith('g779'));
+	assert.ok(ourAgent !== undefined, 'QQ 群会话要先建出来');
+	// 宿主把我们这个会话在 DSH 里打开，用户在里面打字：source.kind = 'user'（不是 QQ / B站 / 抖音）
+	// 断言落在「这一轮真的登记了」上：recallInfo 的 recalledAt 要 > 0。
+	// context.text() 会触发 sessionFor 的 rebuild，内容变化不能证明 beginTurn 被调过。
+	// 直接查 recallInfo：只有真正跑了 beginTurn + buildContextBlock 才会写 recalledAt。
+	const { testHooks } = await import('../lib/index.js');
+	const gw = testHooks.gateway;
+	assert.ok(gw !== null, 'testHooks.gateway 要暴露出来');
+	assert.equal(gw.soul.recallInfo?.(ourAgent)?.at ?? 0, 0, '打字之前不该有 recalledAt');
+	handlers['agent/inbox/inserted']({
+		agent: { id: ourAgent, ctx: makeAgentCtx(ourAgent, () => {}) },
+		message: { role: 'user', content: [{ type: 'text', text: '你在干嘛呢' }], source: { kind: 'user' } }
+	});
+	// 模拟宿主组装提示词：beginTurn 跑过之后，这一轮才能真正组出瞬态块并写下 recalledAt。
+	// 修复前 beginTurn 压根没跑，这里就算组装了，sessions 里也是 rebuild 的空壳（recalledAt 是 0）。
+	context.text(at(ourAgent));
+	assert.ok(gw.soul.recallInfo?.(ourAgent)?.at > 0, 'DSH 里打字后这一轮要真的登记过（修复前 beginTurn 没跑，recalledAt 恒为 0）');
+	ok('#78 DSH 会话里打字也会登记一轮，瞬态块能跑（不再整片空白）');
+}
+
 // 2 配置合并 + 工具 schema
 assert.equal(tools.remember.parameters.additionalProperties, false);
 ok('工具参数为标准 JSON Schema');

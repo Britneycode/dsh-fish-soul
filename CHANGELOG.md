@@ -1,5 +1,16 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.49：抖音私信「只发媒体的会话」还是收不到 —— 上一轮只修了 1/4 处。
+  - **病根是同一套判据被复制了四份**：`m.text || m.tips || m.shareAweme` 在代码里出现四次，上一轮只改了 `filterUseful` 函数本体，另外三处内联的没动：
+    - `drainPushFrames` 的帧过滤（**推送路入口**）——只发图片 / 表情 / 语音的帧被整帧丢掉，于是推送路既收不到消息，也拿不到这帧的 `convId`（下面的 `ids` 是从过滤后的消息里取的）
+    - `pickMessages` 的响应挑选 —— 只发媒体的响应被整条跳过，永远挑不到
+    - `countUseful` 的结构挑选（旧 protobuf / 新 protobuf）—— 只发媒体的新结构被判成「解不出来」，输给解出一条文字的旧结构
+  - **后果**：陌生人只发图片 / 表情时，消息收不到、`convId` 也定不下来 ⇒ 发送前的身份校验永远「不敢发」⇒ 面板上反复出现「私信可能遗漏 · douyin:xxx」。
+  - **⚠️ 修的时候踩了个新坑（值得记）**：判据里**不能放 `kind`**。空壳消息的 `kind` 也非 0（实测 `58`），放进去会让「解出一堆空壳」的结构赢过「解出真消息」的结构 —— `countUseful` 挑错结构、`pickMessages` 挑错响应，直接把 `douyin-stranger-dm` 的 5 项打红。最终判据是 `text / tips / shareAweme / convId / seq / senderId`，**不含 kind**，并加了一条测试专门守着这个坑。
+  - 新增两条测试：「推送路必须走 `filterUseful`」（静态断言，防止再写一份内联判据）+「只有 kind 的空壳必须丢掉」。
+  - 111 套件全绿。
+  - 未验证：真机（陌生人只发图片）尚未实测；面板上已存在的旧 gap 不会自动消失（它们是 23:20 v0.15.47 时代留下的）。
+
 - v0.15.48：在 DSH 界面里打开会话打字，认不出主人（remember / recall 全被拒）。#95 / #78
   - **症状**：在 DSH 桌面端打开她的会话打字，`remember` 回「没识别出说话人是谁，这条先不记（避免记到别人名下）」，动态页也显示「瞬态块没跑」。在 QQ 里说话一切正常 —— 这就是报告人说的「只能在 QQ 上说话才能正常调起功能」。
   - **根因是 v0.15.40 自己引入的**：那一版为了让 DSH 里的轮次也记动态，把 `noteInteraction` 这条路径的 `channel` 从 `'dsh'` 改成了 `sessionChannelOf(boundChannel)`（比如 `'qq-private'`），但 `speakers` 里的 `person` 仍然是 `null` ⇒ `ownerId = UNKNOWN_OWNER`；而 `speakerView` 的 #57 兜底只判 `ch === 'dsh'`，接不住 ⇒ 工具层拿到的永远是 unknown。

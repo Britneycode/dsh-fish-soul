@@ -34,3 +34,11 @@ test('已知晓之后再失败，会重新记一条', () => {
   const n = db.prepare("SELECT COUNT(*) n FROM douyin_inbox_gap WHERE channel_id='douyin:未云' AND acknowledged=0").get().n;
   assert.equal(n, 1, '旧的已知晓了，新失败要能再提示');
 });
+
+test('同一会话反复窗口错位只留一条提示', () => {
+  const gap = { channelId: 'douyin:test-peer', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' };
+  const cursor = { convId: '0:1:100001:200002', window: [] };
+  for (let i = 0; i < 5; i++) inbox.record('cursor-window', cursor, [], gap);
+  const n = db.prepare("SELECT COUNT(*) n FROM douyin_inbox_gap WHERE channel_id='douyin:test-peer' AND reason=? AND acknowledged=0").get(gap.reason).n;
+  assert.equal(n, 1, '五次窗口错位只该有一条提示');
+});

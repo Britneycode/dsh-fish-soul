@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { tmpHome } from './_tmp.mjs';
 
 const home = tmpHome('douyin-identity-e2e-');
+process.env.DSH_HOME = home;
 const { openDatabase, getKv } = await import('../lib/db.js');
 const { ChatGateway } = await import('../lib/gateway.js');
 const { DouyinChannel } = await import('../lib/channels/douyin.js');
@@ -140,5 +141,3 @@ test('没有会话 ID 的会话：不发送，并说清原因', async () => {
 	assert.match(r.reason, /认不出你抖音那个会话/, '要说明是认不出会话，不是笼统失败');
 	fresh.close();
 });
-
-test.after(() => { process.env.DSH_HOME = home; });

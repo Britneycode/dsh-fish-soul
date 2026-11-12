@@ -1,6 +1,6 @@
 # 发版：main 上 package.json 的版本还没有对应的 tag 时，打 v<版本> 并建 GitHub Release。
 # 正文取 CHANGELOG.md 里「- v<版本>」那一段（到下一个顶格「- 」为止）。本机的 scripts/release.sh 仍然能用，二选一。
-# npm publish 也在这里做：tag 没建过（= 这次是真发版）才发，registry 里已有这个版本时跳过——
+# npm publish 也在这里做：tag 没建过（= 这次是真发版）才发，registry 已有版本时跳过——
 # 0.11.3 那次只建了 Release 没发 npm，latest 落后两版，就是漏在这一步。
 name: release
 on:

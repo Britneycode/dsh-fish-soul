@@ -92,10 +92,16 @@ test('图片这类媒体消息没有文本，但不能被当成空消息丢掉',
 })
 
 test('只有部分身份字段的消息也要留下', () => {
-  // kind / senderId / seq / convId 任意一个存在，都说明这是一条真消息
-  for (const m of [{ kind: 7 }, { senderId: PEER }, { seq: '3' }, { convId: CONV_ID }]) {
+  // senderId / seq / convId 任意一个存在，都说明这是一条真消息
+  for (const m of [{ senderId: PEER }, { seq: '3' }, { convId: CONV_ID }]) {
     assert.equal(filterUseful([m]).length, 1, `带 ${Object.keys(m)[0]} 的消息必须留下`)
   }
+})
+
+test('只有 kind 的空壳必须丢掉（空壳的 kind 也非 0，实测 58）', () => {
+  // 这是上一版踩过的坑：把 kind 放进判据后，「解出一堆空壳」的结构会赢过
+  // 「解出真消息」的结构（countUseful 挑结构、pickMessages 挑响应都会挑错）。
+  assert.deepEqual(filterUseful([{ kind: 58 }, { kind: 7, text: '' }]), [])
 })
 
 test('什么都没有的空壳消息仍然丢掉', () => {
@@ -126,4 +132,47 @@ test('多个会话混在一起时不能猜', async () => {
     capture([node({ convId: OTHER_CONV_ID })]),
   ])
   assert.equal(await resolveConvId(b, UNAME), '', '会话 ID 不唯一时必须当作拿不到')
+})
+
+// ── ③ 推送路的帧过滤也必须用同一套判据 ──
+//
+// 上一轮只修了 `filterUseful` 函数本体，但 `drainPushFrames` 里还有一处**内联**的
+// `filter((m) => m.text || m.tips || m.shareAweme)` —— 那是推送帧的入口。只发媒体的
+// 帧会在那里被整帧丢掉，于是推送路既收不到媒体消息，也拿不到这帧的 convId
+// （下面 `ids` 是从 useful 里取的）。症状是「陌生人只发图片/表情，永远收不到」。
+test('推送路 drainPushFrames 的过滤走 filterUseful，不能自己内联一套旧判据', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(
+    new URL('../lib/channels/vendor/douyin-bridge/douyin-dm.mjs', import.meta.url),
+    'utf8',
+  )
+  const start = src.indexOf('export function drainPushFrames')
+  assert.ok(start >= 0, 'drainPushFrames 要还在')
+  const body = src.slice(start, src.indexOf('\nexport ', start + 10))
+  assert.ok(
+    /const useful = filterUseful\(parsed\.messages\)/.test(body),
+    '推送帧的过滤要用 filterUseful，不能内联 m.text || m.tips || m.shareAweme',
+  )
+  assert.ok(
+    !/\(m\) => m\.text \|\| m\.tips \|\| m\.shareAweme\)/.test(body),
+    '推送路里不能再出现只认文本的内联过滤',
+  )
+})
+
+// ── ④ 挑响应（pickMessages）与挑结构（countUseful）同样不能只认文本 ──
+test('douyin-api 里挑响应/挑结构都不再把媒体消息当空', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(
+    new URL('../lib/channels/vendor/douyin-bridge/douyin-api.mjs', import.meta.url),
+    'utf8',
+  )
+  const countLine = src.slice(src.indexOf('const countUseful'), src.indexOf('const countUseful') + 300)
+  assert.ok(
+    /m\.convId \|\| m\.seq \|\| m\.senderId/.test(countLine),
+    'countUseful 要认 convId/seq/senderId，否则只发媒体的新结构会被判成「解不出」',
+  )
+  assert.ok(
+    !/const countUseful = \(list\) => list\.filter\(\(m\) => m\.text \|\| m\.tips \|\| m\.shareAweme\)\.length/.test(src),
+    'countUseful 不能退回只认文本的旧判据',
+  )
 })

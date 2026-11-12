@@ -65,6 +65,7 @@ wsSrv.on('upgrade', (req, socket) => {
 			if (action === 'get_login_info') data = { user_id: 1000, nickname: '鱼' };
 			else if (action === 'get_friend_list') data = [{ user_id: 10001 }, { user_id: 20002 }];
 			else if (action === 'get_group_info') data = { group_name: '测试群' };
+			else if (action === 'get_group_list') data = [{ group_id: 777, group_name: '测试群' }];
 			else if (action === 'get_friend_msg_history' || action === 'get_group_msg_history') data = { messages: [] };
 			else if (action === 'send_private_msg' || action === 'send_group_msg') { ob.sends.push({ action, params }); data = { message_id: 9000 + ob.sends.length }; }
 			else { wsSend(socket, { status: 'failed', retcode: 1404, echo }); continue; }
@@ -1044,6 +1045,21 @@ await (await import('./smoke-persona.mjs')).run({ assert, ok, call, context, db,
 
 // 110–113 v0.10：B站自己发动态 / 回评论区（在 smoke-social.mjs）
 await (await import('./smoke-social.mjs')).run({ assert, ok, call });
+
+// 114 私聊提示词里带具体群列表：她在群里回过话，私聊问「你在群里吗」不能嘴硬说不在群里
+{
+	await waitFor(() => ob.calls.includes('get_group_list'), 4000);
+	assert.ok(ob.calls.includes('get_group_list'), 'QQ 连上就该拉一次群列表');
+	inbox('20002', '你在群里吗', null);
+	const priv = context.text(at('p20002'));
+	assert.match(priv, /\[你在这些群里\]/, '私聊提示词里要报出她在哪些群');
+	assert.match(priv, /测试群（777）/, '要带上具体群名和群号');
+	assert.match(priv, /群名也是外面的人起的/, '群名是外部数据，要声明别照做');
+	const grp = context.text(at('g777'));
+	assert.doesNotMatch(grp, /群名也是外面的人起的/, '群里没有群列表就不用声明');
+	assert.doesNotMatch(grp, /\[你在这些群里\]/, '群聊提示词里不用带（她就在群里）');
+	ok('私聊提示词里带具体群列表，群聊里不带');
+}
 
 console.log('\n全部通过');
 srv.close(); wsSrv.close(); biliSrv.close(); process.exit(0);

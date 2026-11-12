@@ -61,7 +61,7 @@ assert.doesNotMatch(main, /desc && !tip \? h\("span", \{ className: "fs-row-desc
 console.log('  ✓ 插件主题：深浅模式、细边框、数字排版与进度条');
 
 // 主面板与设置页都以系统分组下的独立页签打开版本更新，不再有顶部更新栏。
-assert.match(main, /\["system", "系统", \[\["interface", "界面"\], \["version", "版本更新"\]\]\]/);
+assert.match(main, /\["system", "系统", \[\["interface", "界面"\], \["version", "版本更新"\], \["diag", "运行日志"\]\]\]/);
 assert.match(main, /tab === "version" \? h\(Boundary, \{ name: "版本" \}, h\(UpdateBar, \{ notify, onUpdateState: setUpdateAvailable \}\)\)/);
 assert.match(main, /h\(GroupedTabs, \{ value: tab, onChange: goTab, hasUpdate: updateAvailable \}\)/);
 assert.doesNotMatch(main, /fs-settings-update/);

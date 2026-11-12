@@ -1,5 +1,12 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.38：全项目审计清理 + #78 记忆挂载修复。
+  - **#78 记忆问题**：正常 QQ 会话的「没组装记忆」诊断修正（`chat_session` 表里有记录的不再误报 `notMounted`）；所有会话在 inbox 事件时补挂人格卡/瞬态块做保险，覆盖宿主 setup 时 ctx 不对的情况。
+  - 死代码清理：`PLUGIN_CAPABILITIES`、注入桥 `awsSign`、`gateway.douyinLinks()`、设置页死输入框「同一个人」。
+  - 隐患修复：`update-check` 重新排程异常路径包 catch；CDP `JSON.parse` 加保护；日记/评论轮询/drainInbox 三处空 catch 加限频 warn；`pausedMap` N+1 改单读；`browse` 评论超时定时器清理。
+  - 配置：`douyin.shareCard` 补 schema 声明；白名单占位符改准确。
+  - 文档：README 目录树补全、MAP 补模块、CHANGELOG 排序修正、RUNBOOK 套件数 93→98 + 补环境变量节、RISKS 回滚锚点更新、AGENTS 数字修正。
+  - 清理：删零引用样例 `test/eval/sample-report.md`、`.pr`/`.ui` 空文件、根目录重复 docx、`.gitignore` 冗余行。
 - v0.15.37：抖音私信读取、自身回声与遗漏提示修复。
   - 轮询、推送及旧收件重放按已知自身 UID 拦截机器人自己的消息，避免再次触发回复。
   - 保留初始化私信响应与完成状态；事件缓冲裁剪或导航后继续消费推送。按已验证会话 ID 和读取时间校验缓存，刷新后读取 CDP 响应，缓存命中不混入未验证页面媒体。

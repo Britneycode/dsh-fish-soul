@@ -1,5 +1,9 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.39：刷过的视频能想起来了（#78 真机复现的两个根因）。
+  - **瞬态块窗口只有 1 个虚拟日**：昨天刷的今天就查不到，表现是「她明明刷了却说想不起来」。B站 / 抖音的 `contextLines` 放宽到 2 个虚拟日，默认条数 2 → 3。
+  - **`recalledAt` 竞态**：`sendReply` 跑在 `turn/end` 之后，这期间下一轮消息的 `beginTurn` 会把 `sessions` 那条记录整个替换掉（`recalledAt` 归零）→ 误报「没组装记忆」。现在同时记到这一轮的 turn state 上，`turn/end` 把 `st` 直接传给 `recallInfo`。
+  - 新增 `test/recall-window-78.mjs`（4 项），99 套件。
 - v0.15.38：全项目审计清理 + #78 记忆挂载修复。
   - **#78 记忆问题**：正常 QQ 会话的「没组装记忆」诊断修正（`chat_session` 表里有记录的不再误报 `notMounted`）；所有会话在 inbox 事件时补挂人格卡/瞬态块做保险，覆盖宿主 setup 时 ctx 不对的情况。
   - 死代码清理：`PLUGIN_CAPABILITIES`、注入桥 `awsSign`、`gateway.douyinLinks()`、设置页死输入框「同一个人」。

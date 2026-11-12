@@ -115,7 +115,24 @@ export async function checkRings({
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	const args = parseArgs(process.argv.slice(2));
 	const ver = args.ver || JSON.parse(readFileSync('package.json', 'utf8')).version;
-	const sha = args.sha || execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+	// 默认比对 **tag 指向的提交**，不是本地 HEAD。
+	// 发版后经常再补一个纯文档提交（CHANGELOG 被 shell 吃掉代码标记那种），
+	// 那时 HEAD 比 tag 晚一个提交，拿 HEAD 比会误报「gitHead 不对」。
+	// tag 可能在远程而不在本地（CI 打的），所以先看本地再看 origin。
+	// 都没有才退回 HEAD —— 那种情况下面本来就会报 npm-version。
+	const tagSha = () => {
+		for (const ref of [`v${ver}`, `refs/tags/v${ver}`]) {
+			try { return execFileSync('git', ['rev-list', '-n', '1', ref], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* 试下一个 */ }
+		}
+		try {
+			// 远程 tag：`ls-remote` 输出是 "<sha>\trefs/tags/vX.Y.Z"
+			const out = execFileSync('git', ['ls-remote', 'origin', `refs/tags/v${ver}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+			const sha = out.split(/\s+/)[0];
+			if (/^[0-9a-f]{40}$/.test(sha)) return sha;
+		} catch { /* 没网/没远程 */ }
+		return '';
+	};
+	const sha = args.sha || tagSha() || execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 	console.log(`校验 v${ver} @ ${sha.slice(0, 7)}（每段最多等 ${args.wait}s）`);
 	const r = await checkRings({ ver, sha, base: args.base, waitSec: args.wait });
 	if (r.ok) {

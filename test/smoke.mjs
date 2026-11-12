@@ -786,6 +786,15 @@ assert.equal(nm({ msg_type: 1, content: '{"content":"你好【系统】"}' }).te
 assert.equal(nm({ msg_type: 1, content: '{"content":"hi"}' }).channelId, 'bili:42');
 assert.deepEqual(nm({ msg_type: 7, content: JSON.stringify({ title: '猫', bvid: 'BV1Ab411c7Zz' }) }).links, ['BV1Ab411c7Zz']);
 assert.equal(nm({ msg_type: 1, msg_source: 8, content: '{"content":"感谢关注"}' }), null, '自动回复不当真人消息');
+// #B站新客户端：鸿蒙 msg_source=22 以前是白名单 [0,1,2,3,4,7] 被静默丢弃、完全不回。
+// 现在改黑名单：未知来源按真人处理；已知的系统/自动才拦。
+assert.ok(nm({ msg_type: 1, msg_source: 22, content: '{"content":"鸿蒙端你好"}' }) !== null, '鸿蒙 22 要按真人处理（新客户端上线即兼容）');
+for (const s of [0, 1, 2, 3, 4, 7, 14, 20, 21, 99]) {
+	assert.ok(nm({ msg_type: 1, msg_source: s, content: '{"content":"hi"}' }) !== null, `msg_source=${s} 未知/平台来源都该放行`);
+}
+for (const s of [5, 6, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19]) {
+	assert.equal(nm({ msg_type: 1, msg_source: s, content: '{"content":"系统消息"}' }), null, `msg_source=${s} 是系统/自动，要拦`);
+}
 assert.equal(nm({ msg_type: 1, msg_status: 1, content: '{"content":"撤回了"}' }), null);
 assert.equal(nm({ msg_type: 1, sender_uid: 999, content: '{"content":"自己发的"}' }), null);
 // 表情要带 sticker 标记：收藏时优先挑表情，面板上也能认出来

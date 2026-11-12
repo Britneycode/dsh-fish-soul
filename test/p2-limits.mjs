@@ -47,6 +47,26 @@ test('readBody 超过上限就拒绝（不再无限累积 chunks）', async () =
   assert.ok(rejected !== null, '超大 body 必须 reject');
   assert.match(String(rejected.message), /请求太大/, '错误信息要说清是太大');
   assert.equal(big.destroyed, true, '要销毁连接，别继续收');
+
+  // 自定义上限（图片导入那条路用 6MB）：同一个 320KB body 要能读出来。
+  // 以前 import 直接复用共享的 256KB 上限，base64 图一膨胀就被截断，
+  // 表现是「选图导入没反应 / 失败」（2026-11-12 真机）。
+  const bigOk = makeReq();
+  const p3 = readBody(bigOk, null, 6 * 1024 * 1024);
+  for (let i = 0; i < 5; i++) bigOk.emit('data', chunk);
+  bigOk.emit('end');
+  const got = await p3;
+  assert.equal(got.length, 5 * 64 * 1024, '放大的上限要能收下 320KB');
+  assert.equal(bigOk.destroyed, false, '没超限就不该销毁连接');
+
+  // 显式传小上限：比默认更严也能生效
+  const tiny = makeReq();
+  const p4 = readBody(tiny, null, 1024);
+  let tinyRejected = null;
+  p4.catch((e) => { tinyRejected = e; });
+  tiny.emit('data', Buffer.alloc(2048, 0x61));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(tinyRejected !== null, '自定义上限比默认小时也要拦');
 });
 
 // ── ② / ③ outbox 队列上限 ───────────────────────────────────────────────────

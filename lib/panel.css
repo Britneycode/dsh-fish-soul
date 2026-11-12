@@ -242,6 +242,8 @@ a.fs-btn{text-decoration:none}
 .fs-sticker figcaption .fs-input{flex:none;width:100%;height:24px;padding:0 4px;font-size:12px;text-align:center}
 .fs-sticker .fs-icon-btn{position:absolute;top:2px;right:2px;opacity:0}
 .fs-sticker:hover .fs-icon-btn,.fs-sticker:focus-within .fs-icon-btn{opacity:1}
+/* 触屏没有 hover：删除按钮必须常驻可见（普通列表 .fs-item 早就这么兜了，表情包漏了这条）。 */
+@media (hover:none){.fs-sticker .fs-icon-btn{opacity:1}}
 /* 人格页：模板卡片、说话示例气泡、世界书编辑 */
 .fs-persona{padding:10px 0;border-bottom:1px solid var(--fs-line)}
 .fs-persona:last-child{border-bottom:0}

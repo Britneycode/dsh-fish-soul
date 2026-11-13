@@ -602,11 +602,11 @@ assert.ok(stranger);
 assert.ok(db.prepare("SELECT 1 FROM memory WHERE owner_id = ? AND content LIKE '%当时没回%'").get(`user:${stranger.canonical_id}`));
 ok('陌生人临时会话：不回复，人和话都记下');
 
-// 15 超过 10 分钟的旧消息：只记忆不回复
-conn.push({ post_type: 'message', message_type: 'private', sub_type: 'friend', user_id: 20002, message_id: 602, time: nowSec() - 20 * 60, sender: { nickname: '老友' }, message: [{ type: 'text', data: { text: '昨天那事咋样了' } }] });
+// 15 超过回复时限的旧消息：只记忆不回复（默认 120 分钟，所以用 200 分钟确保超限）
+conn.push({ post_type: 'message', message_type: 'private', sub_type: 'friend', user_id: 20002, message_id: 602, time: nowSec() - 200 * 60, sender: { nickname: '老友' }, message: [{ type: 'text', data: { text: '昨天那事咋样了' } }] });
 await sleep(500);
 assert.equal(host.followups.length, 1);
-ok('旧消息（>10 分钟）：只记忆不回复');
+ok('旧消息（>120 分钟）：只记忆不回复');
 
 // 16 群：不点名不听；@ 之后接着听；多人合批带署名；回复引用点名那条
 conn.push({ post_type: 'message', message_type: 'group', group_id: 888, user_id: 20002, message_id: 701, sender: { card: '阿二' }, message: [{ type: 'text', data: { text: '今天好热' } }] });

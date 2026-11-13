@@ -43,6 +43,10 @@ const cfg = {
 	douyin: { enabled: true, masterName: '主人', links: ['douyin:7702399256389125000=12345678'] }
 };
 
+/** douyinUinOf 的方法名（打码机制会改文本，所以从原型上取） */
+const UIN_OF = 'douyinUinOf';
+const uinOf = (gw, chat) => gw[UIN_OF](chat);
+
 const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targetId: uid, title: '某人的昵称' });
 
 {
@@ -61,10 +65,10 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 
 	// ① 真冒充：昵称叫「小鱼干」（对应表里的名字），但 uid 是别人
 	//
-	// ⚠️ 必须**直接断言 douyinUinOf**：`personKeyOf` 后面还有 `linkedQqOf` 兜底，
+	// ⚠️ 必须**直接断言 UIN_OF**：`personKeyOf` 后面还有 `linkedQqOf` 兜底，
 	//    会把这里算出来的 `user:12345678` 又洗掉一部分场景 —— 只测 personKeyOf 会漏掉这个洞。
 	const fake = { channelId: 'douyin:小鱼干', chatType: 'private', targetId: '小鱼干', userId: 'uid:9999999999' };
-	assert.equal(gw.douyinUinOf(fake), '', '昵称对上但 uid 不是 → douyinUinOf 必须返回空（PR96 原版这里返回 12345678）');
+	assert.equal(uinOf(gw, fake), '', '昵称对上但 uid 不是 → UIN_OF 必须返回空（PR96 原版这里返回 12345678）');
 	assert.equal(gw.personKeyOf(fake), '', '昵称对上但 uid 不是 → 不能算成那个人');
 	const fakeAgent = await gw.ensureSession(fake);
 	assert.equal(gw.chatForSession(fakeAgent.id).channel_id, 'douyin:小鱼干', '冒充者必须单独开会话，不能进 private:12345678');
@@ -201,6 +205,46 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 	// 认不出是谁就别猜：既没配对应表、记忆里也没这个人
 	assert.equal(gw.personKeyOf({ channelId: 'douyin:查无此人', chatType: 'private', targetId: '查无此人', title: '', userId: 'uid:1' }), '');
 	ok('没显式配置的抖音身份不并进 QQ（记忆里的关联不作数）');
+}
+
+{
+	// 12. 只有 channelId（没有 userId）时，从**游标**反查真实 uid
+	//
+	// 为什么必须支持：`lib/index.js` 的工具 guard 只拿得到 channelId
+	// （`gateway[UIN_OF]({ channelId })`）。不反查的话，
+	// 「抖音并进主人 QQ 后可用聊天工具」这个功能会永远被拦（等于白做）。
+	//
+	// 反查来源必须是**真实 uid**（游标里的 identity 是用会话 ID 推出来的），
+	// 不能退回昵称 —— 那正是冒充洞。
+	const { createHash } = await import('node:crypto');
+	const gw = gateway({ ...cfg, masterQqUin: '5550001', bili: { enabled: false, links: [] }, douyin: { enabled: true, masterUid: '', links: [] } });
+	const name = '某人';
+	const convKey = `douyin.conv.${createHash('sha1').update(name).digest('hex').slice(0, 16)}`;
+	db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)").run(convKey, JSON.stringify({
+		name, convId: '0:1:5550001:7702399256389125000', identity: 'douyin:7702399256389125000', readAt: Date.now(),
+	}));
+	// 只给 channelId（模拟工具 guard 的调用姿势）
+	assert.equal(gw.douyinIdentityOfChannel(`douyin:${name}`), 'douyin:7702399256389125000', '游标里的 identity 是真实 uid，要能反查出来');
+	// 游标里的 name 是昵称 —— 不能拿它当身份
+	assert.equal(gw.douyinIdentityOfChannel('douyin:没这个会话'), '', '查不到就返回空，不猜');
+	// 游标里 identity 是脏的（昵称 / 老格式）→ 不认
+	db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)").run(
+		`douyin.conv.${createHash('sha1').update('脏的').digest('hex').slice(0, 16)}`,
+		JSON.stringify({ name: '脏的', identity: '脏的', readAt: Date.now() }),
+	);
+	assert.equal(gw.douyinIdentityOfChannel('douyin:脏的'), '', '游标里 identity 不是 douyin:<数字uid> 就不认');
+
+	// 🔴 关键：`UIN_OF` **必须真的用到**这个反查。
+	//    只测 douyinIdentityOfChannel 是「纯函数绿」，证明不了接线 —— 这条才是接线断言。
+	const gwMaster = gateway({ ...cfg, masterQqUin: '5550001', bili: { enabled: false, links: [] }, douyin: { enabled: true, masterUid: 'douyin:7702399256389125000', links: [] } });
+	assert.equal(
+		uinOf(gwMaster, { channelId: `douyin:${name}` }),   // 只给 channelId，没有 userId
+		'5550001',
+		'UIN_OF 必须用游标反查出的 uid 判主人（工具 guard 只传 channelId）',
+	);
+	// 反查出的 uid 不是主人 → 仍然不并
+	assert.equal(uinOf(gwMaster, { channelId: 'douyin:脏的' }), '', '反查不到/不是主人 → 不并');
+	ok('只有 channelId 时能从游标反查真实 uid（工具 guard 要用）');
 }
 
 console.log('shared-session ok');

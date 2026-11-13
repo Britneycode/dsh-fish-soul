@@ -203,10 +203,10 @@ test('shapeResult 的 fromMe 保留三态（null 不能压成 false）', async (
 test('注入筛选只认明确的 fromMe === false（未知不注入）', async () => {
   const { readFileSync } = await import('node:fs')
   const src = readFileSync(new URL('../lib/channels/douyin.js', import.meta.url), 'utf8')
-  // normalizeDouyinMessage：fromMe 未知（null/undefined）也当自己的，不收
+  // normalizeDouyinMessage：只有明确 fromMe === true 才拒（纯函数，输入可能没有 fromMe）
   assert.ok(
-    /if \(!m \|\| m\.fromMe !== false \|\| m\.system \|\| m\.unsupported\) return null;/.test(src),
-    'normalizeDouyinMessage 要按 fromMe !== false 拒绝（未知当自己的）',
+    /if \(!m \|\| m\.fromMe === true \|\| m\.system \|\| m\.unsupported\) return null;/.test(src),
+    'normalizeDouyinMessage 要按 fromMe === true 拒绝（保持纯函数契约）',
   )
   // 注入筛选
   assert.ok(

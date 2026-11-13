@@ -1,5 +1,14 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.50：抖音私信「串会话」+「把自己回的话当成对方发的」。
+  - **① 串会话（一条消息发给好几个人）**：`currentPeer` 的 `name` 来自 DOM（当前打开的会话），但 `convId` 来自 `latestConvIdFromCdp` —— 而它扫的是**整个 CDP 缓冲**，取「最近一条能解出 convId 的响应」。轮询同时在读多个会话时，缓冲里混着它们的响应，取到的可能是**别的会话**的 ID。于是 `cur.name` 和 `cur.convId` 不是同一个会话；`sendDM` 只校验 `cur.convId !== want`，不校验两者一致性 ⇒ 通过了，但发给了错的人。
+    - 修法：`latestConvIdFromCdp` 加 `since` 窗口，只扫 `enterChat` **之后**触发的响应（那才是当前这个会话的）；`since <= 0` 时直接返回空 —— 快路径（判断「已经在目标会话里」）没有新响应，不能靠旧缓冲猜。
+  - **② 把自己回的话当成对方发的**：`decodeMessageNode` 在拿不到 `selfSecUid` 时给 `fromMe: null`（算不出谁发的），但 `shapeResult` 写的是 `fromMe: m.fromMe === true` —— 把 `null` 和 `false` **压成同一个值**，信息在这里丢了。于是「算不出谁发的」被当成「对方发的」，她自己刚回出去的话下一轮又被当成新消息注入回去（真机症状：她回「这不是你发的表情包吗」，然后自我纠正「哦，是我发的那个柯基」）。
+    - 修法：`fromMe` 保留三态（`true` / `false` / `null`），下游只认**明确 `false`** 才算对方发的（`shapeResult`、`normalizeDouyinMessage`、注入筛选、群成员学习、`isGroupConversation` 的 peer 统计五处）。方向是「宁可不回，也不把自己的话当对方的」—— 真漏一条面板上有 gap 提示，自己跟自己对话更糟。
+  - 测试新增 4 条（`latestConvIdFromCdp` 的 since 窗口 2 条、`fromMe` 三态 2 条），红绿验证过。
+  - 全量 109/111 绿；`douyin-browser` 与 `douyin-music` 因宿主抖音浏览器占着同一 profile 起不来（环境问题，与本次改动无关，单跑同样红）。
+  - 未验证：真机（串会话、把自己话当对方）尚未实测。
+
 - v0.15.49：抖音私信「只发媒体的会话」还是收不到 —— 上一轮只修了 1/4 处。
   - **病根是同一套判据被复制了四份**：`m.text || m.tips || m.shareAweme` 在代码里出现四次，上一轮只改了 `filterUseful` 函数本体，另外三处内联的没动：
     - `drainPushFrames` 的帧过滤（**推送路入口**）——只发图片 / 表情 / 语音的帧被整帧丢掉，于是推送路既收不到消息，也拿不到这帧的 `convId`（下面的 `ids` 是从过滤后的消息里取的）

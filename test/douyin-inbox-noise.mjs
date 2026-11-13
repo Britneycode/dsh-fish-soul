@@ -101,6 +101,7 @@ function makeChannel() {
   });
   ch.drainInbox = async () => {};
   ch.runCanary = async () => {};
+  ch.consumePushFrames = async () => {};
   return ch;
 }
 
@@ -113,7 +114,7 @@ test('轮询每轮都会把超期的待核实作废', async () => {
   age(first.id, 25 * HOUR);
 
   const ch = makeChannel();
-  await ch.pollInner();
+  await ch.pollOnce();
   assert.equal(rowOf(first.id).status, 'dismissed', '轮询一轮就该清掉超期的待核实');
 });
 
@@ -122,9 +123,21 @@ test('轮询每轮都会清掉没人确认的缺口提示', async () => {
   const calls = [];
   ch.inbox.pruneGaps = () => { calls.push('pruneGaps'); return 0; };
   ch.inbox.expireStaleUnknown = () => { calls.push('expireStaleUnknown'); return 0; };
-  await ch.pollInner();
+  await ch.pollOnce();
   assert.ok(calls.includes('pruneGaps'), '轮询里要清缺口提示');
   assert.ok(calls.includes('expireStaleUnknown'), '轮询里要过期待核实');
+});
+
+test('读私信的锁被占着时，收件箱维护照样每轮都跑', async () => {
+  const ch = makeChannel();
+  // exclusive 不放锁（模拟真机：驱动读 hang 住，锁焊死）
+  ch.host.exclusive = async () => undefined;
+  const calls = [];
+  ch.inbox.reclaimStuck = () => { calls.push('reclaimStuck'); return 0; };
+  ch.inbox.expireStaleUnknown = () => { calls.push('expireStaleUnknown'); return 0; };
+  await ch.pollOnce();
+  assert.ok(calls.includes('reclaimStuck'), '锁被占着也要回收卡住的 processing');
+  assert.ok(calls.includes('expireStaleUnknown'), '锁被占着也要过期待核实');
 });
 
 // ── ④ 后端返回结构不许变 ───────────────────────────────────────────────────

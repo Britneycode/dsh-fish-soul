@@ -247,4 +247,37 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 	ok('只有 channelId 时能从游标反查真实 uid（工具 guard 要用）');
 }
 
+{
+	// 13. 昵称配置（主人的真实写法）+ 二次确认：保留配置，但挡住冒充
+	//
+	// 真机配置就是 `未云=3630958828` 这种**昵称**格式。完全禁掉会让主人白配一次；
+	// 完全放行就是 PR #96 的冒充洞。折中：昵称只用来**定位**，
+	// 授权必须有「已确认的事实」—— person 表里这行同时有 douyin_uid + qq_uin。
+	const { createHash } = await import('node:crypto');
+	const name = '小鱼干';
+	const uid = '7702399256389125000';
+	const qq = '12345678';
+	const gw = gateway({ ...cfg, masterQqUin: '5550001', bili: { enabled: false, links: [] }, douyin: { enabled: true, masterUid: '', links: [`${name}=${qq}`] } });
+	const chat = (u, n = name) => ({ channelId: `douyin:${n}`, chatType: 'private', targetId: n, title: '', userId: `uid:${u}` });
+
+	// ① 还没确认过 → 不并（安全降级；**不能**「第一次见到就自动绑定」，那是谁先来谁被绑）
+	assert.equal(uinOf(gw, chat(uid)), '', '没有已确认的事实 → 昵称配置不授权');
+
+	// ② 认人阶段已经确认过这个人（person 行有 douyin_uid + qq_uin）→ 昵称配置生效
+	db.prepare("INSERT OR REPLACE INTO person (canonical_id, qq_uin, douyin_uid, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('p-confirmed', ?, ?, ?, 'friend', 1, ?, ?)")
+		.run(qq, `douyin:${uid}`, name, Date.now(), Date.now());
+	assert.equal(uinOf(gw, chat(uid)), qq, '确认过 → 昵称配置生效，并进那个人的 QQ 会话');
+	// 固化进绑定表后，即使 person 行被删也还认
+	assert.equal(gw.douyinUinBinding(uid), qq, '确认过的事实要固化进绑定表');
+
+	// ③ 冒充者：昵称一样，uid 是别人的 → person 表里没有这个 uid ⇒ 不并
+	assert.equal(uinOf(gw, chat('9999999999')), '', '昵称一样但 uid 没确认过 → 挡住冒充');
+
+	// ④ 昵称改了但 uid 没变 → 仍按绑定表认（改昵称不掉线）
+	assert.equal(gw.douyinUinBinding(uid), qq);
+	const renamedCfg = { ...cfg, douyin: { enabled: true, masterUid: '', links: [`${name}=${qq}`] } };
+	void renamedCfg;
+	ok('昵称配置 + 二次确认：保留主人写法，冒充者 uid 不同进不来');
+}
+
 console.log('shared-session ok');

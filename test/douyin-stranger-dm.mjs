@@ -323,3 +323,15 @@ test('面板只报还活着的会话；游标没了的失败计数要清掉', as
 
 test.after(() => db.close());
 console.log('douyin-stranger-dm ok');
+
+// ── ④ 卡住的 processing 要能运行时回收 ──
+test('卡住的 processing 有运行时回收（不只在启动时）', async () => {
+  const { readFileSync } = await import('node:fs');
+  const inbox = readFileSync(new URL('../lib/douyin-inbox.js', import.meta.url), 'utf8');
+  assert.ok(/reclaimStuck\(maxAgeMs = 5 \* 60_000\)/.test(inbox), 'douyin-inbox 要有 reclaimStuck');
+  const ch = readFileSync(new URL('../lib/channels/douyin.js', import.meta.url), 'utf8');
+  assert.ok(
+    /this\.inbox\.reclaimStuck\?\.\(\)/.test(ch),
+    'drainInbox 每轮要调 reclaimStuck（驱动读 hang 时那两条会一直挂 processing）',
+  );
+});

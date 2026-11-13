@@ -1,5 +1,20 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.51：修 v0.15.50 引入的回归 —— 抖音私信大面积被丢 + 群聊判成单聊。
+  - **v0.15.50 犯了什么**：为了修「把自己回的话当成对方发的」，我把 `fromMe` 判定从「`!m.fromMe`」（对 `null` 为真）收紧成「只认明确 `false`」。但 `normalizeDouyinMessage` 和 `isGroupConversation` 是**纯函数**，输入可能根本没有 `fromMe` 字段（DOM 路构造的对象），`undefined !== false` ⇒ 全被拒。
+  - **实测影响**（拿发出去的 `6fa53d5` 那版跑）：
+    | 场景 | 0.15.50 | 0.15.51 |
+    |---|---|---|
+    | `fromMe: null`（拿不到 selfSecUid，真机会出现） | 丢弃 | 入库 |
+    | `fromMe` 字段缺失（DOM 路） | 丢弃 | 入库 |
+    | `fromMe: true`（自己发的） | 丢弃 | 丢弃 |
+    | 群聊判定（两人发言） | 判成单聊（走错路径） | 判成群 |
+  - 结论：那一版会让**大量抖音私信被丢**（凡拿不到 secUid 的帧），群聊还全判成单聊。所以单独发一版修掉。
+  - **改法**：收紧要收在**注入那一侧**（`readConversation` 的 `eligible` 筛选只认 `fromMe === false`），那里才是「把自己的话当对方的」真正发生的地方；纯函数保持宽容 —— `normalizeDouyinMessage` 只有明确 `fromMe === true` 才拒，`isGroupConversation` 用 `!== true`（群聊要数人数，未知按对方算）。
+  - v0.15.50 里改对的另外三处（`shapeResult` 三态、注入筛选、群成员学习）保持不变。
+  - **教训（要记）**：CI 红了之后我只看了本地结果、没读 CI 日志，而本地那两个浏览器套件（`douyin-browser` / `douyin-music`，因宿主占着 profile）也红，把真问题（`douyin-group` / `smoke`）盖住了。**以后本地全量跑完要逐个确认失败项，不能只看最后「失败：xxx」那一行。**
+  - 全量本地 109/111 绿（两个红的仍是浏览器 profile 被占的环境问题）。
+
 - v0.15.50：抖音私信「串会话」+「把自己回的话当成对方发的」。
   - **① 串会话（一条消息发给好几个人）**：`currentPeer` 的 `name` 来自 DOM（当前打开的会话），但 `convId` 来自 `latestConvIdFromCdp` —— 而它扫的是**整个 CDP 缓冲**，取「最近一条能解出 convId 的响应」。轮询同时在读多个会话时，缓冲里混着它们的响应，取到的可能是**别的会话**的 ID。于是 `cur.name` 和 `cur.convId` 不是同一个会话；`sendDM` 只校验 `cur.convId !== want`，不校验两者一致性 ⇒ 通过了，但发给了错的人。
     - 修法：`latestConvIdFromCdp` 加 `since` 窗口，只扫 `enterChat` **之后**触发的响应（那才是当前这个会话的）；`since <= 0` 时直接返回空 —— 快路径（判断「已经在目标会话里」）没有新响应，不能靠旧缓冲猜。

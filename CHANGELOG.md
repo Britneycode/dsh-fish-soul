@@ -1,5 +1,16 @@
 # dsh-fish-soul 变更记录
 
+- v0.15.54：抖音私信「永久卡 processing / 一条待核实堵死整个会话」三层根因。
+  - **真机症状**：主人（未云）发「在干嘛」能 `done`（54 秒），但陌生人（Re.）的纯表情消息 57 秒后变 `unknown`；`#292` 一条消息卡 `processing` 超过 20 分钟；一条 `unknown` 之后同会话的消息全部轮不到。
+  - **① 结算只认 `turn/end`**：`gateway.js` 的 `onSessionEvent` 开头 `if (!this.bound.has(sessionId)) return` —— 事件一丢就没人回写，消息永远 `processing`。现在加了 90 秒兜底（模型正常 54 秒），并允许迟到的成功确认把 `unknown` 拉回 `done`（慢轮次不误伤）。
+  - **② 回收排在锁后面**：`reclaimStuck` 原来挂在 `pollInner` 里，而 `pollInner` 在 `host.exclusive('读私信')` 内 —— 驱动读 hang 住时锁不放，回收一轮都跑不到。现在抽成 `sweepInbox()`，**排在拿锁之前**（锁焊死 / 浏览器停了都能自愈）。
+  - **③ 阻塞判据没有时间窗**：`next()` 原来是 `NOT EXISTS (... u.id<m.id AND u.status='unknown')`，**没有任何时间窗** ⇒ 一条待核实永久挡住同会话其后所有消息。现在改成 **30 秒冷却窗口**（锚在 `updated_at`，只挡排在它后面的）。
+    - 为什么不是「完全不挡」：面板的核实入口在 v0.15.53 已删，完全不挡等于放弃「立刻核实」的余地；30 秒足够反应，又不会永久哑掉。
+  - **诊断**：新增 4 条运行日志（`turn-end-failed` / `inbox-settle` / `session-event-drop` / `dispatch-failed`），**只在失败路径写**（`settle(true)` 正常路径不写，不刷屏）。结算落「待核实」时会带上原因（结束原因不是 completed / 这轮不是我们发的 / 回复没发出去）。
+  - 排查中排掉三个嫌疑点（实测代码确认）：`session-resume` 成功路径上 session id **不变**；`sendReply` 每条返回路径都返回布尔值；`source.kind === SOURCE_DOUYIN` 必置 `fromUs = true`。
+  - 全量 114 套件通过。红绿验证：撤掉修复 10 红 4 绿（4 条是「不回归已有行为」的守卫），恢复后 14 全绿。
+  - **未验证**：`Re.` 那两条具体是「结束原因不是 completed」还是「回复没发出去」还没定论 —— 现在收敛成三种可能，靠新日志区分。发一条私信看「系统 → 运行日志」里出现 `turn-end-failed` 还是 `inbox-settle`（带「回复没发出去」）即可定论。
+
 - v0.15.53：抖音设置页去掉两块提示噪音，信息改落到「系统 → 运行日志」。
   - **用户原话**：「直接去除这些提示吧，不需要这些提示」→ 面板上「私信可能遗漏 · douyin:xxx」和「私信待核实 · douyin:xxx」两类行（连带「另有 N 条」两行）全部移除。
   - **不能只删 UI**：`douyin_inbox` 的 `unknown` 状态会挡住同会话后面的消息（`next()` 里的 `NOT EXISTS (... status='unknown')`）。只删面板入口的话，一旦产生 unknown 就再也清不掉，那个会话永久哑掉。所以配了三道兜底：

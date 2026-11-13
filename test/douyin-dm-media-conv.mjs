@@ -176,3 +176,46 @@ test('douyin-api 里挑响应/挑结构都不再把媒体消息当空', async ()
     'countUseful 不能退回只认文本的旧判据',
   )
 })
+
+// ── ⑤ fromMe 必须是三态，不能压成布尔 ──
+//
+// `decodeMessageNode` 在拿不到 selfSecUid 时给 `fromMe: null`（算不出谁发的）。
+// `shapeResult` 以前写的是 `fromMe: m.fromMe === true` —— 把 null 和 false
+// **压成同一个值**。于是「算不出谁发的」被当成「对方发的」，她自己刚回出去的话
+// 下一轮又被当成对方的新消息注入回去（真机症状：她把刚发的表情包当成对方发的，
+// 还回一句「这不是你发的表情包吗」）。
+test('shapeResult 的 fromMe 保留三态（null 不能压成 false）', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(
+    new URL('../lib/channels/vendor/douyin-bridge/douyin-dm.mjs', import.meta.url),
+    'utf8',
+  )
+  assert.ok(
+    /fromMe: m\.fromMe === true \? true : m\.fromMe === false \? false : null/.test(src),
+    'shapeResult 的 fromMe 要保留三态（true / false / null），不能写成 === true',
+  )
+  assert.ok(
+    !/fromMe: m\.fromMe === true,\n\s+system:/.test(src),
+    '不能再退回把 null 压成 false 的旧写法',
+  )
+})
+
+test('注入筛选只认明确的 fromMe === false（未知不注入）', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../lib/channels/douyin.js', import.meta.url), 'utf8')
+  // normalizeDouyinMessage：fromMe 未知（null/undefined）也当自己的，不收
+  assert.ok(
+    /if \(!m \|\| m\.fromMe !== false \|\| m\.system \|\| m\.unsupported\) return null;/.test(src),
+    'normalizeDouyinMessage 要按 fromMe !== false 拒绝（未知当自己的）',
+  )
+  // 注入筛选
+  assert.ok(
+    /filter\(i => msgs\[i\]\.fromMe === false && !msgs\[i\]\.system/.test(src),
+    '注入筛选要只认 fromMe === false',
+  )
+  // 不能再出现 !msgs[i].fromMe 这种对 null 判真的写法
+  assert.ok(
+    !/!msgs\[i\]\.fromMe/.test(src),
+    '不能再用 !msgs[i].fromMe（对 null 是 true，会把自己的话当对方的）',
+  )
+})

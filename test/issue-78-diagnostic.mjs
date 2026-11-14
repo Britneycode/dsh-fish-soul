@@ -1,0 +1,24 @@
+// #78: 不是所有动态都有召回诊断；正常桌面聊天不能报轮次失败。
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
+import { ChatGateway } from '../lib/gateway.js';
+const source=readFileSync(new URL('../lib/client.soul.js',import.meta.url),'utf8').replace('return { InspectorPane, ActivityPane };','return { InspectorPane, ActivityPane, recallStatus };');
+let factory;vm.runInNewContext(source,{window:{__ModuleLoader__:{load:({factory:f})=>{factory=f}}}});
+const {recallStatus}=factory(()=>({}));
+assert.equal(recallStatus({kind:'reply'}),null,'入站「要回」发生在召回前，不应误报未组装');
+assert.equal(recallStatus({kind:'digest'}),null,'独立整理事件不能冒充一轮召回诊断');
+assert.equal(recallStatus({kind:'sent'}),null,'重发成功等没有诊断的事件不应猜测');
+assert.equal(recallStatus({kind:'sent',recallChecked:true}).badge,'记忆没进这轮');
+assert.equal(recallStatus({kind:'dsh',recallAt:10,memories:['一条']}).badge,'想起 1');
+assert.equal(recallStatus({kind:'sent',recallAt:10,speakerUnknown:true}).badge,'认不出是谁');
+const notes=[],entries=[];
+const gw=Object.assign(Object.create(ChatGateway.prototype),{bound:new Map([['s',{channel_id:'private:1'}]]),turns:new Map(),waiters:new Map(),interjectTurns:new Set(),douyin:null,soul:{recallInfo:()=>({at:10,memories:['一条']})},note:(...a)=>notes.push(a),diag:{add:(...a)=>entries.push(a)},log:()=>{}});
+gw.onSessionEvent({id:'s'},{type:'user/message',data:{message:{source:{kind:'user'}}}});
+gw.onSessionEvent({id:'s'},{type:'assistant/message',data:{message:{content:[{type:'text',text:'好'}]}}});
+gw.onSessionEvent({id:'s'},{type:'turn/end',data:{reason:{kind:'completed'}}});
+assert(notes.some(([k])=>k==='dsh'));assert(!entries.some(([k])=>k.startsWith('turn-end-failed')),'正常桌面聊天不该记失败');
+const noteGw=Object.assign(Object.create(ChatGateway.prototype),{decisions:[],titleOf:()=>'',getConfig:()=>({})});
+noteGw.note('reply',{text:'a'});assert.equal(noteGw.decisions[0].recallChecked,undefined);
+noteGw.note('sent',{recallAt:0});assert.equal(noteGw.decisions[0].recallChecked,true);
+console.log('✓ #78 动态召回状态与桌面轮次诊断不再误报');

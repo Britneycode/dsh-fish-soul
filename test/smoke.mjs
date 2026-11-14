@@ -486,6 +486,25 @@ async function call(method, path, body) {
 	const res = { writeHead: (s) => { status = s; }, end: (s) => { out = s; } };
 	await route.handler(req, res); return { status, json: JSON.parse(out) };
 }
+// #113：走真实插件接线，桌面输入和完成的回复都进同一个已绑定会话存档。
+{
+	const { testHooks } = await import('../lib/index.js');
+	const gw = testHooks.gateway;
+	const original = (await call('GET', '/chat-archive/state')).json;
+	await call('POST', '/chat-archive/config', { enabled: true, channels: ['private:113'], days: 30 });
+	gw.bound.set('issue113', { channel_id: 'private:113', workspace_path: '' });
+	const msg = { role: 'user', content: [{type:'text', text:'DSH 输入内容'}], source: {kind:'user'} };
+	handlers['agent/inbox/inserted']({ agent: {id:'issue113', ctx:makeAgentCtx('issue113', () => {})}, message:msg });
+	handlers['session/event']({id:'issue113'}, {type:'user/message', data:{message:msg}});
+	handlers['session/event']({id:'issue113'}, {type:'assistant/message', data:{message:{content:[{type:'text', text:'DSH 完整回复'}]}}});
+	handlers['session/event']({id:'issue113'}, {type:'turn/end', data:{reason:{kind:'completed'}}});
+	const rows = (await call('GET', '/chat-archive/list?channel=private%3A113')).json.items;
+	assert.deepEqual(rows.map(x => [x.self, x.content]), [[1, 'DSH 完整回复'], [0, 'DSH 输入内容']], '桌面输入与回复都能在真实存档接口查到');
+	await call('POST', '/chat-archive/delete', {channel:'private:113'});
+	await call('POST', '/chat-archive/config', {enabled:original.enabled, channels:original.channels, days:original.days});
+	gw.bound.delete('issue113');
+	ok('#113 桌面输入和回复通过真实插件事件接线进入聊天存档');
+}
 let p = await call('POST', '/retrieval/probe', { model: 'm2' });
 assert.equal(p.json.status, 'stale'); assert.equal(db.prepare('SELECT model_id FROM vec_meta').get().model_id, 'm1');
 ok('同维度换模型：标 stale，不污染索引');

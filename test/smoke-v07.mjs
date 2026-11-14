@@ -19,6 +19,27 @@ export async function run(t) {
 	const { segmentsToText } = await import('../lib/channels/onebot.js');
 	let p;
 
+	// #101：真正注册的工具守卫只给消息 id 对应的本轮文件授权。
+	{
+		const { testHooks } = await import('../lib/index.js');
+		const { saveVoiceFile, clearVoiceFiles } = await import('../lib/voice-files.js');
+		const gw = testHooks.gateway;
+		await call('POST', '/voice/config', { enabled: true, saveIncoming: true });
+		const oldBinding = gw.bound.get(String(sid1));
+		gw.bound.set(String(sid1), oldBinding ?? gw.chatForSession(sid1));
+		const pth = saveVoiceFile('in', MP3);
+		const msg = { id: 'voice-101-test', source: { kind: gwMod.SOURCE_QQ, channelId: 'private:20002' } };
+		gw.pendingVoicePaths.set(msg.id, { paths: [pth], sessionId: String(sid1), at: Date.now() });
+		gw.onSessionEvent({ id: sid1 }, { type: 'user/message', data: msg });
+		assert.equal(guard({ agent: { id: sid1 }, name: 'sound_read', arguments: {input: pth} }), undefined);
+		assert.match(guard({ agent: { id: sid1 }, name: 'sound_read', arguments: {input: pth, lyrics: '/etc/passwd'} }), /只能分析/);
+		gw.onSessionEvent({ id: sid1 }, { type: 'user/message', data: {id:'other', source:{kind:'user'}} });
+		assert.match(guard({ agent: { id: sid1 }, name: 'sound_read', arguments: {input: pth} }), /只能分析/);
+		gw.turns.delete(sid1); if (!oldBinding) gw.bound.delete(String(sid1)); clearVoiceFiles('in');
+		await call('POST', '/voice/config', { enabled: false, saveIncoming: false });
+		ok('#101 注册守卫：本轮路径放行，额外文件参数及 DSH 下一轮拒绝');
+	}
+
 	// 50 选模型：按功能指定 → DSH 默认 → 第一个提供方的第一个模型；用量（宿主 usage 块 / 按字数估）
 	{
 		const streams = [];

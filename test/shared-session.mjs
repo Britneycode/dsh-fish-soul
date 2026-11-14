@@ -40,10 +40,50 @@ function gateway(cfg) {
 const cfg = {
 	qq: { enabled: true }, masterQqUin: '875692618',
 	bili: { enabled: true, masterUid: '172195454', links: ['172195454=875692618', '3777=66666666'] },
-	douyin: { enabled: true, masterName: '主人', links: ['小鱼干=12345678'] }
+	douyin: { enabled: true, masterName: '主人', links: ['douyin:7702399256389125000=12345678'] }
 };
 
 const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targetId: uid, title: '某人的昵称' });
+
+{
+	// 11. 🔴 安全边界：昵称**不是**身份 —— 改个名字不能并进别人的 QQ 会话
+	//
+	//     并会话 = 同一个 session（同一份记忆 + 同一个模型上下文），
+	//     所以身份键只能是「对方改不了的东西」（数字 uid）。
+	//
+	//     这条用**真正的攻击姿势**：对应表里配的是数字 uid，
+	//     冒充者把自己的抖音昵称改成那个数字（channelId 的冒号后段就是昵称）。
+	//     旧实现把昵称也放进 keys ⇒ 冒充成立；修好后必须挡住。
+	const TARGET_UID = '7702399256389125000';
+	// 用**裸昵称**配置复现（这正是 PR96 的写法：`links: ['小鱼干=12345678']`）。
+	// 配成 `douyin:<uid>` 时旧正则会把前缀一起吃进左值，反而撞不上 —— 别用那种配置测。
+	const gw = gateway({ ...cfg, douyin: { ...cfg.douyin, links: [`小鱼干=12345678`] } });
+
+	// ① 真冒充：昵称叫「小鱼干」（对应表里的名字），但 uid 是别人
+	//
+	// ⚠️ 必须**直接断言 douyinUinOf**：`personKeyOf` 后面还有 `linkedQqOf` 兜底，
+	//    会把这里算出来的 `user:12345678` 又洗掉一部分场景 —— 只测 personKeyOf 会漏掉这个洞。
+	const fake = { channelId: 'douyin:小鱼干', chatType: 'private', targetId: '小鱼干', userId: 'uid:9999999999' };
+	assert.equal(gw.douyinUinOf(fake), '', '昵称对上但 uid 不是 → douyinUinOf 必须返回空（PR96 原版这里返回 12345678）');
+	assert.equal(gw.personKeyOf(fake), '', '昵称对上但 uid 不是 → 不能算成那个人');
+	const fakeAgent = await gw.ensureSession(fake);
+	assert.equal(gw.chatForSession(fakeAgent.id).channel_id, 'douyin:小鱼干', '冒充者必须单独开会话，不能进 private:12345678');
+
+	// ② 对照（正面）：uid 真对得上 → 并进去（说明不是「一律不并」把功能做废了）
+	const gw2 = gateway({ ...cfg, douyin: { ...cfg.douyin, links: [`${TARGET_UID}=12345678`] } });
+	const real = { channelId: 'douyin:随便什么名字', chatType: 'private', targetId: '随便什么名字', title: '', userId: `uid:${TARGET_UID}` };
+	assert.equal(gw2.personKeyOf(real), 'user:12345678', 'uid 对上就该并 —— 昵称是什么无所谓');
+	const realAgent = await gw2.ensureSession(real);
+	assert.equal(gw2.chatForSession(realAgent.id).channel_id, 'private:12345678');
+	ok('昵称冒充挡得住：昵称写成目标 uid 也并不进别人的会话');
+
+	// ② 主人身份同理：昵称叫「主人」/ 昵称写成主人 uid，但自己的 uid 不对 → 不算主人
+	const fakeMaster = { channelId: 'douyin:主人', chatType: 'private', targetId: '主人', title: '', userId: 'uid:8888888888' };
+	assert.equal(gw.personKeyOf(fakeMaster), '', '昵称叫「主人」不等于就是主人');
+	const fakeMaster2 = { channelId: 'douyin:4242', chatType: 'private', targetId: '4242', title: '', userId: 'uid:8888888888' };
+	assert.equal(gw.personKeyOf(fakeMaster2), '', '昵称写成主人 uid 也不算主人');
+	ok('昵称叫「主人」/ 写成主人 uid 都不会被认成主人');
+}
 
 {
 	// 1. B站 主人 关联了 QQ：会话开成 QQ 私聊那个，B站 自己不另开
@@ -58,11 +98,12 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 }
 
 {
-	// 2. 抖音 也是同一条规则（名字对上 QQ 号就并）
+	// 2. 抖音 配了「数字 uid = QQ 号」对应表：并进对应的那个 QQ 会话
 	const gw = gateway(cfg);
-	const agent = await gw.ensureSession({ channelId: 'douyin:小鱼干', chatType: 'private', targetId: '小鱼干', title: '' });
-	assert.equal(gw.chatForSession(agent.id).channel_id, 'douyin:小鱼干');
-	ok('未经验证的昵称不并进 QQ 会话');
+	const agent = await gw.ensureSession({ channelId: 'douyin:小鱼干', chatType: 'private', targetId: '小鱼干', title: '', userId: 'douyin:7702399256389125000' });
+	assert.equal(gw.chatForSession(agent.id).channel_id, 'private:12345678');
+	assert.equal(findChatSession(db, 'douyin', 'douyin:小鱼干'), null, '抖音 不该再单开一个会话');
+	ok('抖音 配了 uid 对应表 → 并进对应的 QQ 私聊会话');
 }
 
 {
@@ -135,28 +176,31 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 }
 
 {
-	// 9. 主人不用配对应表：B站 主人 UID / 抖音 主人名字 就是 masterQqUin 那个人
-	const gw = gateway({ qq: { enabled: true }, masterQqUin: '5550001', bili: { enabled: true, masterUid: '4242', links: [] }, douyin: { enabled: true, masterName: '主人', links: [] } });
+	// 9. 主人不用配对应表：B站 主人 UID / 抖音 主人 ID 就是 masterQqUin 那个人
+	const gw = gateway({ qq: { enabled: true }, masterQqUin: '5550001', bili: { enabled: true, masterUid: '4242', links: [] }, douyin: { enabled: true, masterName: '主人', masterUid: 'douyin:4242', links: [] } });
 	assert.equal(gw.personKeyOf(biliChat('4242')), 'user:5550001');
-	assert.equal(gw.personKeyOf({ channelId: 'douyin:主人', chatType: 'private' }), '');
+	assert.equal(gw.personKeyOf({ channelId: 'douyin:主人', chatType: 'private', userId: 'uid:4242' }), 'user:5550001');
 	assert.equal(gw.personKeyOf(biliChat('4243')), '', '不是主人、又没配对应表 → 算不出是谁');
 	const agent = await gw.ensureSession(biliChat('4242'));
 	assert.equal(gw.chatForSession(agent.id).channel_id, 'private:5550001');
-	ok('只有 B站 主人 UID 可以按已有配置并到 QQ');
+	const dw = gateway({ qq: { enabled: true }, masterQqUin: '5550001', bili: { enabled: true, masterUid: '', links: [] }, douyin: { enabled: true, masterUid: 'douyin:4242', links: [] } });
+	const da = await dw.ensureSession({ channelId: 'douyin:主人', chatType: 'private', targetId: '主人', title: '', userId: 'uid:4242' });
+	assert.equal(dw.chatForSession(da.id).channel_id, 'private:5550001', '抖音 主人 ID 对上也能并');
+	ok('B站 主人 UID / 抖音 主人 ID 都可按已有配置并到 QQ');
 }
 
 {
-	// 10. 抖音改了昵称、对应表对不上：退回「记忆里这个人挂的 QQ 号」（认人按真实 ID，改名不丢）
-	db.prepare("INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('p-renamed', '12345678', 'uid:7702399256389125000', '新昵称', 'friend', 1, ?, ?)")
+	// 10. 抖音 改了昵称、对应表对不上：**不**退回记忆里查到的关联（昵称可改、没验过，不能拿来并会话）
+	db.prepare("INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('p-renamed', '12345678', 'uid:6666666666666666', '新昵称', 'friend', 1, ?, ?)")
 		.run(Date.now(), Date.now());
 	const gw = gateway(cfg);
-	const renamed = { channelId: 'douyin:新昵称', chatType: 'private', targetId: '新昵称', title: '', userId: 'uid:7702399256389125000' };
-	assert.equal(gw.personKeyOf(renamed), '', '未经验证的 ID 不能映射到 QQ');
+	const renamed = { channelId: 'douyin:新昵称', chatType: 'private', targetId: '新昵称', title: '', userId: 'uid:6666666666666666' };
+	assert.equal(gw.personKeyOf(renamed), '', '记忆里的抖音身份不能映射到 QQ');
 	const agent = await gw.ensureSession(renamed);
-	assert.equal(gw.chatForSession(agent.id).channel_id, 'douyin:新昵称', '未经验证的 ID 不并到 QQ');
+	assert.equal(gw.chatForSession(agent.id).channel_id, 'douyin:新昵称', '没显式配置就不并到 QQ');
 	// 认不出是谁就别猜：既没配对应表、记忆里也没这个人
 	assert.equal(gw.personKeyOf({ channelId: 'douyin:查无此人', chatType: 'private', targetId: '查无此人', title: '', userId: 'uid:1' }), '');
-	ok('未经验证的抖音 ID 不并进 QQ');
+	ok('没显式配置的抖音身份不并进 QQ（记忆里的关联不作数）');
 }
 
 console.log('shared-session ok');

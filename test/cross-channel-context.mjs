@@ -26,7 +26,7 @@ function journal() {
 	put('qq:private:10001', [[now - 1 * H, '主人', 'user:master', '在吗']]);
 	put('bili:12345', [
 		[now - 30 * 60_000, '主人', 'user:master', '你看看这个视频'],
-		[now - 29 * 60_000, '鱼', null, '看了，橘猫弹钢琴那个吧', true],
+		[now - 29 * 60_000, '鱼', 'user:master', '看了，橘猫弹钢琴那个吧', true],
 	]);
 	const got = j.recentAcrossChannels('user:master', { except: 'qq:private:10001', now });
 	assert.equal(got.length, 1, '只搬另一个通道');
@@ -49,6 +49,21 @@ function journal() {
 	put('qq:private:20002', [[now - 60_000, '路人', 'user:someone', '你好']]);
 	assert.equal(j.recentAcrossChannels('user:master', { except: 'qq:private:10001', now }).length, 0);
 	ok('别人跟她的私聊不会被搬给主人');
+}
+
+{
+	// 同一日志里主人曾通过 DSH 发言，之后 B 在自己的私聊里对话：B 的回复不能跟着搬给主人。
+	const { j, put } = journal();
+	put('private:20002', [
+		[now - 4000, '主人', 'user:master', '桌面端说话'],
+		[now - 3000, 'B', 'user:b', '秘密'],
+		[now - 2000, '鱼', 'user:b', '这是给 B 的私密回复', true],
+		[now - 1000, '鱼', null, '无法确定归属的回复', true],
+	]);
+	const got = j.recentAcrossChannels('user:master', { except: 'private:10001', now });
+	assert.equal(got.length, 1);
+	assert.deepEqual(got[0].lines, ['主人：桌面端说话'], '只搬有明确归属的内容，不能带 B 的回复或未知归属回复');
+	ok('#105：混合日志不会把其他人的回复带给主人');
 }
 
 {

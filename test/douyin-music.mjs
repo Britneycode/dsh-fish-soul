@@ -50,7 +50,8 @@ async function fixture({ apply = true, attach = true, duplicate = false, removeP
 try {
   await fixture();
   const list = await driver.listRecommendedMusic();
-  assert.deepEqual(list, { ok: true, songs: ['晚风心里吹'] }, '等待面板与推荐歌曲异步加载');
+  assert.equal(list.ok, true);
+  assert.deepEqual(list.songs, ['晚风心里吹'], '等待面板与推荐歌曲异步加载');
   let result = await driver.publishNote({ music: '晚风心里吹' });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(await br.eval('window.publishCount'), 1, '确认音乐后发布');
@@ -82,7 +83,23 @@ try {
   assert.match(result.error, /同名/);
   assert.equal(await br.eval('window.publishCount'), 0, '同名歌曲不盲选');
   await driver.closeMusicPanel();
-  console.log('✓ 抖音配乐（本地 Chromium 模拟页面）：异步加载、正确选歌、未确认/无按钮/同名时不发布');
+
+  // 推荐列表里同一首歌常有剪辑版。点第一张「使用」并确认歌名，不能因此整单不发。
+  await fixture({ duplicate: true });
+  assert.equal((await driver.listRecommendedMusic()).ok, true);
+  result = await driver.publishNote({ music: '晚风心里吹', allowDuplicate: true });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(await br.eval('window.publishCount'), 1, '同名时点第一张并确认后要发布');
+  await driver.closeMusicPanel();
+
+  await fixture({ duplicate: true, attach: false });
+  assert.equal((await driver.listRecommendedMusic()).ok, true);
+  result = await driver.publishNote({ music: '晚风心里吹', allowDuplicate: true });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /未确认/);
+  assert.equal(await br.eval('window.publishCount'), 0, '同名但编辑页没确认歌名，仍然不发布');
+  await driver.closeMusicPanel();
+  console.log('✓ 抖音配乐（本地 Chromium 模拟页面）：异步加载、正确选歌、未确认/无按钮时不发布、同名点第一张');
 } finally {
   await br.quit();
 }

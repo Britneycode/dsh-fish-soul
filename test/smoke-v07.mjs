@@ -35,6 +35,17 @@ export async function run(t) {
 		assert.match(guard({ agent: { id: sid1 }, name: 'sound_read', arguments: {input: pth, lyrics: '/etc/passwd'} }), /只能分析/);
 		gw.onSessionEvent({ id: sid1 }, { type: 'user/message', data: {id:'other', source:{kind:'user'}} });
 		assert.match(guard({ agent: { id: sid1 }, name: 'sound_read', arguments: {input: pth} }), /只能分析/);
+		// 主人明确选了工具放开：新功能不能收回原有 sound_read 能力；其他受限会话仍不能越界。
+		const otherId = 'voice-101-other';
+		gw.bound.set(otherId, { channel_id: 'private:20002' });
+		await call('POST', '/models/config', { sessionAllow: 'master' });
+		assert.equal(guard({ agent: { id: sid1 }, name: 'sound_read', arguments: {input: '/other/audio.wav', lyrics: '/other/lyrics.txt'} }), undefined, '主人原有工具权限不收窄');
+		assert.match(guard({ agent: { id: otherId }, name: 'sound_read', arguments: {input: '/other/audio.wav'} }), /只能分析/, '非主人仍受本轮文件限制');
+		await call('POST', '/models/config', { sessionAllow: 'all' });
+		assert.equal(guard({ agent: { id: otherId }, name: 'sound_read', arguments: {input: '/other/audio.wav'} }), undefined, '全放开档保留原有行为');
+		await call('POST', '/models/config', { sessionAllow: 'memory' });
+		assert.match(guard({ agent: { id: sid1 }, name: 'sound_read', arguments: {input: '/other/audio.wav'} }), /只能分析/, '恢复受限后再次拒绝');
+		gw.bound.delete(otherId);
 		gw.turns.delete(sid1); if (!oldBinding) gw.bound.delete(String(sid1)); clearVoiceFiles('in');
 		await call('POST', '/voice/config', { enabled: false, saveIncoming: false });
 		ok('#101 注册守卫：本轮路径放行，额外文件参数及 DSH 下一轮拒绝');

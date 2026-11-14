@@ -164,7 +164,7 @@ const clock = { now: () => Date.now(), getRoleDateParts: () => ({ dateStr: '2030
 	const sent = [];
 	const decided = [];
 	const qq = {
-		enabled: true, allGroups: true, batchMs: 60, followUpCount: 3, followUpSeconds: 120, followUpSmart: false,
+		enabled: true, allGroups: true, allFriends: true, batchMs: 60, followUpCount: 3, followUpSeconds: 120, followUpSmart: false,
 		interject: { enabled: true, chance: 1, cooldownMinutes: 0, maxPerHour: 30 }
 	};
 	const gw = new ChatGateway({

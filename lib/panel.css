@@ -115,12 +115,14 @@ select.fs-input{appearance:none;-webkit-appearance:none;padding-right:32px;curso
 .fs-switch[aria-checked=false] .fs-switch-thumb{background:var(--fg-tertiary)}
 .fs-switch[aria-checked=true] .fs-switch-thumb{background:var(--bg-control);transform:translateX(12px)}
 
-/* 官方控件只补充插件布局与危险态，视觉主体来自宿主。 */
+/* 官方控件只补充插件布局与危险态，**视觉主体一律来自宿主**。
+   🔴 不要在这里覆盖 primary 的底色。
+   宿主原生是 `background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-inverted)`
+   （见 asar 里 dsh-client-ui-settings-account 的 AccountSection 按钮样式：深色实心 + 反色字）。
+   这里曾经硬写成 `#4663f3`，看着"更蓝更亮"，但那是**近似模拟**，跟设置页其它按钮对不上。
+   ⇒ 要么用原生，要么别显示这个按钮。 */
 .fs-native-btn{flex:none}
 .fs-native-btn.fs-native-danger{color:var(--status-error)}
-/* 白字主按钮使用稍深的蓝，确保浅色宿主中仍有足够对比度。 */
-.fs .fs-native-btn.fs-native-primary:not(:disabled){background:#4663f3;color:#fff}
-@media (hover:hover){.fs .fs-native-btn.fs-native-primary:hover:not(:disabled){background:#3b57e7}}
 
 
 /* Button（sm）：outline / primary / ghost / danger */

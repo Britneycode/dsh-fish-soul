@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 发版：打附注 tag + 推 + 建 GitHub release
+# 发版：打附注 tag + 推 + 建 GitHub release；npm 由 release workflow 发布。
 # 用法：bash scripts/release.sh <版本号> <release 正文文件>
 #   bash scripts/release.sh 0.9.0 /tmp/rel-v090.md
 #
@@ -36,6 +36,23 @@ if not os.environ.get("GITHUB_TOKEN_BRITNEYCODE"):
 if not body.strip():
     sys.exit("正文是空的")
 PY
+
+# main 已经推过时，本次 push 不会触发 workflow；也可能已有自动发版在跑。
+# 提前拒绝，避免手动 tag 抢跑或生成不会发布 npm 的孤儿 Release。
+git fetch --quiet --no-tags origin main
+REMOTE_MAIN="$(git rev-parse FETCH_HEAD)"
+LOCAL_MAIN="$(git rev-parse HEAD)"
+if [ "$REMOTE_MAIN" = "$LOCAL_MAIN" ]; then
+  echo "main 已推送：请检查自动 release workflow，不要再用手动脚本抢跑" >&2
+  exit 1
+fi
+git merge-base --is-ancestor "$REMOTE_MAIN" "$LOCAL_MAIN" || { echo "本地 main 不包含远端 main，请先同步" >&2; exit 1; }
+if git diff --quiet "$REMOTE_MAIN" "$LOCAL_MAIN" -- package.json .github/workflows/release.yml; then
+  echo "本次推送未改 package.json 或 release workflow，不能触发自动 npm 发布" >&2
+  exit 1
+fi
+REMOTE_TAG="$(git ls-remote --refs origin "refs/tags/$TAG")"
+[ -z "$REMOTE_TAG" ] || { echo "远端 $TAG 已存在，请检查已有发版" >&2; exit 1; }
 
 git tag -a "$TAG" -m "$TAG"
 git push origin "$TAG"
@@ -76,4 +93,5 @@ except urllib.error.HTTPError as e:
 
 print(f"OK {res['tag_name']} {res['html_url']}")
 print(f"  正文 {len(res['body'])} 字符 / {res['body'].count(chr(10)) + 1} 行")
+print("  npm 发布由 GitHub release workflow 完成，请到 Actions 确认；失败可重跑。")
 PY

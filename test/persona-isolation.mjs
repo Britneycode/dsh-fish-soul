@@ -81,3 +81,30 @@ const fakeCtx = () => {
 }
 
 console.log('\npersona-isolation ok');
+
+// ── 3. isOurSession 的判定依据必须是 chat_session 登记，不是工作区 / 标题 ──
+{
+	const { openDatabase, insertChatSession } = await import('../lib/db.js');
+	const { ChatGateway } = await import('../lib/gateway.js');
+	process.env.DSH_HOME = tmpHome('fish-soul-isolation-ws-');
+	const db = openDatabase();
+	const ws = 'D:/some/workspace';
+	insertChatSession(db, { channel: 'qq', channelId: 'private:10001', sessionId: 'ours-1', workspacePath: ws, title: 'QQ·某人', nowMs: Date.now() });
+
+	const gw = new ChatGateway({
+		ctx: { get: () => undefined }, db, clock: { now: () => Date.now() },
+		getConfig: () => ({ qq: {}, sessions: { workspacePath: ws } }), log: () => {},
+		channel: { connected: true, selfId: '1000', isFriend: () => true },
+		soul: { beginTurn: () => {}, nowLabel: () => '现在', resolvePerson: () => null, memorizeUnanswered: () => {}, availability: () => 'idle', personaName: () => '鱼', recallInfo: () => [] }
+	});
+
+	assert.equal(gw.isOurSession('ours-1'), true, '登记过的会话是我们的');
+	assert.equal(gw.isOurSession('not-ours'), false, '没登记的不是我们的（用户自己开的）');
+	// 🔴 关键：同一个工作区下、但不是我们建的会话，不能被认成我们的
+	//    （工作区只是个路径，谁都能在里面开会话）
+	assert.equal(gw.isOurSession('user-tech-chat'), false, '同一个工作区里用户自己的会话也不算我们的');
+	// 内存里没有但库里有 → 要认（宿主重启后别的路径恢复的情况）
+	gw.bound.delete('ours-1');
+	assert.equal(gw.isOurSession('ours-1'), true, '内存里没有但库里有登记 → 仍认得出（查库兜底）');
+	ok('isOurSession 按 chat_session 登记判定（不是工作区 / 标题），且有查库兜底');
+}

@@ -915,6 +915,33 @@ assert.deepEqual(cs.json.sessions.chats.filter((c) => c.channelId === 'private:2
 }
 ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先"看"一眼；按段发回（带签名和 csrf），表情包传图床后发图；UID=QQ 合并到同一个人');
 
+// #105：主人在 B 的桌面会话写过一句后，B 的 QQ 回复不能被搬进主人的上下文。
+{
+	const { testHooks } = await import('../lib/index.js');
+	const journal = testHooks.soul.journal;
+	handlers['agent/inbox/inserted']({
+		agent: { id: f888.id, ctx: makeAgentCtx(f888.id, () => {}) },
+		message: { role: 'user', content: [{ type: 'text', text: '桌面里的主人消息105' }], source: { kind: 'user' } }
+	});
+	const count = host.followups.length;
+	conn.push({ post_type: 'message', message_type: 'private', sub_type: 'friend', user_id: 20002, message_id: 10501,
+		sender: { nickname: '阿二' }, message: [{ type: 'text', data: { text: 'B的消息105' } }] });
+	const b = await waitFor(() => host.followups.slice(count).find((f) => f.msg.source.channelId === 'private:20002'), 9000);
+	assert.ok(b, 'B 的 QQ 消息必须到达会话');
+	const sent = ob.sends.length;
+	turn(b.id, '给B的私密回复105', b.msg);
+	await waitFor(() => ob.sends.length > sent, 6000);
+	await waitFor(() => (journal.chats.get('private:20002')?.recent ?? []).some((line) => line.text === '给B的私密回复105'), 6000);
+	const reply = journal.chats.get('private:20002').recent.find((line) => line.text === '给B的私密回复105');
+	assert.equal(reply.ownerId, `user:${p20002.canonical_id}`, '发送回复要保存本轮真实对象，而不是桌面主人');
+	inbox('10001', '检查跨号隔离105', null);
+	const ownerBlock = context.text(at('p10001'));
+	assert.match(ownerBlock, /桌面里的主人消息105/, '同一人的消息仍可跨通道注入');
+	assert.doesNotMatch(ownerBlock, /给B的私密回复105|B的消息105/, 'B 的消息和回复都不能进主人上下文');
+	ok('#105：主人桌面发言后 B 的 QQ 回复不跨账号泄露');
+}
+
+
 // #78 第 3 步：共享会话里回复发到哪。默认「哪边问的就回哪边」；设成「一律回 QQ」后，
 // B站 进来的话回复落到 QQ，提示词里的回复规则也要跟着换成 QQ 的（B站 的小表情码发到 QQ 是一串方括号）
 {

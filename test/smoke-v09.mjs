@@ -13,6 +13,7 @@ export async function run(t) {
 		assert.deepEqual([c.moodAffects, c.outFilter.enabled, c.forward.enabled, c.heat.enabled, c.interactions.pokeBack, c.interactions.react, c.turnMood.enabled, c.diary.enabled, c.diary.qzone],
 			[true, true, true, true, true, false, false, true, false], '默认：每轮判断心情 / 表情回应 / QQ 空间关，其余开');
 		assert.equal(bh.behaviorConfig({ outFilter: { maxChars: 5 }, diary: { hour: 3 } }).outFilter.maxChars, 60, '夹到下限');
+		assert.equal(c.outFilter.completeQq, false, '老配置默认保留截短');
 		assert.equal(bh.behaviorConfig({ diary: { hour: 3 } }).diary.hour, 18);
 		const angry = bh.moodProfile({ tone: '慵懒', mood: { label: '生气', level: 2 } });
 		assert.ok(angry.delay > 2 && angry.interject < 0.3 && angry.sticker < 0.3, '懒 + 生气：回得慢、不想插话、不发表情包');
@@ -209,6 +210,28 @@ export async function run(t) {
 		sent.length = 0;
 		await gw.sendReply(sid3, { text: '今天去公园了。人好多啊！', images: [] });
 		assert.equal(sent.length, 1, '关掉拆条就不拆');
+		// 超长回复：兼容旧的总字数限制，打开选项后 QQ 的后续段落不能丢。
+		const longReply = ['甲第一问' + '天'.repeat(96), '乙第二问' + '地'.repeat(96), '丙第三问' + '海'.repeat(96)].join('\n\n');
+		const textSent = () => sent.map(([, segs]) => segs.filter((s) => s.type === 'text').map((s) => s.data.text).join(''));
+		cfg.behavior.outFilter = { enabled: true, maxChars: 220, split: false };
+		sent.length = 0;
+		await gw.sendReply(sid3, { text: longReply, images: [] });
+		assert.deepEqual(textSent(), longReply.split('\n\n').slice(0, 2), '旧配置仍截短');
+		cfg.behavior.outFilter.completeQq = true;
+		gw.recentSent.clear(); sent.length = 0;
+		await gw.sendReply(sid3, { text: longReply, images: [] });
+		assert.deepEqual(textSent(), longReply.split('\n\n'), 'QQ 群聊完整发送三段');
+		gw.recentSent.clear(); sent.length = 0;
+		await gw.sendReply(sid3, { text: longReply, images: [], channelId: 'private:23456' });
+		assert.deepEqual(textSent(), longReply.split('\n\n'), 'QQ 私聊也完整发送');
+		// 超过五段 / 2000 字时也要保留内容，最后几段按现有规则合并到第五条。
+		const manyParas = ['山', '水', '云', '风', '月', '花', '海'].map((c, i) => `第${i + 1}段` + c.repeat(350));
+		gw.recentSent.clear(); sent.length = 0;
+		await gw.sendReply(sid3, { text: manyParas.join('\n\n'), images: [] });
+		assert.deepEqual(textSent(), [...manyParas.slice(0, 4), manyParas.slice(4).join('\n\n')], '超过五段不丢尾段');
+		assert.equal(gw.cleanOut('作为一个AI，我明白了', { channel_id: 'group:9903', title: '群' }), '我明白了', '完整回复仍去 AI 味');
+		assert.ok(!gw.cleanOut(longReply, { channel_id: 'bili:123', title: 'B站' }).includes('丙第三问'), '选项不改变 B站限制');
+		assert.ok(!gw.cleanOut(longReply, { channel_id: 'douyin:123', title: '抖音' }).includes('丙第三问'), '选项不改变抖音限制');
 		cfg.behavior.outFilter = { enabled: true };
 		mood = bh.NEUTRAL_MOOD; gw.random = () => 0.5;
 
@@ -268,9 +291,12 @@ export async function run(t) {
 		assert.ok(p.json.groups.some((x) => x.groupId === '9901' && x.heat?.state), '有会话的群都列出来（带冷热）');
 		p = await call('POST', '/behavior/config', { outFilter: { maxChars: 99999 }, turnMood: { enabled: true }, bogus: 1 });
 		assert.deepEqual([p.json.config.outFilter.maxChars, p.json.config.outFilter.enabled, p.json.config.turnMood.enabled, p.json.config.bogus], [2000, true, true, undefined]);
+		p = await call('POST', '/behavior/config', { outFilter: { completeQq: true } });
+		assert.equal(p.json.config.outFilter.completeQq, true, 'QQ 完整回复选项保存');
 		p = await call('POST', '/behavior/config', { turnMood: { enabled: false } });
 		assert.equal(p.json.config.outFilter.maxChars, 2000, '只改传了的');
-		await call('POST', '/behavior/config', { outFilter: { maxChars: 300 } });
+		assert.equal(p.json.config.outFilter.completeQq, true, '更新其他设置不丢选项');
+		await call('POST', '/behavior/config', { outFilter: { maxChars: 300, completeQq: false } });
 
 		// 群设定：只进那个群的上下文
 		assert.equal((await call('POST', '/groups/note', { groupId: 'abc', note: 'x' })).json.ok, false);

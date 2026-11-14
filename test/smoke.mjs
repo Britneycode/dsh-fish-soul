@@ -968,6 +968,7 @@ ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先
 	assert.equal(rr.watched.length, 0);
 	bm.rcmdFail = false;
 	assert.match(context.text(at(sid1)), /你最近在 B站刷到的[^\n]*\n- 《年度鬼畜》（鬼畜UP）：看饿了，想吃夜宵（链接 https:\/\/www\.bilibili\.com\/video\/BV1Gh411c7Ww）\n- 《猫咪打架实录》/);
+	assert.match(context.text(at(sid1)), /你最近在 B站刷到的[^\n]*\n- 《年度鬼畜》[^\n]*\n- 《猫咪打架实录》[^\n]*\n- 《深夜做饭》/, '#78：实际 QQ 会话上下文应包含最近三条有感受的视频');
 }
 // 设置页"现在刷一下"走同一套（宿主没模型时只记标题）
 bm.extra = true;

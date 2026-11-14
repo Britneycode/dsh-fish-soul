@@ -56,7 +56,7 @@ const fake = Object.assign(Object.create(ChatGateway.prototype), {
  soul:{memorizeUnanswered(){}}, note(){}, reactTo:async()=>{}, enqueue(){},
  hearVoice:async(_m, opt)=>results.push(opt.saveAllowed),
 });
-const qcfg={replyWindowMinutes:10,followUpCount:0,followUpSeconds:0,mentionOnly:true,groupAllowList:['55']};
+const qcfg={replyWindowMinutes:10,followUpCount:0,followUpSeconds:0,mentionOnly:true,groupAllowList:['55'],allFriends:true};
 const msg=(patch)=>({timeMs:Date.now(),channelId:'private:1',chatType:'private',userId:'1',subType:'friend',text:'hi',records:[{}],files:[],forwards:[],...patch});
 await fake.decide(msg({}),{canonical_id:'person1'},qcfg);
 await fake.decide(msg({}),null,qcfg);

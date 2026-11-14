@@ -1,7 +1,5 @@
-# 发版：main 上 package.json 的版本还没有对应的 tag 时，打 v<版本> 并建 GitHub Release。
-# 正文取 CHANGELOG.md 里「- v<版本>」那一段（到下一个顶格「- 」为止）。本机的 scripts/release.sh 仍然能用，二选一。
-# npm publish 也在这里做：tag 没建过（= 这次是真发版）才发，registry 已有版本时跳过——
-# 0.11.3 那次只建了 Release 没发 npm，latest 落后两版，就是漏在这一步。
+# 发版：新版本自动建 tag / Release 并发布 npm；手动脚本先建 tag 时也由这里补发 npm。
+# 自动 Release 的正文取 CHANGELOG.md；手动脚本创建的 Release 保留其自定义正文。
 name: release
 on:
   push:
@@ -26,16 +24,33 @@ jobs:
         run: |
           VER=$(node -p "require('./package.json').version")
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          # 用不同查询参数避开 registry 对旧 404 的缓存；非 404 错误不能当作未发布。
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://registry.npmjs.org/dsh-fish-soul/$VER?check=${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-version")
+          case "$CODE" in 200|404) ;; *) echo "::error::查询 npm 版本失败（HTTP $CODE）"; exit 1 ;; esac
           if git rev-parse -q --verify "refs/tags/v$VER" >/dev/null; then
-            echo "skip=1" >> "$GITHUB_OUTPUT"
-            echo "tag v$VER 已存在，整个发版流程跳过"
+            if [ "$CODE" = 200 ]; then
+              echo "skip=1" >> "$GITHUB_OUTPUT"
+              echo "tag v$VER 和 npm 版本均已存在，跳过"
+              exit 0
+            fi
+            # 本机脚本先推 tag 再推 main；只允许从该 tag 的精确提交补发。
+            TAG_SHA=$(git rev-parse "refs/tags/v$VER^{commit}")
+            if [ "$TAG_SHA" != "$GITHUB_SHA" ]; then
+              echo "::error::tag v$VER 指向 $TAG_SHA，与当前提交不同；不能用当前代码补发 npm"
+              exit 1
+            fi
+            echo "existing_tag=1" >> "$GITHUB_OUTPUT"
+            echo "tag 已存在但 npm 缺失，等待手动 Release 后补发"
             exit 0
           fi
-          # 只在真发版时校验 README；tag 已存在（发版已完成）时跳过，
-          # 避免 README 后续改动把已完成的 workflow 标红
+          if [ "$CODE" = 200 ]; then
+            echo "::error::npm 已有 $VER，但 tag 不存在；请人工核对，不能重新创建 tag"
+            exit 1
+          fi
+          # 已发过的版本跳过 README 校验，避免后续文档变更让 workflow 标红。
           grep -q "版本 \*\*$VER\*\*" README.md || { echo "README 里的版本不是 $VER"; exit 1; }
       - name: 正文
-        if: steps.v.outputs.skip != '1'
+        if: steps.v.outputs.skip != '1' && steps.v.outputs.existing_tag != '1'
         run: |
           VER='${{ steps.v.outputs.ver }}'
           awk -v head="- v$VER" '
@@ -46,24 +61,42 @@ jobs:
           test -s /tmp/notes.md || { echo "CHANGELOG 里没找到 - v$VER"; exit 1; }
           cat /tmp/notes.md
       - name: 打 tag + 建 Release
-        if: steps.v.outputs.skip != '1'
+        if: steps.v.outputs.skip != '1' && steps.v.outputs.existing_tag != '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER='${{ steps.v.outputs.ver }}'
           TITLE="v$VER"
           gh release create "v$VER" --target "$GITHUB_SHA" --title "$TITLE" --notes-file /tmp/notes.md
+      - name: 等待已有标签的 Release
+        if: steps.v.outputs.skip != '1' && steps.v.outputs.existing_tag == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER='${{ steps.v.outputs.ver }}'
+          # release.sh 推 main 后才创建 Release，runner 可能先启动，等待其完成。
+          for attempt in $(seq 1 24); do
+            DRAFT=$(gh release view "v$VER" --json isDraft --jq '.isDraft' 2>/dev/null || true)
+            if [ "$DRAFT" = false ]; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::未等到已发布的 GitHub Release v$VER；完成 Release 后重跑此 workflow"
+          exit 1
       - name: npm publish
-        # tag 刚建过（这次运行是真的在发版）才发 npm；registry 已有这个版本就跳过（幂等，重跑 workflow 不会重复发）
+        # 两条入口共用；重跑时已有 npm 版本则跳过。
         if: steps.v.outputs.skip != '1'
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           VER='${{ steps.v.outputs.ver }}'
-          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://registry.npmjs.org/dsh-fish-soul/$VER")
+          CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://registry.npmjs.org/dsh-fish-soul/$VER?check=${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-publish")
           if [ "$CODE" = "200" ]; then
             echo "registry 里已有 $VER，跳过 publish"
             exit 0
+          fi
+          if [ "$CODE" != "404" ]; then
+            echo "::error::查询 npm 版本失败（HTTP $CODE），不发布"
+            exit 1
           fi
           if [ -z "$NPM_TOKEN" ]; then
             echo "::error::缺 NPM_TOKEN secret，npm 没发出去（Git 侧已完成，记得手动补 publish）"

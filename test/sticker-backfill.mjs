@@ -145,3 +145,26 @@ const box = new StickerBox({ db, getConfig: () => ({ collect: true, perDay: 10 }
 }
 
 console.log('\nsticker-backfill ok');
+
+// ── 8. 三种失败必须分得开（否则「有些表情没标签」只能靠猜）──
+//   ① 回了 null      → 图没送进模型（llm.js 那边另有 warn）
+//   ② 回了「看不清」 → 图进去了，模型没认出来
+//   ③ 回了一段话但不像标签 → 提示词 / 模型理解问题
+{
+	const logs = [];
+	const box2 = new StickerBox({ db, getConfig: () => ({ collect: true, perDay: 10 }), log: (lvl, msg) => logs.push(`${lvl}:${msg}`) });
+	seed([{ file: '没标签A.gif', hash: 'h2', workspacePath: ws, tags: [], tagsBy: '', at: 1 }]);
+
+	await box2.backfillTags({ workspacePath: ws, vision: async () => null, embedder: null });
+	assert.ok(logs.some((l) => l.includes('没拿到回复')), '① 回 null 要留痕');
+
+	logs.length = 0;
+	await box2.backfillTags({ workspacePath: ws, vision: async () => '看不清', embedder: null });
+	assert.ok(logs.some((l) => l.includes('回的不像标签') && l.includes('看不清')), '② 「看不清」要留痕并带上原文');
+
+	logs.length = 0;
+	await box2.backfillTags({ workspacePath: ws, vision: async () => { throw new Error('通道 500'); }, embedder: null });
+	assert.ok(logs.some((l) => l.includes('抛错') && l.includes('通道 500')), '③ 抛错要留痕并带上原因');
+
+	ok('三种失败各留一行（图没进去 / 看不清 / 回的格式不对，日志里分得开）');
+}

@@ -42,6 +42,23 @@ const ok = (n) => console.log('✓', n);
 }
 
 {
+	// 两个 key 交替出现时，各自仍按窗口合并。只看队尾会拆成 4 条。
+	let now = 2_500_000;
+	const d = new DiagLog({ db, now: () => now });
+	d.add('douyin-inbox-gap:douyin:未云', { channelId: 'douyin:未云' }, 'warn');
+	now += 1000;
+	d.add('douyin-inbox-gap:douyin:Re.', { channelId: 'douyin:Re.' }, 'warn');
+	now += 1000;
+	d.add('douyin-inbox-gap:douyin:未云', { channelId: 'douyin:未云' }, 'warn');
+	now += 1000;
+	d.add('douyin-inbox-gap:douyin:Re.', { channelId: 'douyin:Re.' }, 'warn');
+	const list = d.list();
+	assert.equal(list.length, 2, `交替出现仍应各留一条，实际 ${list.length}`);
+	assert.deepEqual(list.map((e) => e.count).sort(), [2, 2]);
+	ok('两个 key 交替出现：各自合并，不被队尾拆开');
+}
+
+{
 	// ② 上限：塞 250 条，只留 200
 	let now = 3_000_000;
 	const d = new DiagLog({ db, now: () => now });

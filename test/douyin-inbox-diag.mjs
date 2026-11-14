@@ -68,6 +68,18 @@ test('同一个会话反复缺口合并计数（别刷屏）', () => {
   assert.equal(list[0].count, 2);
 });
 
+test('两个会话交替出现时，同一会话仍合并（别被队尾换 key 拆开）', () => {
+  const diag = new DiagLog({ db, now: () => Date.now() });
+  const box = new DouyinInbox(db, diag);
+  box.record('gap-alt-1', {}, [], { channelId: 'douyin:未云', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
+  box.record('gap-alt-2', {}, [], { channelId: 'douyin:Re.', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
+  box.record('gap-alt-3', {}, [], { channelId: 'douyin:未云', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
+  box.record('gap-alt-4', {}, [], { channelId: 'douyin:Re.', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
+  const list = gaps(diag);
+  assert.equal(list.length, 2, `交替出现仍应各留一条：${JSON.stringify(list.map((e) => [e.detail.channelId, e.count]))}`);
+  assert.deepEqual(list.map((e) => e.count).sort(), [2, 2]);
+});
+
 test('窗口对不齐产生的缺口会记进运行日志', () => {
   const diag = new DiagLog({ db, now: () => Date.now() });
   const box = new DouyinInbox(db, diag);

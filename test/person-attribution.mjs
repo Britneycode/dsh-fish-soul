@@ -298,3 +298,75 @@ const makePartner = (db, name = '聊天对象') => {
 }
 
 console.log('\nperson-attribution ok');
+
+// ───────────────────────── ④ 署名归属不认裸昵称（昵称冒充） ─────────────────────────
+
+// 反馈：别人把昵称改成主人的，聊天里提到主人的署名记忆就落到主人 person 行上。
+// `ownerByName`（lib/index.js）按 display_name 查人 ⇒ 昵称不是身份，谁都能改。
+// 修法：ChatDigester 只认「这一轮真的在场说话的人」——
+//   inTurn（本轮 speakers 的 ownerId 集合）之外的署名一律当第三者（不记），
+//   完全不再问 findOwnerByName（跨行查名）。
+{
+	tmpHome('D-impersonate');
+	const db = openDatabase();
+	// 聊天对象（冒充者）自己的行：昵称故意与主人同名
+	db.prepare(`
+		INSERT INTO person (canonical_id, qq_uin, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at)
+		VALUES ('p_imp', '51000001', '主人', 'stranger', 5, ?, ?)
+	`).run(now, now);
+	// 真主人的行
+	db.prepare(`
+		INSERT INTO person (canonical_id, qq_uin, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at)
+		VALUES ('master', '51000002', '主人', 'close', 9, ?, ?)
+	`).run(now, now);
+	// 主人某次真在场说过话（ownerId 挂在 journal 行上）
+	const journal = new ChatJournal({ keepRecent: 50 });
+	journal.add('private:51000002', { who: '主人', ownerId: 'user:master', text: '下周我生日' });
+	// 好感归因用的 findOwnerByName 也要给（生产里指向 ownerByName）
+	const digester = digesterFor(db, journal, JSON.stringify({
+		memories: [
+			{ who: '主人', content: '主人下周生日', kind: 'event', importance: 3 }
+		],
+		self: [], summary: '聊天对象聊到主人', people: []
+	}), { findOwnerByName: (n) => (n === '主人' ? 'user:master' : null) });
+	const r = await digester.digest('private:51000002');
+
+	// 主人这轮真的在场 → 他的事照记在他名下（不能一刀切丢掉在场者的记忆）
+	const own = db.prepare("SELECT owner_id FROM memory WHERE content = '主人下周生日'").get();
+	assert.equal(own?.owner_id, 'user:master', '在场说话的人，他的事照记在他名下');
+
+	// 关键红绿：冒充者（不在场）那一轮里模型提到「主人」→ 不能落主人行。
+	const j2 = new ChatJournal({ keepRecent: 50 });
+	j2.add('private:51000001', { who: '主人', ownerId: 'user:p_imp', text: '我生日在八月' });
+	const digester2 = digesterFor(db, j2, JSON.stringify({
+		memories: [
+			{ who: '主人', content: '主人八月生日', kind: 'event', importance: 3 }
+		],
+		self: [], summary: '', people: []
+	}), { findOwnerByName: (n) => (n === '主人' ? 'user:master' : null) });
+	await digester2.digest('private:51000001');
+	// 冒充者那轮模型把他自己的事写进 memories：署名「主人」通过 journal 绑定（uid 来的）
+	// 落到**他自己**的行上 —— 不是主人行。跨行查名被在场校验挡住。
+	const planted = db.prepare("SELECT owner_id FROM memory WHERE content = '主人八月生日'").get();
+	assert.equal(planted?.owner_id, 'user:p_imp', '同名的冒充者说起自己的事，落在他自己（uid 来的）行上，不落主人行');
+	// 在场那轮正当事照记
+	const own2 = db.prepare("SELECT owner_id FROM memory WHERE content = '主人下周生日'").get();
+	assert.equal(own2?.owner_id, 'user:master', '在场那轮说的事照记在他名下（不记过头）');
+	// 更毒的场景：冒充者这轮署名是自己的名字，模型却写了一条 about/who 是「主人」的记忆
+	// （主人这轮根本不在场）→ findOwnerByName 查到主人行，但在场校验必须挡住，不能记。
+	const j3 = new ChatJournal({ keepRecent: 50 });
+	j3.add('private:51000001', { who: '冒充者', ownerId: 'user:p_imp', text: '主人说好明天给我带饭' });
+	const digester3 = digesterFor(db, j3, JSON.stringify({
+		memories: [
+			{ who: '主人', content: '主人答应明天给冒充者带饭', kind: 'promise', importance: 3 }
+		],
+		self: [], summary: '', people: []
+	}), { findOwnerByName: (n) => (n === '主人' ? 'user:master' : null) });
+	await digester3.digest('private:51000001');
+	const planted2 = db.prepare("SELECT owner_id FROM memory WHERE content = '主人答应明天给冒充者带饭'").get();
+	assert.equal(planted2?.owner_id, undefined, '主人不在场时，提到「主人」的记忆不能落到主人行（跨行查名被在场校验挡住）');
+
+	ok('④ 署名只认本轮在场的人：冒充者改昵称骗不到记忆归属');
+}
+
+console.log('\nperson-attribution ok');

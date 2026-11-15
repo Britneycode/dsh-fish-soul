@@ -80,6 +80,30 @@ const pick = async (rel) => await social.replyImages(`看 ![x](${rel})`);
 	}
 }
 
+// ── 根目录本身是 junction（_stickers 整个指到工作区外）：根不可信，整根拒 ──
+{
+	const ws2 = join(home, 'ws2'); // 第二个工作区：_stickers 根是 junction
+	mkdirSync(ws2, { recursive: true });
+	const rootOutside = join(home, 'root-outside');
+	mkdirSync(rootOutside, { recursive: true });
+	writeFileSync(join(rootOutside, 'secret.png'), Buffer.from('SECRET-VIA-ROOT-JUNCTION'));
+	symlinkSync(rootOutside, join(ws2, '_stickers'), 'junction'); // 根 = junction（Windows 建 junction 不需要特权）
+
+	const logs2 = [];
+	const social2 = new DouyinSocial({
+		host: { running: false, exclusive: async (n, fn) => fn() },
+		getConfig: () => ({}),
+		log: (...a) => { logs2.push(a.map(String).join(' ')); },
+		callLlm: async () => '',
+		stickers: { list: () => [], resolveFeelRefs: async (t) => ({ text: t, resolved: [] }) },
+		workspacePath: () => ws2,
+	});
+	const r = await social2.replyImages('看 ![x](_stickers/secret.png)');
+	assert.equal(r.images.length, 0, '_stickers 根是 junction → 不能读到工作区外的图');
+	assert.ok(logs2.some((l) => l.includes('越界') || l.includes('拒绝')), '根不可信要留一条日志（别悄悄吞）');
+	ok('评论图片：_stickers 根是 junction 时整根拒绝');
+}
+
 // ── 目录 / 格式 / 大小 ──
 {
 	assert.equal((await pick('_stickers/dir.png')).images.length, 0, '目录不能当图发');

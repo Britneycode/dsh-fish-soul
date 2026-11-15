@@ -124,3 +124,40 @@ console.log('  ✓ 开始入口：可隐藏、持久化并在界面设置中恢�
 		`这些 form 键读了但初始化块里没有（会显示空白 / 存不进去）：${missing.join(', ')}`);
 	console.log(`  ✓ 表单键对得上：${blocks.length} 套表单、${used.length} 个 form 键全有初始化`);
 }
+
+// 通用控件重置必须是「零特异性」，否则它会盖掉宿主原子控件的组件样式。
+// 真机症状：更新页「更新到 vX」渲染成黑底黑字（宿主 primary 是深色实心 + 反色字）。
+// 根因：写成 `.fs :where(button,…)` ⇒ 特异性 (0,1,0)，跟宿主 `._button_xxx{color}` 打平，
+// 而插件样式注入在宿主之后 ⇒ 平局时后者胜 ⇒ 反色字被改回继承色。
+// 这里直接算特异性，不依赖具体写法（包 :where() 或去掉 .fs 前缀都算过）。
+{
+	const selectorOfReset = (raw) => {
+		// 先去掉注释：注释里写了 `._button_xxx{color}` 这种例子，括号会带偏配对
+		const cssNoComments = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+		for (const m of cssNoComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+			const [, sel, body] = m;
+			if (!/color\s*:\s*inherit/.test(body)) continue;
+			// 目标规则同时点名 button / input / textarea（不管有没有被 :where( 包着）
+			if (/\bbutton\b/.test(sel) && /\binput\b/.test(sel) && /\btextarea\b/.test(sel)) return sel.trim();
+		}
+		return null;
+	};
+	// 特异性：(id, class/attr/pseudo-class, type/pseudo-element)。:where() 内部一律计 0。
+	const specificity = (sel) => {
+		let s = sel.replace(/:where\([^)]*\)/g, '*');   // :where() 不参与特异性
+		s = s.replace(/::[\w-]+/g, ' ');                 // 伪元素
+		const ids = (s.match(/#[\w-]+/g) || []).length;
+		const classes = (s.match(/\.[\w-]+/g) || []).length + (s.match(/\[[^\]]+\]/g) || []).length
+			+ (s.match(/:(?!:)[\w-]+(\([^)]*\))?/g) || []).length;
+		const types = (s.match(/(^|[\s>+~,])[a-zA-Z][\w-]*/g) || []).length;
+		return ids * 100 + classes * 10 + types;
+	};
+	const sel = selectorOfReset(css);
+	assert.ok(sel, 'panel.css 里应该能找到通用控件重置规则（button/input/textarea 的 color:inherit）');
+	assert.equal(specificity(sel), 0,
+		`通用控件重置的选择器「${sel}」特异性是 ${specificity(sel)}，必须为 0 —— `
+		+ '否则会盖掉宿主原子控件（Button/Pill/Input…）自己的组件类样式，'
+		+ '宿主 primary 按钮会变成黑底黑字。包一层 :where() 即可。');
+	assert.ok(!/^\.fs\s/.test(sel), `重置不要以 .fs 开头（特异性不为 0）：${sel}`);
+	console.log(`  ✓ 控件重置零特异性：${sel}`);
+}

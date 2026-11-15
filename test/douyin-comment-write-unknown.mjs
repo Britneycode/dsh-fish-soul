@@ -8,10 +8,16 @@
 // 取不到上传授权 / 图片传不上去）—— 这些**根本没发出去**，不能跟「结果不明」
 // 混为一谈：混了就白白丢掉 DOM 回退（评论再也回不了）。
 //
+// DOM 写路径不一样：它有好几步（点「回复」→ 找输入框 → 聚焦 → 插字 → 点「发送」），
+// 卡在前几步时 exclusive 超时只把错误交给调用方，回调**还在锁里接着跑** ——
+// 它可能随后自己点下「发送」。所以 DOM 路径**进写路径就标记**「可能发出去了」
+// （宁可少回一条，也不能把同一条评论发两遍）。
+//
 // 这里用真对象复现：真 DouyinSocial + 真 driver + 真 callBridge +
 // 真页面桥源码（node:vm 里跑）+ 真 db + 真 host.exclusive（只把超时缩短）。
 // 只在最底下假掉两样：CDP（浏览器）和页面 fetch。
-// DOM 写路径只做「有没有被调用」的观测（它不是这次要改的东西）。
+// DOM 写路径这次是真走（假 CDP 照剧本回话）：它卡住后自己把评论发出去的那一下，
+// 就是重复公开评论的根源。
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { tmpHome } from './_tmp.mjs';
@@ -93,6 +99,50 @@ function makeBrowser(page, { dropAfterCall = false, installWorks = true, hang = 
 	};
 }
 
+/**
+ * 真 DOM 写路径的假 CDP：真 driver.reply 会照剧本一步步走
+ * （点「回复」→ 找输入框 → 聚焦 → 插字 → 点「发送」）。
+ * 点「回复」那一步第一次调用时挂住（模拟页面卡在点回复 / 输入阶段）；
+ * 放行后照常返回值 —— 回调会继续往下走，最后真的点下「发送」。
+ */
+function makeDomBrowser() {
+	let release = null;
+	const gate = new Promise((resolve) => { release = resolve; });
+	let hung = false;
+	let replyCalls = 0; // 进了几次 DOM 写路径（点「回复」）
+	let sent = 0;       // 真点下「发送」的次数 = 评论发出去了几次
+	return {
+		sessionId: 'S1',
+		preloadScripts: [],
+		addPreloadScript(s) { this.preloadScripts.push(s); },
+		async send() { return {}; },
+		async eval(expr) {
+			const s = String(expr);
+			if (/leaf\.click\(\)/.test(s)) {
+				replyCalls++;
+				if (!hung) { hung = true; await gate; } // 第一次：卡住（页面不响应）
+				return true;                             // 放行后照常：点着「回复」了
+			}
+			if (/ed\.focus\(\)/.test(s)) return true;                    // 回复框聚焦上了
+			if (/byText/.test(s)) { sent++; return true; }              // 点「发送」→ 评论发出去了
+			if (/rc-verifycenter/.test(s)) return '';                    // 没有验证码
+			if (/getBoundingClientRect/.test(s)) return { x: 20, y: 30 };// 输入框位置
+			if (/ed\.innerText/.test(s)) return '';                      // 框里没字了 = 发出去了
+			if (/removeAttribute/.test(s)) return true;                  // 清理标记
+			if (/comment-input-inner-container/.test(s)) return 0;       // 页面上已有的输入框数
+			return null;
+		},
+		releaseHang: () => release(),
+		replyCalls: () => replyCalls,
+		sentCount: () => sent,
+		async waitSent(ms = 10_000) {
+			const deadline = Date.now() + ms;
+			while (sent === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+			return sent;
+		},
+	};
+}
+
 /** 假抖音接口：记下每次请求，publish 的返回由场景定。 */
 function makeFetch({ publish, auth }) {
 	const calls = [];
@@ -107,8 +157,9 @@ function makeFetch({ publish, auth }) {
 	return { fetchImpl, calls };
 }
 
-/** 真 DouyinSocial + 真 driver；读路径（作品列表/评论列表/打开作品）和 DOM 写路径换成假的。 */
-function makeSocial({ browser, domWrites, comments = [COMMENT], works = [WORK], host, domReply }) {
+/** 真 DouyinSocial + 真 driver；读路径（作品列表/评论列表/打开作品）和 DOM 写路径换成假的。
+ *  realReply：DOM 写路径也用真 driver.reply（只有它自己知道「点回复 / 点发送」这些步骤）。 */
+function makeSocial({ browser, domWrites, comments = [COMMENT], works = [WORK], host, domReply, realReply = false }) {
 	const h = host ?? { running: true, loggedIn: true, browser, exclusive: async (_name, fn) => fn() };
 	const social = new DouyinSocial({
 		host: h, db,
@@ -122,7 +173,7 @@ function makeSocial({ browser, domWrites, comments = [COMMENT], works = [WORK], 
 		listWorks: async () => works,
 		openWork: async () => ({ ok: true }),
 		listComments: async () => comments,
-		reply: domReply ?? (async (cm, text) => { domWrites.push({ cid: cm?.cid ?? '', text }); return { ok: true }; }),
+		reply: realReply ? real.reply : (domReply ?? (async (cm, text) => { domWrites.push({ cid: cm?.cid ?? '', text }); return { ok: true }; })),
 	};
 	return social;
 }
@@ -342,10 +393,12 @@ function makeRealHost(browser, maxMs = 2000) {
 	}
 }
 
-// ── ⑫ 本地校验没过 + 独占锁超时：压根没发出去，不该记 failed ──────────────────
+// ── ⑫ 本地校验没过 → 退回 DOM；DOM 挂住 + 独占锁超时 → 记 failed ────────────────
 //  缺作品 id → 接口路径的本地校验就拒了（publish 一次都没调）→ 退回 DOM；
-//  DOM 这边页面卡住挂住 → 独占锁超时。这条评论压根没发出去 —— 记成 failed
-//  就等于永久丢掉它（下一轮不再回，主人那边永远等不到这条回复）。
+//  DOM 这边页面卡住挂住 → 独占锁超时。
+//  ⚠️ DOM 路径是**保守标记**：进了写路径就算「可能发出去了」（回调卡住时它还在锁里
+//  接着跑，可能随后自己点下「发送」）→ 记 failed，下一轮不再进 DOM 回退。
+//  宁可少回一条，也不能把同一条评论在真实账号上发两遍。
 {
 	const keepAlive = setInterval(() => {}, 1000); // 钉住事件循环（挂住的 promise 不算活）
 	let releaseDom;
@@ -367,12 +420,12 @@ function makeRealHost(browser, maxMs = 2000) {
 		assert.equal(r.ok, false, '独占锁超时 → 这一轮没发成');
 		assert.equal(publishCalls(calls), 0, '本地校验没过 = publish 一次都不能调');
 		assert.equal(domWrites.length, 1, '没发出去 → 仍要退回 DOM 点击（老路别丢）');
-		assert.deepEqual(recorded(), [], '压根没发出去 → 不该记 failed（下一轮还能回）');
+		assert.deepEqual(recorded(), ['failed'], 'DOM 回退进去了 = 可能已经发出去了 → 记 failed（下一轮不再进 DOM 回退）');
 	} finally {
 		releaseDom();
 		clearInterval(keepAlive);
 	}
-	ok('⑫ 本地校验失败 + 超时：不记 failed，可回退');
+	ok('⑫ 本地校验失败 → 退回 DOM；DOM 挂住超时：记 failed');
 }
 
 // ── ⑬ 前置阶段挂住（取上传授权不返回）+ 独占锁超时 → 同样不该记 failed ────────
@@ -426,6 +479,47 @@ function makeRealHost(browser, maxMs = 2000) {
 	assert.deepEqual(domWrites, [], '回调没跑 = DOM 也没点');
 	assert.deepEqual(recorded(), [], '压根没跑 → 不该记 failed');
 	ok('⑭ 排队超时（回调没跑）：不记 failed');
+}
+
+// ── ⑮ DOM 写路径卡在「点回复」阶段 + 独占锁超时 → 下一轮不许再走 DOM 写路径 ──────
+//  DOM 写路径有好几步：点「回复」→ 找输入框 → 聚焦 → 插字 → 点「发送」。
+//  卡在前几步时，exclusive 超时只把错误交给调用方，回调**还在锁里接着跑** ——
+//  它可能随后自己点下「发送」，评论**已经发出去了**。
+//  这时候只有「进了写路径就标记」才能保证下一轮不再发一遍（重复公开评论）。
+{
+	const keepAlive = setInterval(() => {}, 1000); // 钉住事件循环（挂住的 promise 不算活）
+	const { fetchImpl, calls } = makeFetch({ publish: async () => jsonResponse({ status_code: 0, comment: { cid: '999' } }) });
+	const browser = makeDomBrowser();
+	browser.isAlive = () => true;
+	const host = makeRealHost(browser);
+	const social = makeSocial({
+		browser, domWrites: [], host,
+		comments: [{ ...COMMENT, cid: '' }], // 没有 cid → 只能走 DOM 写路径
+		realReply: true,                     // DOM 写路径走真 driver.reply
+	});
+	social.driver.listCommentsApi = async () => []; // 这一条只测 DOM 路径
+	resetDb();
+	try {
+		try {
+			const r1 = await social.pollComments();
+			assert.equal(r1.ok, false, '独占锁超时 → 这一轮没发成');
+			assert.equal(browser.replyCalls(), 1, 'DOM 写路径被调用了（卡在点「回复」阶段）');
+			assert.equal(publishCalls(calls), 0, '没有 cid = 没走接口');
+			assert.deepEqual(recorded(), ['failed'], 'DOM 路径进了写路径就算「可能发出去了」→ 记 failed（下一轮不再发这条）');
+		} finally {
+			browser.releaseHang(); // 放行 → 回调接着往下走，最后自己点下「发送」
+		}
+		await browser.waitSent();
+		assert.equal(browser.sentCount(), 1, '卡住的回调放行后自己发出去了（这个窗口是真的）');
+		// 下一轮：这条已经记了 failed → 不再回 → 不会再走 DOM 写路径（否则就是重复公开评论）
+		const r2 = await social.pollComments();
+		assert.equal(r2.ok, true, '下一轮正常跑完');
+		assert.equal(browser.replyCalls(), 1, '下一轮不许再走 DOM 写路径（会重复发评论）');
+		assert.equal(browser.sentCount(), 1, '下一轮不许再发一次');
+		ok('⑮ DOM 路径卡住 + 超时：下一轮不再走 DOM 写路径');
+	} finally {
+		clearInterval(keepAlive);
+	}
 }
 
 console.log('douyin-comment-write-unknown ok');

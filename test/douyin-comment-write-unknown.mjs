@@ -67,8 +67,11 @@ function makePage({ fetchImpl, install = true }) {
 /**
  * 假 CDP：eval 把表达式丢进假页面里跑 —— 真桥代码 + 真 callBridge 拼出来的表达式。
  * dropAfterCall：页面里跑完了，结果回来之前 CDP 断（最危险的那种：请求发出去了，结果丢了）。
+ * hang：匹配到的表达式永远不返回（页面卡死）—— 返回 release 把它放行。
  */
-function makeBrowser(page, { dropAfterCall = false, installWorks = true } = {}) {
+function makeBrowser(page, { dropAfterCall = false, installWorks = true, hang = null } = {}) {
+	let release = null;
+	const gate = new Promise((resolve) => { release = resolve; });
 	return {
 		sessionId: 'S1',
 		preloadScripts: [],
@@ -76,6 +79,7 @@ function makeBrowser(page, { dropAfterCall = false, installWorks = true } = {}) 
 		async send() { return {}; },
 		async eval(expr) {
 			const s = String(expr);
+			if (hang && hang.test(s)) { await gate; return null; } // 卡住：调用方永远等不到结果
 			if (s === COMMENT_BRIDGE_SOURCE) {
 				if (!installWorks) return null; // 页面不是真抖音：装完也验不到桥
 				vm.runInContext(s, page);
@@ -85,6 +89,7 @@ function makeBrowser(page, { dropAfterCall = false, installWorks = true } = {}) 
 			if (dropAfterCall && s.includes('.postComment(')) throw new Error('CDP 断了');
 			return r;
 		},
+		releaseHang: () => release(),
 	};
 }
 
@@ -103,7 +108,7 @@ function makeFetch({ publish, auth }) {
 }
 
 /** 真 DouyinSocial + 真 driver；读路径（作品列表/评论列表/打开作品）和 DOM 写路径换成假的。 */
-function makeSocial({ browser, domWrites, comments = [COMMENT], works = [WORK], host }) {
+function makeSocial({ browser, domWrites, comments = [COMMENT], works = [WORK], host, domReply }) {
 	const h = host ?? { running: true, loggedIn: true, browser, exclusive: async (_name, fn) => fn() };
 	const social = new DouyinSocial({
 		host: h, db,
@@ -117,13 +122,31 @@ function makeSocial({ browser, domWrites, comments = [COMMENT], works = [WORK], 
 		listWorks: async () => works,
 		openWork: async () => ({ ok: true }),
 		listComments: async () => comments,
-		reply: async (cm, text) => { domWrites.push({ cid: cm?.cid ?? '', text }); return { ok: true }; },
+		reply: domReply ?? (async (cm, text) => { domWrites.push({ cid: cm?.cid ?? '', text }); return { ok: true }; }),
 	};
 	return social;
 }
 
 const resetDb = () => db.exec('DELETE FROM social_reply');
 const publishCalls = (calls) => calls.filter((c) => c.url.includes('/comment/publish/')).length;
+/** 这一轮往 social_reply 里记了什么（空数组 = 一条都没记 → 这条评论下一轮还能回）。 */
+const recorded = () => db.prepare("SELECT status FROM social_reply WHERE platform = 'douyin'").all().map((x) => x.status);
+
+/**
+ * 真 DouyinHost：超时的语义是「报错给调用方，锁等 fn 真收尾才放」。
+ * 只把「回抖音评论」的超时缩短（测试等不了 90 秒）—— 语义完全一样。
+ * 2 秒：CI 上 4 vCPU 被别的套件抢满时，页面桥的 eval 可能慢几百毫秒，
+ * 超时太短会抢在「请求已经发出去」之前 —— 那样就测不到「结果不明」这一段了。
+ */
+function makeRealHost(browser, maxMs = 2000) {
+	const host = new DouyinHost({ db, getConfig: () => ({ window: 'visible' }), log: () => {} });
+	host.state = 'running';
+	host.browser = browser;
+	host.loggedIn = true;
+	const realExclusive = host.exclusive.bind(host);
+	host.exclusive = (label, fn, opts = {}) => realExclusive(label, fn, label === '回抖音评论' ? { ...opts, maxMs } : opts);
+	return host;
+}
 
 // ── ① 抖音没回评论 id：评论**已经发出去了**，只是没拿到 id ──────────────────
 {
@@ -298,21 +321,14 @@ const publishCalls = (calls) => calls.filter((c) => c.url.includes('/comment/pub
 		const page = makePage({ fetchImpl });
 		const browser = makeBrowser(page);
 		browser.isAlive = () => true;
-		const host = new DouyinHost({ db, getConfig: () => ({ window: 'visible' }), log: () => {} });
-		host.state = 'running';
-		host.browser = browser;
-		host.loggedIn = true;
-		// 真 exclusive，只是把「回抖音评论」的超时缩短（测试等不了 90 秒）—— 语义完全一样。
-		// 2 秒：CI 上 4 vCPU 被别的套件抢满时，页面桥的 eval 可能慢几百毫秒，
-		// 超时太短会抢在「请求已经发出去」之前 —— 那样就测不到「结果不明」这一段了。
-		const realExclusive = host.exclusive.bind(host);
-		host.exclusive = (label, fn, opts = {}) => realExclusive(label, fn, label === '回抖音评论' ? { ...opts, maxMs: 2000 } : opts);
+		const host = makeRealHost(browser);
 		const social = makeSocial({ browser, domWrites, host });
 		resetDb();
 		const r1 = await social.pollComments();
 		assert.equal(r1.ok, false, '挂住超时 → 这一轮没发成');
 		assert.equal(publishCalls(calls), 1, '请求已经发出去了（只是结果没回来）');
 		assert.deepEqual(domWrites, [], '挂住超时也不能退回 DOM 再点一次');
+		assert.deepEqual(recorded(), ['failed'], '写操作挂住 = 可能已经发出去了 → 记 failed（下一轮不再发这条）');
 		// 请求最终死了 → 桥报「结果不明」→ 锁放掉
 		releaseHang(new Error('连接断了'));
 		await new Promise((resolve) => setTimeout(resolve, 50));
@@ -324,6 +340,92 @@ const publishCalls = (calls) => calls.filter((c) => c.url.includes('/comment/pub
 	} finally {
 		clearInterval(keepAlive);
 	}
+}
+
+// ── ⑫ 本地校验没过 + 独占锁超时：压根没发出去，不该记 failed ──────────────────
+//  缺作品 id → 接口路径的本地校验就拒了（publish 一次都没调）→ 退回 DOM；
+//  DOM 这边页面卡住挂住 → 独占锁超时。这条评论压根没发出去 —— 记成 failed
+//  就等于永久丢掉它（下一轮不再回，主人那边永远等不到这条回复）。
+{
+	const keepAlive = setInterval(() => {}, 1000); // 钉住事件循环（挂住的 promise 不算活）
+	let releaseDom;
+	const domHang = new Promise((resolve) => { releaseDom = resolve; });
+	const domWrites = [];
+	const { fetchImpl, calls } = makeFetch({ publish: async () => jsonResponse({ status_code: 0, comment: { cid: '999' } }) });
+	const page = makePage({ fetchImpl });
+	const browser = makeBrowser(page);
+	browser.isAlive = () => true;
+	const host = makeRealHost(browser);
+	const social = makeSocial({
+		browser, domWrites, host,
+		works: [{ id: '', title: '晒猫', kind: 'note' }], // 缺作品 id → 本地校验拒
+		domReply: async (cm, text) => { domWrites.push({ cid: cm?.cid ?? '', text }); await domHang; return { ok: true }; },
+	});
+	resetDb();
+	try {
+		const r = await social.pollComments();
+		assert.equal(r.ok, false, '独占锁超时 → 这一轮没发成');
+		assert.equal(publishCalls(calls), 0, '本地校验没过 = publish 一次都不能调');
+		assert.equal(domWrites.length, 1, '没发出去 → 仍要退回 DOM 点击（老路别丢）');
+		assert.deepEqual(recorded(), [], '压根没发出去 → 不该记 failed（下一轮还能回）');
+	} finally {
+		releaseDom();
+		clearInterval(keepAlive);
+	}
+	ok('⑫ 本地校验失败 + 超时：不记 failed，可回退');
+}
+
+// ── ⑬ 前置阶段挂住（取上传授权不返回）+ 独占锁超时 → 同样不该记 failed ────────
+//  前置阶段没过 = 图还没传上去 = 评论**根本没发出去**。这时候超时，
+//  不能当成「可能已经发出去了」—— 记 failed 就把这条评论永久丢了。
+{
+	const keepAlive = setInterval(() => {}, 1000); // 钉住事件循环（挂住的 promise 不算活）
+	const domWrites = [];
+	const { fetchImpl, calls } = makeFetch({ publish: async () => jsonResponse({ status_code: 0, comment: { cid: '999' } }) });
+	const page = makePage({ fetchImpl });
+	// 页面卡死：取上传授权的 CDP 调用永远不返回
+	const browser = makeBrowser(page, { hang: /__fishComment\.uploadAuth/ });
+	browser.isAlive = () => true;
+	const host = makeRealHost(browser);
+	const social = makeSocial({ browser, domWrites, host });
+	social.replyImages = async () => ({ text: '好的呀～', images: [{ bytes: Buffer.from([1, 2, 3]), format: 'jpeg' }] });
+	resetDb();
+	try {
+		const r = await social.pollComments();
+		assert.equal(r.ok, false, '独占锁超时 → 这一轮没发成');
+		assert.equal(publishCalls(calls), 0, '前置就断了 = publish 一次都不能调');
+		assert.deepEqual(domWrites, [], '接口还没写就卡住 → 这次没轮到 DOM');
+		assert.deepEqual(recorded(), [], '压根没发出去 → 不该记 failed（下一轮还能回）');
+	} finally {
+		browser.releaseHang();
+		clearInterval(keepAlive);
+	}
+	ok('⑬ 前置阶段挂住 + 超时：不记 failed，可回退');
+}
+
+// ── ⑭ 排队就超时了（回调根本没跑）→ 更不该记 failed ──────────────────────────
+//  真 exclusive 的计时器是从回调开始跑的，所以「排队超时」用假 exclusive 模拟：
+//  回调压根没开始 → 什么都没发出去 → 一条都不该记。
+{
+	const domWrites = [];
+	const { fetchImpl, calls } = makeFetch({ publish: async () => jsonResponse({ status_code: 0, comment: { cid: '999' } }) });
+	const page = makePage({ fetchImpl });
+	const browser = makeBrowser(page);
+	const host = {
+		running: true, loggedIn: true, browser,
+		exclusive: async (label, fn) => {
+			if (label === '回抖音评论') throw new Error('回抖音评论超时'); // 排队没排上：回调没跑
+			return fn();
+		},
+	};
+	const social = makeSocial({ browser, domWrites, host, works: [{ id: '', title: '晒猫', kind: 'note' }] });
+	resetDb();
+	const r = await social.pollComments();
+	assert.equal(r.ok, false, '排队超时 → 这一轮没发成');
+	assert.equal(publishCalls(calls), 0, '回调没跑 = publish 一次都不能调');
+	assert.deepEqual(domWrites, [], '回调没跑 = DOM 也没点');
+	assert.deepEqual(recorded(), [], '压根没跑 → 不该记 failed');
+	ok('⑭ 排队超时（回调没跑）：不记 failed');
 }
 
 console.log('douyin-comment-write-unknown ok');

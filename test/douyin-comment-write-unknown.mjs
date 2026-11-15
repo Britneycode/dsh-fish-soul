@@ -1,11 +1,16 @@
-// 抖音评论写操作：接口结果不明时**不能再发一次**。
+// 抖音评论写操作：接口结果不明时**不能再发一次**；压根没发出去时**还能退回 DOM**。
 //
 // 为什么：postComment 进了页面之后，bridge 调用可能超时 / 断连 / 抖音没回评论 id ——
 // 这时候评论**可能已经发出去了**，只是结果没回来。以前一律 ok:false，
 // pollComments 就退回 DOM 再点一次「发送」→ 同一条评论在真实账号上发两遍。
 //
+// 反过来，本地校验没过（缺作品 id / 正文图片都空）、前置就断了（桥没装上 /
+// 取不到上传授权 / 图片传不上去）—— 这些**根本没发出去**，不能跟「结果不明」
+// 混为一谈：混了就白白丢掉 DOM 回退（评论再也回不了）。
+//
 // 这里用真对象复现：真 DouyinSocial + 真 driver + 真 callBridge +
-// 真页面桥源码（node:vm 里跑）+ 真 db。只在最底下假掉两样：CDP（浏览器）和页面 fetch。
+// 真页面桥源码（node:vm 里跑）+ 真 db + 真 host.exclusive（只把超时缩短）。
+// 只在最底下假掉两样：CDP（浏览器）和页面 fetch。
 // DOM 写路径只做「有没有被调用」的观测（它不是这次要改的东西）。
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -25,6 +30,7 @@ process.env.TMPDIR = base;
 const { openDatabase, setKv } = await import('../lib/db.js');
 const db = openDatabase();
 const { DouyinSocial } = await import('../lib/douyin-social.js');
+const { DouyinHost } = await import('../lib/channels/douyin.js');
 // ⚠️ 页面桥源码要用 vm.runInContext 跑：它要的就是「一个浏览器页面」，
 //    沙箱里只有假 document / navigator / fetch，不碰真实页面、不发真实请求。
 const { COMMENT_BRIDGE_SOURCE } = await import('../lib/channels/vendor/douyin-bridge/douyin-comment.js');
@@ -83,12 +89,13 @@ function makeBrowser(page, { dropAfterCall = false, installWorks = true } = {}) 
 }
 
 /** 假抖音接口：记下每次请求，publish 的返回由场景定。 */
-function makeFetch({ publish }) {
+function makeFetch({ publish, auth }) {
 	const calls = [];
 	const fetchImpl = async (url, init) => {
 		const u = String(url);
 		calls.push({ url: u, method: init?.method ?? 'GET' });
 		if (u.includes('/comment/publish/')) return publish(u, init);
+		if (u.includes('/comment/upload/auth/')) return auth ? auth(u, init) : jsonResponse({ status_code: 0 });
 		if (u.includes('/comment/list/')) return jsonResponse({ status_code: 0, comments: [] });
 		return jsonResponse({ status_code: 0 });
 	};
@@ -96,10 +103,10 @@ function makeFetch({ publish }) {
 }
 
 /** 真 DouyinSocial + 真 driver；读路径（作品列表/评论列表/打开作品）和 DOM 写路径换成假的。 */
-function makeSocial({ browser, domWrites, comments = [COMMENT] }) {
-	const host = { running: true, loggedIn: true, browser, exclusive: async (_name, fn) => fn() };
+function makeSocial({ browser, domWrites, comments = [COMMENT], works = [WORK], host }) {
+	const h = host ?? { running: true, loggedIn: true, browser, exclusive: async (_name, fn) => fn() };
 	const social = new DouyinSocial({
-		host, db,
+		host: h, db,
 		getConfig: () => ({ enabled: true, comments: { enabled: true, perHour: 5 } }),
 		callLlm: async () => '好的呀～',
 		log: () => {}, note: () => {},
@@ -107,7 +114,7 @@ function makeSocial({ browser, domWrites, comments = [COMMENT] }) {
 	const real = social.driver; // 真 driver：真 callBridge + 真页面桥
 	social.driver = {
 		...real,
-		listWorks: async () => [WORK],
+		listWorks: async () => works,
 		openWork: async () => ({ ok: true }),
 		listComments: async () => comments,
 		reply: async (cm, text) => { domWrites.push({ cid: cm?.cid ?? '', text }); return { ok: true }; },
@@ -203,6 +210,120 @@ const publishCalls = (calls) => calls.filter((c) => c.url.includes('/comment/pub
 	assert.equal(domWrites.length, 1, '没有 cid 的评论走 DOM 点击');
 	assert.equal(publishCalls(calls), 0, '没有 cid 就不走接口');
 	ok('⑥ 没有 cid：正常 DOM 回退不变');
+}
+
+// ── ⑦ 缺作品 id：本地校验没过，请求**根本没发出去** ──────────────────────────
+{
+	const domWrites = [];
+	const { fetchImpl, calls } = makeFetch({ publish: async () => jsonResponse({ status_code: 0, comment: { cid: '999' } }) });
+	const page = makePage({ fetchImpl });
+	const social = makeSocial({ browser: makeBrowser(page), domWrites, works: [{ id: '', title: '晒猫', kind: 'note' }] });
+	resetDb();
+	await social.pollComments();
+	assert.equal(publishCalls(calls), 0, '本地校验没过 = publish 一次都不能调');
+	assert.equal(domWrites.length, 1, '没发出去 → 仍要退回 DOM 点击（老路别丢）');
+	ok('⑦ 缺作品 id：publish=0，DOM 回退保留');
+}
+
+// ── ⑧ 正文和图片都空：同样根本没发出去 ──────────────────────────────────────
+{
+	const { fetchImpl, calls } = makeFetch({ publish: async () => jsonResponse({ status_code: 0, comment: { cid: '999' } }) });
+	const page = makePage({ fetchImpl });
+	const social = makeSocial({ browser: makeBrowser(page), domWrites: [] });
+	const x = await social.driver.replyApi({ awemeId: WORK.id, cid: COMMENT.cid, text: '' });
+	assert.equal(x.ok, false, '正文和图都空不算发成功');
+	assert.equal(x.writeState, 'NOT_ATTEMPTED', '根本没发出去 → NOT_ATTEMPTED（可以退回 DOM）');
+	assert.equal(publishCalls(calls), 0, 'publish 一次都不能调');
+	ok('⑧ 正文和图片都空：publish=0，状态 NOT_ATTEMPTED');
+}
+
+// ── ⑨ 取图片上传授权失败：前置就断了，评论没发出去 ──────────────────────────
+{
+	const domWrites = [];
+	const { fetchImpl, calls } = makeFetch({
+		publish: async () => jsonResponse({ status_code: 0, comment: { cid: '999' } }),
+		auth: async () => { throw new Error('网络断了'); },
+	});
+	const page = makePage({ fetchImpl });
+	const social = makeSocial({ browser: makeBrowser(page), domWrites });
+	social.replyImages = async () => ({ text: '好的呀～', images: [{ bytes: Buffer.from([1, 2, 3]), format: 'jpeg' }] });
+	resetDb();
+	await social.pollComments();
+	assert.equal(publishCalls(calls), 0, '授权没拿到 = publish 一次都不能调');
+	assert.equal(domWrites.length, 1, '前置失败 → 仍要退回 DOM 点击');
+	const x = await social.driver.replyApi({ awemeId: WORK.id, cid: COMMENT.cid, text: '好的呀～', images: [{ bytes: Buffer.from([1, 2, 3]), format: 'jpeg' }] });
+	assert.equal(x.writeState, 'NOT_ATTEMPTED', '授权失败 → NOT_ATTEMPTED');
+	ok('⑨ 上传授权失败：状态 NOT_ATTEMPTED，DOM 回退保留');
+}
+
+// ── ⑩ 图片上传网络异常（uploadImage 抛错）：前置就断了，评论没发出去 ────────
+{
+	const domWrites = [];
+	const { fetchImpl, calls } = makeFetch({
+		publish: async () => jsonResponse({ status_code: 0, comment: { cid: '999' } }),
+		auth: async () => jsonResponse({
+			status_code: 0, access_key: 'ak', secret_key: 'sk', session_token: 'st',
+			service_id: 'sid', upload_domain: 'imagex.example', region: 'cn',
+		}),
+	});
+	const page = makePage({ fetchImpl });
+	const social = makeSocial({ browser: makeBrowser(page), domWrites });
+	social.replyImages = async () => ({ text: '好的呀～', images: [{ bytes: Buffer.from([1, 2, 3]), format: 'jpeg' }] });
+	const realFetch = globalThis.fetch;
+	globalThis.fetch = async () => { throw new Error('网络断了'); }; // 上传走 globalThis.fetch
+	resetDb();
+	try {
+		await social.pollComments();
+		const x = await social.driver.replyApi({ awemeId: WORK.id, cid: COMMENT.cid, text: '好的呀～', images: [{ bytes: Buffer.from([1, 2, 3]), format: 'jpeg' }] });
+		assert.equal(x.ok, false, '上传挂了不算发成功');
+		assert.equal(x.writeState, 'NOT_ATTEMPTED', '上传异常 → NOT_ATTEMPTED（没发出去，能退回 DOM）');
+	} finally {
+		globalThis.fetch = realFetch;
+	}
+	assert.equal(publishCalls(calls), 0, '图没传上去 = publish 一次都不能调');
+	assert.equal(domWrites.length, 1, '前置失败 → 仍要退回 DOM 点击');
+	ok('⑩ 图片上传网络异常：状态 NOT_ATTEMPTED，DOM 回退保留');
+}
+
+// ── ⑪ 真实 host.exclusive：请求挂住 → 独占锁超时 → 下一轮不 DOM / 不重发 ──────
+//  这里用**真** DouyinHost.exclusive（不是假锁）：超时的语义是「报错给调用方，
+//  锁等 fn 真收尾才放」—— 挂住的那次写操作到底发出去了没有，只有真锁才说得清。
+{
+	const keepAlive = setInterval(() => {}, 1000); // 钉住事件循环（挂住的 promise 不算活）
+	try {
+		const domWrites = [];
+		let releaseHang;
+		const hung = new Promise((_resolve, reject) => { releaseHang = reject; });
+		const { fetchImpl, calls } = makeFetch({ publish: () => hung });
+		const page = makePage({ fetchImpl });
+		const browser = makeBrowser(page);
+		browser.isAlive = () => true;
+		const host = new DouyinHost({ db, getConfig: () => ({ window: 'visible' }), log: () => {} });
+		host.state = 'running';
+		host.browser = browser;
+		host.loggedIn = true;
+		// 真 exclusive，只是把「回抖音评论」的超时缩短（测试等不了 90 秒）—— 语义完全一样。
+		// 2 秒：CI 上 4 vCPU 被别的套件抢满时，页面桥的 eval 可能慢几百毫秒，
+		// 超时太短会抢在「请求已经发出去」之前 —— 那样就测不到「结果不明」这一段了。
+		const realExclusive = host.exclusive.bind(host);
+		host.exclusive = (label, fn, opts = {}) => realExclusive(label, fn, label === '回抖音评论' ? { ...opts, maxMs: 2000 } : opts);
+		const social = makeSocial({ browser, domWrites, host });
+		resetDb();
+		const r1 = await social.pollComments();
+		assert.equal(r1.ok, false, '挂住超时 → 这一轮没发成');
+		assert.equal(publishCalls(calls), 1, '请求已经发出去了（只是结果没回来）');
+		assert.deepEqual(domWrites, [], '挂住超时也不能退回 DOM 再点一次');
+		// 请求最终死了 → 桥报「结果不明」→ 锁放掉
+		releaseHang(new Error('连接断了'));
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		const r2 = await social.pollComments();
+		assert.equal(r2.ok, true, '下一轮正常跑完');
+		assert.equal(publishCalls(calls), 1, '下一轮不许再发一次（可能已经发出去了）');
+		assert.deepEqual(domWrites, [], '下一轮也不许退回 DOM');
+		ok('⑪ 请求挂住超时（真 exclusive）：下一轮不 DOM、不重发');
+	} finally {
+		clearInterval(keepAlive);
+	}
 }
 
 console.log('douyin-comment-write-unknown ok');

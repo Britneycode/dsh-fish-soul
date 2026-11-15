@@ -69,5 +69,12 @@ assert.equal(reason,'empty_response');
 const missingRouter = new LlmRouter({db,getConfig:()=>({}),log:()=>{},ctx:{}});
 reason=''; await createStickerVision(missingRouter, {timeoutMs:500})('prompt',[],{onFailure:(r)=>{reason=r;}});
 assert.equal(reason,'model_unavailable');
+
+// 启动后自动补标签必须走同一套分类，不能再留一个只回 null 的旧回调。
+{
+ const src = (await import('node:fs')).readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
+ assert.match(src, /createStickerVision\(llmRouter\)/, '启动补标签要复用 createStickerVision');
+ assert.doesNotMatch(src, /AbortSignal\.timeout\(20_000\)/, '不能再留一套独立的 20 秒超时');
+}
 console.log('issue-118-sticker-diagnostics ok');
 db.close();

@@ -62,28 +62,6 @@ function stuckBrowser() {
 	return br
 }
 
-/**
- * 假浏览器：eval 慢 `ms` 才回 —— 正常但慢的页面。
- * 页面比给的 timeoutMs 还慢就按超时算（跟真 Browser.eval 一致）。
- */
-function slowBrowser(ms, value = null) {
-	const br = { timeouts: [], evals: 0 }
-	br.eval = (expr, opts = {}) => {
-		const timeout = Number(opts.timeoutMs)
-		br.timeouts.push(timeout)
-		br.evals++
-		return new Promise((resolve, reject) => {
-			setTimeout(() => {
-				if (timeout > 0 && ms > timeout) reject(new Error(`CDP Runtime.evaluate 超时（${timeout}ms）`))
-				else resolve(value)
-			}, timeout > 0 ? Math.min(timeout, ms) : ms)
-		})
-	}
-	br.send = () => Promise.resolve({})
-	br.goto = async () => ({ url: 'https://www.douyin.com/note/x' })
-	return br
-}
-
 test('eval 把 timeoutMs 透传给 send；不给就还是 60 秒', async () => {
 	const br = new Browser({ exe: 'x', userDataDir: 'y', port: 1 })
 	br.ready = true

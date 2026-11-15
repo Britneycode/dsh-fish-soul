@@ -10,6 +10,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ensurePageAlive, VERIFY_JS } from '../lib/douyin-social.js'
 
+// lib/time-util.js 的 sleep 是 unref 的。CI 上 4 vCPU 被真启 Chromium 的套件抢满时，
+// 事件循环认为没事可做直接结束，await 永不 resolve，0.1 秒就挂
+// （'Promise resolution is still pending but the event loop has already resolved'）。
+// 挂一个非 unref 的定时器把事件循环钉住（2026-11-10 commit 53af484 同款修法）。
+const keepAlive = setInterval(() => {}, 1000)
+test.after(() => clearInterval(keepAlive))
+
 /** eval 永远 pending 的假浏览器。reload 后按 aliveAfterReload 决定是否恢复。 */
 function deadBrowser({ aliveAfterReload = false } = {}) {
 	const br = { reloaded: false, evals: 0 }

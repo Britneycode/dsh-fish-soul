@@ -23,7 +23,14 @@ html[data-ds-theme-source] body:not([data-ds-dark-theme]) :is(.fs,.fs-page-shell
 .fs.nav-collapsed{--fs-side:48px}
 .fs *,.fs *::before,.fs *::after{box-sizing:border-box}
 .fs :where(h2,h3,p,pre,ul,figure){margin:0;padding:0}
-.fs :where(button,input,select,textarea){font:inherit;color:inherit}
+/* 通用控件重置 —— 必须保持「零特异性」，只兜底没被打扮过的元素。
+   🔴 写成 `.fs :where(button,…)` 时特异性是 (0,1,0)（`.fs` 那一层计入），
+   跟宿主控件自己的 `._button_xxx{color/font-size}` 打平；而插件样式注入在宿主之后
+   ⇒ 重置反而赢了宿主 ⇒ 宿主 primary 按钮的「深色实心 + 反色字」被换成继承色，
+   变成黑底黑字（真机：更新页「更新到 vX」是一个看不清字的黑块）。
+   包一层 :where() 把特异性降到 (0,0,0)：宿主任何组件类都赢它，
+   插件自有的 .fs-btn / .fs-icon-btn 也照旧赢它（它们仍是 (0,1,0)）。 */
+:where(.fs) :where(button,input,select,textarea){font:inherit;color:inherit}
 .fs :where(button,a,input,select,textarea,summary):focus-visible{outline:1px solid var(--accent);outline-offset:1px}
 .fs .num,.fs-unit.num{font-family:var(--fs-mono);font-size:12px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .fs-muted{color:var(--fg-tertiary)}

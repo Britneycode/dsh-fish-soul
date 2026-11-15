@@ -74,8 +74,9 @@ function makePage({ fetchImpl, install = true }) {
  * 假 CDP：eval 把表达式丢进假页面里跑 —— 真桥代码 + 真 callBridge 拼出来的表达式。
  * dropAfterCall：页面里跑完了，结果回来之前 CDP 断（最危险的那种：请求发出去了，结果丢了）。
  * hang：匹配到的表达式永远不返回（页面卡死）—— 返回 release 把它放行。
+ * hangThen：放行后拿表达式做什么（默认放行 = 返回 null；给了就跑它 → 放行后照常真跑）。
  */
-function makeBrowser(page, { dropAfterCall = false, installWorks = true, hang = null } = {}) {
+function makeBrowser(page, { dropAfterCall = false, installWorks = true, hang = null, hangThen = null } = {}) {
 	let release = null;
 	const gate = new Promise((resolve) => { release = resolve; });
 	return {
@@ -85,7 +86,7 @@ function makeBrowser(page, { dropAfterCall = false, installWorks = true, hang = 
 		async send() { return {}; },
 		async eval(expr) {
 			const s = String(expr);
-			if (hang && hang.test(s)) { await gate; return null; } // 卡住：调用方永远等不到结果
+			if (hang && hang.test(s)) { await gate; return hangThen ? await hangThen(s) : null; } // 卡住：调用方永远等不到结果
 			if (s === COMMENT_BRIDGE_SOURCE) {
 				if (!installWorks) return null; // 页面不是真抖音：装完也验不到桥
 				vm.runInContext(s, page);
@@ -155,6 +156,42 @@ function makeFetch({ publish, auth }) {
 		return jsonResponse({ status_code: 0 });
 	};
 	return { fetchImpl, calls };
+}
+
+/**
+ * ImageX 三步的假 fetch（Apply → PUT → Commit）—— 上传走 globalThis.fetch，不碰外网。
+ * 只回协议要的字段：Apply 给上传地址 + StoreUri/Auth，Commit 给尺寸 + ImageUri。
+ */
+function imageXFetch() {
+	return async (url) => {
+		const u = String(url);
+		if (u.includes('Action=ApplyImageUpload')) {
+			return jsonResponse({
+				ResponseMetadata: {},
+				Result: {
+					SessionKey: 'session-key',
+					UploadAddress: {
+						UploadHost: 'tos.example',
+						StoreInfos: [{ StoreUri: 'store/uri', Auth: 'store-auth' }],
+					},
+				},
+			});
+		}
+		if (u.includes('Action=CommitImageUpload')) {
+			return jsonResponse({
+				ResponseMetadata: {},
+				Result: { PluginResult: [{ ImageWidth: 100, ImageHeight: 100, ImageUri: 'tos-cn-i-xxx/yyy', ImageFormat: 'jpeg' }] },
+			});
+		}
+		return new Response('OK', { status: 200 }); // PUT：传字节本身
+	};
+}
+
+/** 等到条件成立（最多等 ms）—— 卡住的东西放行后要等它自己跑完。 */
+async function waitUntil(fn, ms = 10_000) {
+	const deadline = Date.now() + ms;
+	while (!fn() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+	return fn();
 }
 
 /** 真 DouyinSocial + 真 driver；读路径（作品列表/评论列表/打开作品）和 DOM 写路径换成假的。
@@ -451,8 +488,15 @@ function makeRealHost(browser, maxMs = 2000) {
 		assert.deepEqual(recorded(), [], '压根没发出去 → 不该记 failed（下一轮还能回）');
 	} finally {
 		browser.releaseHang();
-		clearInterval(keepAlive);
 	}
+	// 放行后：被放弃的回调接着跑 → 接口前置还是失败 → 退回 DOM → DOM 路径照样
+	// 「进写路径就标记」（保守策略，见 adf8a33）；外层已经放弃，没人接结果，
+	// 那时补记 failed（writeAbandoned）。
+	// ⚠️ 必须等它落定再走：否则它那条记录会漏到后面的场景里。
+	await waitUntil(() => domWrites.length === 1);
+	assert.equal(domWrites.length, 1, '放行后回调接着跑，退回了 DOM');
+	resetDb(); // 这条记录别漏到后面的场景
+	clearInterval(keepAlive);
 	ok('⑬ 前置阶段挂住 + 超时：不记 failed，可回退');
 }
 
@@ -520,6 +564,58 @@ function makeRealHost(browser, maxMs = 2000) {
 	} finally {
 		clearInterval(keepAlive);
 	}
+}
+
+// ── ⑯ 前置阶段挂住超时 → 放行后**真的发出去了** → 必须补记 failed ──────────────
+//  接口路径的前置阶段（取上传授权）挂住 → 独占锁超时 → 外层 catch 已经返回，
+//  这时 mayHaveSent 还是 false（压根没到写出去那一刻）→ **一条都没记**。
+//  但回调还在锁里接着跑：授权一放行就传图、**真的把评论发出去了**。
+//  数据库里却一条记录都没有 → 下一轮同一条评论再发一遍 = 重复公开评论。
+{
+	const keepAlive = setInterval(() => {}, 1000); // 钉住事件循环（挂住的 promise 不算活）
+	const domWrites = [];
+	const { fetchImpl, calls } = makeFetch({
+		publish: async () => jsonResponse({ status_code: 0, comment: { cid: '999' } }),
+		auth: async () => jsonResponse({
+			status_code: 0, access_key: 'ak', secret_key: 'sk', session_token: 'st',
+			service_id: 'sid', upload_domain: 'imagex.example', region: 'cn',
+		}),
+	});
+	const page = makePage({ fetchImpl });
+	// 假 CDP：取上传授权的那次 eval 挂住；放行后照常真跑（真页面桥 → 真授权）
+	const browser = makeBrowser(page, {
+		hang: /__fishComment\.uploadAuth/,
+		hangThen: async (s) => vm.runInContext(s, page),
+	});
+	browser.isAlive = () => true;
+	const host = makeRealHost(browser);
+	const social = makeSocial({ browser, domWrites, host });
+	social.replyImages = async () => ({ text: '好的呀～', images: [{ bytes: Buffer.from([1, 2, 3]), format: 'jpeg' }] });
+	resetDb();
+	const realFetch = globalThis.fetch;
+	globalThis.fetch = imageXFetch(); // 上传走 ImageX（三步都在 globalThis.fetch 上）
+	try {
+		const r1 = await social.pollComments();
+		assert.equal(r1.ok, false, '独占锁超时 → 这一轮没发成');
+		assert.equal(publishCalls(calls), 0, '授权还没拿到 = publish 一次都不能调');
+		assert.deepEqual(domWrites, [], '接口还没写就卡住 → 这次没轮到 DOM');
+		assert.deepEqual(recorded(), [], '此刻还没写出去 → 一条都不该记');
+		// 放行 → 回调接着跑：授权拿到 → 传图 → **真的 publish 出去**
+		browser.releaseHang();
+		await waitUntil(() => publishCalls(calls) === 1);
+		assert.equal(publishCalls(calls), 1, '放行后回调真的把评论发出去了（这个窗口是真的）');
+		assert.deepEqual(domWrites, [], '接口发出去了就不该再走 DOM');
+		assert.deepEqual(recorded(), ['failed'], '外层已经放弃 → 发出去了也得补记 failed（下一轮不再发这条）');
+		// 下一轮：这条已经记了 failed → 不再回 → 不会再 publish 一次（否则就是重复公开评论）
+		const r2 = await social.pollComments();
+		assert.equal(r2.ok, true, '下一轮正常跑完');
+		assert.equal(publishCalls(calls), 1, '下一轮不许再发一次（可能已经发出去了）');
+		assert.deepEqual(domWrites, [], '下一轮也不许退回 DOM 再发一遍');
+	} finally {
+		globalThis.fetch = realFetch;
+		clearInterval(keepAlive);
+	}
+	ok('⑯ 前置挂住超时 + 放行后真发出去了：补记 failed，下一轮不重发');
 }
 
 console.log('douyin-comment-write-unknown ok');

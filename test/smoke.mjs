@@ -495,14 +495,15 @@ async function call(method, path, body) {
 	gw.bound.set('issue113', { channel_id: 'private:113', workspace_path: '' });
 	const msg = { role: 'user', content: [{type:'text', text:'DSH 输入内容'}], source: {kind:'user'} };
 	handlers['agent/inbox/inserted']({ agent: {id:'issue113', ctx:makeAgentCtx('issue113', () => {})}, message:msg });
-	handlers['session/event']({id:'issue113'}, {type:'user/message', data:{message:msg}});
-	// #116：开启桌面语音后，本轮瞬态块告诉模型如何标记；关闭时不出现。
+	// #116：宿主先构建上下文、后发 session/event，也必须告诉模型如何标记。
 	const ready = gw.voice.readyFor; gw.voice.readyFor = () => true;
 	await call('POST', '/voice/config', {enabled:true, desktopTts:true});
 	assert.match(context.text(at('issue113')), /DSH 本地语音.*\[语音\]/);
+	assert.doesNotMatch(context.text(at('issue113')), /QQ 回复规则/, 'DSH 打字不应提示回复会发到 QQ');
 	await call('POST', '/voice/config', {enabled:false, desktopTts:false});
 	assert.doesNotMatch(context.text(at('issue113')), /DSH 本地语音/);
 	gw.voice.readyFor = ready;
+	handlers['session/event']({id:'issue113'}, {type:'user/message', data:{message:msg}});
 	handlers['session/event']({id:'issue113'}, {type:'assistant/message', data:{message:{content:[{type:'text', text:'DSH 完整回复'}]}}});
 	handlers['session/event']({id:'issue113'}, {type:'turn/end', data:{reason:{kind:'completed'}}});
 	const rows = (await call('GET', '/chat-archive/list?channel=private%3A113')).json.items;

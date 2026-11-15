@@ -84,9 +84,13 @@ assert.deepEqual(results,[true,false,true,false]);
  assert.doesNotMatch(sent.content[0].text,/本轮语音文件/);assert.ok(!dispatch.pendingVoicePaths.has(sent.id));
 }
 // DSH 本地语音不走 QQ 出站、失败不干扰文字。
-let sends=0; cfg.enabled=true; cfg.desktopTts=true; gw.channel.send=()=>{sends++}; gw.voice={synthesize:async()=>wav,lastError:''};
-await gw.saveDesktopVoice('你好'); assert.equal(voiceFileList('out').length,1); assert.equal(sends,0);
-gw.voice.synthesize=async()=>null; await gw.saveDesktopVoice('你好'); assert.equal(voiceFileList('out').length,1);
+let sends=0; cfg.enabled=true; cfg.desktopTts=true; gw.channel.send=()=>{sends++}; let spoken=[]; gw.voice={synthesize:async text=>{spoken.push(text);return wav},lastError:''};
+await gw.saveDesktopVoice('普通文字\n\n![表情](_stickers/脸红.webp)'); assert.equal(voiceFileList('out').length,0, '没有标记不得合成');
+await gw.saveDesktopVoice('普通文字\n\n[语音] 你好\n![表情](_stickers/脸红.webp)'); assert.equal(voiceFileList('out').length,1); assert.equal(sends,0); assert.deepEqual(spoken,['你好'], '只读标记段的文字，去掉图片');
+await gw.saveDesktopVoice('[不回]\n\n[语音] 不该读'); assert.deepEqual(spoken,['你好']);
+await gw.saveDesktopVoice('[语音] 第一段\n\n不读这段\n\n[语音] 第二段'); assert.deepEqual(spoken,['你好','第一段','第二段']);
+const outCount=voiceFileList('out').length;
+gw.voice.synthesize=async()=>null; await gw.saveDesktopVoice('[语音] 你好'); assert.equal(voiceFileList('out').length,outCount);
 // 正常完成的桌面轮次走真实 VoiceService（HTTP 替身）、受配额限制且不外发。
 {
  const {openDatabase}=await import('../lib/db.js'); const db=openDatabase();
@@ -94,7 +98,7 @@ gw.voice.synthesize=async()=>null; await gw.saveDesktopVoice('你好'); assert.e
  let requests=0,sends=0;
  const voice=new VoiceService({db,getConfig:()=>voiceConfig(config),fetchImpl:async(_url,opts)=>{requests++;assert.equal(JSON.parse(opts.body).input,'你好');return new Response(Buffer.from('ID3hello'));}});
  const g=Object.assign(Object.create(ChatGateway.prototype),{bound:new Map([['desktop-test',{channel_id:'private:1'}]]),turns:new Map(),pendingVoicePaths:new Map(),waiters:new Map(),interjectTurns:new Set(),soul:{recallInfo:()=>({memories:[]})},voice,getConfig:()=>({voice:config}),channel:{send:()=>sends++},note(){},log(){}});
- const run=(reason='completed')=>{g.onSessionEvent({id:'desktop-test'},{type:'user/message',data:{source:{kind:'user'}}});g.onSessionEvent({id:'desktop-test'},{type:'assistant/message',data:{message:{content:[{type:'text',text:'你好'}]}}});g.onSessionEvent({id:'desktop-test'},{type:'turn/end',data:{reason:{kind:reason}}});};
+ const run=(reason='completed')=>{g.onSessionEvent({id:'desktop-test'},{type:'user/message',data:{source:{kind:'user'}}});g.onSessionEvent({id:'desktop-test'},{type:'assistant/message',data:{message:{content:[{type:'text',text:'[语音] 你好'}]}}});g.onSessionEvent({id:'desktop-test'},{type:'turn/end',data:{reason:{kind:reason}}});};
  const before=voiceFileList('out').length;run();await new Promise(r=>setTimeout(r,100));assert.equal(requests,1);assert.equal(voiceFileList('out').length,before+1);assert.equal(sends,0);
  run();await new Promise(r=>setTimeout(r,100));assert.equal(requests,1,'共用 TTS 配额');run('interrupted');await new Promise(r=>setTimeout(r,100));assert.equal(requests,1,'中断轮次不合成');db.close();
 }

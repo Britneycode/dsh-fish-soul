@@ -188,7 +188,8 @@ process.env.FISH_SOUL_BILI_MOCK = biliURL;
 writeFileSync(join(home, 'fish-soul-config.json'), JSON.stringify({
 	embedding: { enabled: true, baseURL, apiKey: 'sk-test', model: 'm1' },
 	proactive: { targets: { masterPrivateChannelId: 'private:10001', selfGroupChannelIds: [] } },
-	qq: { enabled: true, wsUrl: `ws://127.0.0.1:${wsSrv.address().port}`, accessToken: 'tok-1', batchMs: 200, allGroups: true },
+	// allFriends 打开＝沿用旧语义（好友私聊都进会话），下面的 #105 / #78 用例依赖这一点
+	qq: { enabled: true, wsUrl: `ws://127.0.0.1:${wsSrv.address().port}`, accessToken: 'tok-1', batchMs: 200, allGroups: true, allFriends: true },
 	douyin: { batchMs: 100 }
 }));
 

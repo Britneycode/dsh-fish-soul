@@ -18,7 +18,7 @@ const db = openDatabase();
 	assert.equal(interjectConfig({ masterQuietMinutes: -3 }).masterQuietMinutes, 0, '负数夹到 0（= 不压制）');
 }
 
-const qq = { enabled: true, allGroups: true, batchMs: 60, followUpCount: 3, followUpSeconds: 120, interject: { enabled: true, chance: 1, cooldownMinutes: 0, maxPerHour: 30 } };
+const qq = { enabled: true, allGroups: true, allFriends: true, batchMs: 60, followUpCount: 3, followUpSeconds: 120, interject: { enabled: true, chance: 1, cooldownMinutes: 0, maxPerHour: 30 } };
 const gw = new ChatGateway({
 	ctx: { get: () => undefined }, db, clock: { now: () => Date.now() },
 	getConfig: () => ({ qq, masterQqUin: '10001' }), log: () => {},

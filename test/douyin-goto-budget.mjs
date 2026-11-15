@@ -57,6 +57,102 @@ function liveBrowser({ href = 'https://www.douyin.com/video/7123', navDelayMs = 
   return br
 }
 
+/**
+ * 真的 Browser + **假时钟**：把「入睡时预算够、醒来时已过期」变成确定可复现的。
+ *
+ * 假时钟 tick(n) 会先把 Date.now() 推到 now+n，再按到期顺序跑定时器，
+ * 回调里看到的是**推进后**的时间（不是它原本的到期时刻）⇒ 一次 tick 越过
+ * deadline，就能精确造出「睡醒时已经过期」（真时钟下要靠事件循环被占住，
+ * 复现全看机器负载，不算确定）。
+ *
+ * @param {object} o
+ * @param {string} o.href location.href 回什么
+ */
+function clockBrowser({ href = 'https://www.douyin.com/video/7123' } = {}) {
+  const br = new Browser({ exe: 'x', userDataDir: 'y', port: 1 })
+  br.ready = true
+  br.sessionId = 'S1'
+  /** 发过的 CDP 命令：{ method, at }（at = 假时钟时刻） */
+  br.calls = []
+  br.ws = {
+    readyState: 1,
+    send(raw) {
+      const msg = JSON.parse(raw)
+      br.calls.push({ method: msg.method, at: Date.now() })
+      const result = msg.method === 'Page.navigate'
+        ? { frameId: 'F1' }
+        : { result: { value: href } }
+      setTimeout(() => br.handleMessage({ data: JSON.stringify({ id: msg.id, result }) }), 0)
+    },
+  }
+  return br
+}
+
+/** 跑干净微任务队列（假时钟的定时器回调只负责 resolve，续跑要靠微任务） */
+const flush = () => new Promise((r) => setImmediate(r))
+
+test('入睡时预算够、醒来时已过期：settle 不能当作成功', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  try {
+    const br = clockBrowser()
+    const budget = 2400
+    // settleMs 3400 ⇒ 导航后等 1133ms + settle 睡 900ms；入睡时预算都够。
+    // 立刻包一层 catch：假时钟下 promise 可能先落地，别留下未处理的 rejection。
+    const p = br.goto('https://www.douyin.com/video/7123', { settleMs: 3400, timeoutMs: budget })
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, error: e }))
+    const advance = async (ms) => { t.mock.timers.tick(ms); await flush() }
+    /** 推进到 promise 落地（buggy 路径还要多走几步，不能让它挂住） */
+    const drive = async (rounds = 20) => {
+      let settled = false
+      p.then(() => { settled = true })
+      for (let i = 0; i < rounds && !settled; i++) await advance(50)
+      return p
+    }
+
+    await advance(1)      // 导航回包 → 开始导航后等待
+    await advance(1200)   // 导航后等待睡醒（还在预算内）
+    await advance(1)      // location.href 回包 → 开始 settle
+    await advance(1300)   // settle 睡醒时已经过了 deadline
+    const res = await drive()
+
+    // 修之前：入睡时预算够就返回 true ⇒ settle 判定通过 ⇒ 过了 deadline 还谎报成功。
+    assert.equal(res.ok, false, '过了 deadline 不该返回成功')
+    assert.match(String(res.error?.message ?? ''), /超时/)
+  } finally {
+    t.mock.timers.reset()
+  }
+})
+
+test('入睡时预算够、醒来时已过期：导航后等待超预算就别再往下走', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  try {
+    const br = clockBrowser()
+    const budget = 1000
+    // settleMs 2400 ⇒ 导航后等 800ms；入睡时预算 999ms 够睡这 800ms。
+    const p = br.goto('https://www.douyin.com/video/7123', { settleMs: 2400, timeoutMs: budget })
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, error: e }))
+    const advance = async (ms) => { t.mock.timers.tick(ms); await flush() }
+    const drive = async (rounds = 20) => {
+      let settled = false
+      p.then(() => { settled = true })
+      for (let i = 0; i < rounds && !settled; i++) await advance(50)
+      return p
+    }
+
+    await advance(1)      // 导航回包 → 开始导航后等待（预算够，睡 800ms）
+    await advance(1200)   // 睡醒时已经过了 deadline
+    const res = await drive()
+
+    assert.equal(res.ok, false, '过了 deadline 不该返回成功')
+    assert.match(String(res.error?.message ?? ''), /超时/)
+    // 修之前：导航后等待的结果没人看 ⇒ 超预算后照样发 eval。
+    const late = br.calls.filter((c) => c.method === 'Runtime.evaluate' && c.at > budget)
+    assert.equal(late.length, 0, `超预算后不该再发 eval：${JSON.stringify(br.calls)}`)
+  } finally {
+    t.mock.timers.reset()
+  }
+})
+
 test('页面卡死时导航有界返回：重试间隔不许睡过预算', async () => {
   const br = hungBrowser()
   const budget = 1500

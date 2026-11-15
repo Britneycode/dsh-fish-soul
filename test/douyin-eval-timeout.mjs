@@ -230,6 +230,27 @@ test('回评论永久 pending 时有界返回，不霸着浏览器锁', async ()
 	assert.ok(br.timeouts.every((x) => x > 0 && x <= 200), `reply 的 eval 超时不该超过给的上限：${br.timeouts}`)
 })
 
+test('评论列表两条路径（DOM / 接口）卡死时有界返回，且 eval 都带 timeoutMs', async () => {
+	// DOM 版：一次 eval 读列表
+	{
+		const br = stuckBrowser()
+		const driver = douyinSocialDriver({ running: true, browser: br }, { evalTimeoutMs: 200 })
+		const list = await within(3000, () => driver.listComments())
+		assert.deepEqual(list, [], 'DOM 版读不到就是空数组')
+		assert.ok(br.timeouts.length > 0, 'DOM 版评论列表的 eval 必须带 timeoutMs')
+		assert.ok(br.timeouts.every((x) => x > 0 && x <= 200), `DOM 版评论列表的 eval 超时不该超过给的上限：${br.timeouts}`)
+	}
+	// 接口版：读 URL → 装桥 → 调桥，三步都得有界
+	{
+		const br = stuckBrowser()
+		const driver = douyinSocialDriver({ running: true, browser: br }, { evalTimeoutMs: 200, gotoTimeoutMs: 1000 })
+		const list = await within(4000, () => driver.listCommentsApi('7123456789'))
+		assert.deepEqual(list, [], '接口版读不到就是空数组')
+		assert.ok(br.timeouts.length > 0, '接口版评论列表的 eval 必须带 timeoutMs')
+		assert.ok(br.timeouts.every((x) => x > 0 && x <= 200), `接口版评论列表的 eval 超时不该超过给的上限：${br.timeouts}`)
+	}
+})
+
 test('正常慢页面仍能成功：单次接近 evalTimeoutMs、多轮累计接近预算也不误判失败', async () => {
 	// 每次 eval 都要 150ms（上限 200ms）；第 2 轮才出列表。
 	// 累计 150 + 1000(轮间等待) + 150 = 1300ms，预算 1400ms ⇒ 刚好压在预算内。

@@ -61,6 +61,23 @@ function newDb() {
 	return path;
 }
 
+// 只有 emoji 表的小库：造「麦麦那边同一条图出现多次」的数据（额度/计数那些场景要用）
+function emojiOnlyDb(name, rows) {
+	const dir = join(root, name, 'MaiBot');
+	mkdirSync(join(dir, 'data', 'emoji_registed'), { recursive: true });
+	const path = join(dir, 'data', 'MaiBot.db');
+	const db = new DatabaseSync(path);
+	db.exec('CREATE TABLE emoji (full_path TEXT, format TEXT, emoji_hash TEXT, description TEXT, emotion TEXT, is_registered INTEGER, is_banned INTEGER, usage_count INTEGER)');
+	const ins = db.prepare('INSERT INTO emoji VALUES (?,?,?,?,?,1,0,?)');
+	for (const r of rows) {
+		const file = join(dir, 'data', 'emoji_registed', r.file);
+		writeFileSync(file, r.bytes);
+		ins.run(file, String(r.file).split('.').pop(), 'h', String(r.description ?? ''), '', Number(r.usage ?? 1));
+	}
+	db.close();
+	return path;
+}
+
 const oldPath = oldDb();
 const x = readMaiBotExtras(oldPath);
 assert.equal(x.schema, 'old');
@@ -158,6 +175,75 @@ assert.equal(r.emojis + r.emojiDup, 1, '同一张图（和旧库那张字节一�
 	assert.equal(seen.length, seenBefore, '已经有标签的不再问模型');
 }
 
+// ── #118：重复导入的老表情不能把「看图打标」的额度吃光 ──
+// 额度是留给「真要问模型」的那几次的：已经有标签的老表情，tagByVision 会直接返回旧标签、
+// 根本不问模型 —— 它们一分额度都不该吃。否则额度被老表情吃光，真正要打标的新图一张都轮不上
+// （导多少遍都不收敛，跟 #118 修的是同一个症状）。
+{
+	const wsB = join(root, 'ws-budget');
+	mkdirSync(wsB);
+	// 库里先有一张带标签的老表情（麦麦那边有 3 条同图的记录 → 导入时全是重复）
+	const old = stickers.importImage({ bytes: GIF, mediaType: 'image/gif', name: 'old.gif', workspacePath: wsB, from: '测试', tags: ['柴犬'] });
+	assert.equal(old.ok, true, '老表情先入库');
+	const budgetPath = emojiOnlyDb('budget', [
+		{ file: 'old.gif', bytes: GIF, usage: 9 },
+		{ file: 'old.gif', bytes: GIF, usage: 8 },
+		{ file: 'old.gif', bytes: GIF, usage: 7 },
+		{ file: 'new.png', bytes: PNG, usage: 1 }
+	]);
+	let asked = 0;
+	const res = await importMaiBotExtras({
+		dbPath: budgetPath, slang, stickers, workspacePath: wsB,
+		vision: async () => { asked++; return '卖萌、可爱'; },
+		maxEmojis: 3
+	});
+	assert.equal(res.emojiDup, 3, '老表情那 3 条都是重复');
+	assert.equal(res.emojis, 1, '新图还是导进去了');
+	const fresh = stickers.collected().find((x) => x.workspacePath === wsB && x.file !== old.file);
+	assert.ok(fresh, '新图入库了');
+	assert.deepEqual(fresh.tags, ['卖萌', '可爱'], '额度被老表情吃光的话，这张新图就永远打不上标签');
+	assert.equal(fresh.tagsBy, 'vision');
+	assert.equal(res.emojiTagged, 1, '只有新图算「这次打上的」');
+	assert.equal(asked, 1, '模型只被叫去看那张新图（老表情有标签，不该问）');
+}
+
+// ── #118：面板报的张数按文件算，不按记录算 ──
+// 同一个文件在麦麦那边可能有多条记录（导入一条 + 重复一条）：只有 1 张图被打上标签，
+// 报成 2 张就是在骗人。
+{
+	const wsC = join(root, 'ws-count');
+	mkdirSync(wsC);
+	const samePath = emojiOnlyDb('same', [
+		{ file: 'a.png', bytes: PNG, usage: 9 },
+		{ file: 'a.png', bytes: PNG, usage: 8 }
+	]);
+	const res = await importMaiBotExtras({ dbPath: samePath, slang, stickers, workspacePath: wsC, vision: async () => '卖萌、可爱', maxEmojis: 5 });
+	assert.equal(res.emojis, 1, '一张图只导进去一次');
+	assert.equal(res.emojiDup, 1, '第二条是重复');
+	assert.equal(res.emojiTagged, 1, '同一张文件只算一张（不是两条记录两张）');
+	const row = stickers.collected().find((x) => x.workspacePath === wsC);
+	assert.deepEqual(row.tags, ['卖萌', '可爱'], '标签真写进 kv 里了');
+}
+
+// 描述里带标签词的：走 summary 路径（没问模型），面板上仍是这一张有标签 → 记 1
+{
+	const wsS = join(root, 'ws-summary');
+	mkdirSync(wsS);
+	const sumPath = emojiOnlyDb('summary', [
+		{ file: 'a.png', bytes: PNG, usage: 9, description: '柴犬笑' },
+		{ file: 'a.png', bytes: PNG, usage: 8, description: '柴犬笑' }
+	]);
+	let asked = 0;
+	const res = await importMaiBotExtras({ dbPath: sumPath, slang, stickers, workspacePath: wsS, vision: async () => { asked++; return '卖萌、可爱'; }, maxEmojis: 5 });
+	assert.equal(res.emojis, 1);
+	assert.equal(res.emojiDup, 1);
+	assert.equal(res.emojiTagged, 1, 'summary 捡出标签的，这一张也算有标签');
+	assert.equal(asked, 0, 'summary 已经够用，不必问模型');
+	const row = stickers.collected().find((x) => x.workspacePath === wsS);
+	assert.deepEqual(row.tags, ['柴犬笑'], '标签来自 summary');
+	assert.equal(row.tagsBy, 'summary');
+}
+
 assert.throws(() => readMaiBotExtras(join(root, 'nope.db')), /找不到/);
 
 // ── #118：面板点「导入」这条路也要打标 ──
@@ -186,3 +272,5 @@ assert.throws(() => readMaiBotExtras(join(root, 'nope.db')), /找不到/);
 rmSync(root, { recursive: true, force: true });
 console.log('✓ 麦麦表情 / 表达方式 / 黑话：两代表结构、按聊天分、全局补进所有聊天、过滤、不重复');
 console.log('✓ 麦麦导入的表情也看图打标（kv 里真的有了标签）');
+console.log('✓ 重复导入的老表情不吃打标额度，真正要打标的新图照样打上（#118）');
+console.log('✓ 打上标签的张数按文件算，同图两条记录只算一张');

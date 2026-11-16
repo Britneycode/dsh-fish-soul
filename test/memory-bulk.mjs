@@ -60,6 +60,47 @@ assert.equal(r.changed, 4); assert.equal(active(), 9);
 assert.equal(bulkMemory({ db, clock, worker, filter: { q: "'); DROP TABLE memory; --" }, action: 'forget', dryRun: true }).matched, 0);
 assert.ok(filterWhere({ ownerId: 'all' }).narrowed === false);
 
+// #125：按类型 / 按日期筛（列表和批量共用 filterWhere）
+const kindWhere = filterWhere({ kind: 'event' });
+assert.ok(kindWhere.sql.includes('kind = ?'), '类型进 WHERE');
+assert.deepEqual(kindWhere.params, ['event']);
+assert.equal(kindWhere.narrowed, true, '只按类型筛也算够窄');
+const badKind = filterWhere({ kind: '乱写' });
+assert.equal(badKind.sql.includes('kind'), false, '非法类型不产生条件');
+assert.equal(badKind.narrowed, false, '非法类型不算够窄');
+const fromWhere = filterWhere({ from: '2026-01-01' });
+assert.ok(fromWhere.sql.includes('>= ?'), '起始日期进 WHERE');
+assert.deepEqual(fromWhere.params, ['2026-01-01']);
+assert.equal(fromWhere.narrowed, true);
+const toWhere = filterWhere({ to: '2026-12-31' });
+assert.ok(toWhere.sql.includes('<= ?'), '结束日期进 WHERE');
+assert.deepEqual(toWhere.params, ['2026-12-31']);
+assert.equal(toWhere.narrowed, true);
+const bothDates = filterWhere({ from: '2026-01-01', to: '2026-12-31' });
+assert.deepEqual(bothDates.params, ['2026-01-01', '2026-12-31'], '起止都在');
+assert.equal(bothDates.narrowed, true);
+assert.equal(filterWhere({ from: '2026-13-45' }).narrowed, false, '非法日期忽略');
+assert.equal(filterWhere({ to: '2026-02-30' }).narrowed, false, '不存在的日期忽略');
+
+// 端到端：按类型 / 日期真的能删到那几条（不只是纯函数对不对）
+const ins2 = db.prepare(`INSERT INTO memory (character_id, owner_id, channel, channel_id, kind, content, keywords, importance, emotion, source_session, created_at, updated_at, status, sort_date)
+	VALUES ('feiyu', 'user:kind', 'qq-private', '', ?, ?, '', 2, 0, 'manual', ?, 1, 'active', ?)`);
+const createdAt = Date.parse('2026-04-02T12:00:00Z');
+const localDay = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const ev1 = Number(ins2.run('event', '事件一', 1, '2026-03-05').lastInsertRowid);
+const ev2 = Number(ins2.run('event', '事件二', 1, '2026-06-10').lastInsertRowid);
+const fa1 = Number(ins2.run('fact', '事实一', 1, '2026-09-20').lastInsertRowid);
+const cr1 = Number(ins2.run('fact', '按创建日期', createdAt, null).lastInsertRowid);
+let dr = bulkMemory({ db, clock, worker, filter: { from: localDay(createdAt), to: localDay(createdAt) }, action: 'forget', dryRun: true });
+assert.deepEqual(dr.ids, [cr1], '没有事件日期的按创建日期算');
+dr = bulkMemory({ db, clock, worker, filter: { from: '2026-06-01', to: '2026-06-30' }, action: 'forget', dryRun: true });
+assert.deepEqual(dr.ids, [ev2], '按事件日期算');
+const kr = bulkMemory({ db, clock, worker, filter: { kind: 'event' }, action: 'forget' });
+assert.equal(kr.ok, true);
+assert.equal(kr.changed, 3, '只按类型筛也够窄，能删');
+assert.deepEqual(new Set(kr.ids), new Set([ids[2], ev1, ev2]), '删掉的正是那几条事件');
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM memory WHERE id = ? AND status = 'active'").get(fa1).n, 1, '别的类型没被误删');
+
 db.close();
 rmSync(home, { recursive: true, force: true });
 console.log('✓ 记忆批量：勾选 / 筛选、删除清向量、恢复重进队列、重要度 / 类型 / 私密、dryRun、防误删全部');

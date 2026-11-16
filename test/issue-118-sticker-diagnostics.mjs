@@ -29,9 +29,11 @@ const router = new LlmRouter({ db, getConfig: () => ({}), log: () => {}, ctx: { 
 const diag = new DiagLog({ db, log: () => {} });
 let sent;
 await handleV07Route({ method:'POST', path:'/stickers/backfill', url:new URL('http://localhost/stickers/backfill'), req:{}, res:{}, send:(status,obj)=>{sent={status,...obj};}, readBody:async()=>JSON.stringify({workspacePath:ws}), sameOrigin:()=>true, deps:{ db, getConfig:()=>({}), saveConfig:()=>{}, stickers:box, llmRouter:router, gateway:{workspacePath:()=>ws}, diag } });
-assert.equal(sent.tagged, 1); assert.equal(sent.skipped, 5); assert.equal(calls, 3, '缺文件、过大和附件失败不能送到模型');
-assert.deepEqual(sent.failures, { file_unreadable:1, file_too_large:1, image_not_admitted:1, model_error:1, invalid_tags:1 });
-assert.match(sent.hint, /读不到/); assert.match(sent.hint, /4 MB/); assert.match(sent.hint, /附件/); assert.match(sent.hint, /模型/);
+assert.equal(sent.total, 5, '文件已经没了的记录不算待办（#118）');
+assert.equal(sent.tagged, 1); assert.equal(sent.skipped, 4); assert.equal(calls, 3, '缺文件、过大和附件失败不能送到模型');
+assert.deepEqual(sent.failures, { file_too_large:1, image_not_admitted:1, model_error:1, invalid_tags:1 });
+assert.match(sent.hint, /4 MB/); assert.match(sent.hint, /附件/); assert.match(sent.hint, /模型/);
+assert.doesNotMatch(sent.hint, /读不到/, '文件已经没了的记录不再每次报「文件读不到」');
 assert.doesNotMatch(JSON.stringify(sent), /secret-token|secret-attach|missing\.png|bad-image\.png/);
 const entry = diag.list().find((x) => x.key === 'sticker-tag-failed');
 assert.ok(entry, '失败原因应进入用户可见运行日志');

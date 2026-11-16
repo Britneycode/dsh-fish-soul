@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readMaiBotExtras, previewMaiBotExtras, importMaiBotExtras, emojiName, sniffImage } from '../lib/maibot-extras.js';
+import { handleV07Route } from '../lib/routes-v07.js';
 import { SlangLearner, slangConfig } from '../lib/slang.js';
 import { StickerBox } from '../lib/stickers.js';
 
@@ -60,6 +61,23 @@ function newDb() {
 	return path;
 }
 
+// 只有 emoji 表的小库：造「麦麦那边同一条图出现多次」的数据（额度/计数那些场景要用）
+function emojiOnlyDb(name, rows) {
+	const dir = join(root, name, 'MaiBot');
+	mkdirSync(join(dir, 'data', 'emoji_registed'), { recursive: true });
+	const path = join(dir, 'data', 'MaiBot.db');
+	const db = new DatabaseSync(path);
+	db.exec('CREATE TABLE emoji (full_path TEXT, format TEXT, emoji_hash TEXT, description TEXT, emotion TEXT, is_registered INTEGER, is_banned INTEGER, usage_count INTEGER)');
+	const ins = db.prepare('INSERT INTO emoji VALUES (?,?,?,?,?,1,0,?)');
+	for (const r of rows) {
+		const file = join(dir, 'data', 'emoji_registed', r.file);
+		writeFileSync(file, r.bytes);
+		ins.run(file, String(r.file).split('.').pop(), 'h', String(r.description ?? ''), '', Number(r.usage ?? 1));
+	}
+	db.close();
+	return path;
+}
+
 const oldPath = oldDb();
 const x = readMaiBotExtras(oldPath);
 assert.equal(x.schema, 'old');
@@ -80,14 +98,14 @@ const slang = new SlangLearner({ db, callLlm: async () => null, getConfig: () =>
 const stickers = new StickerBox({ db, getConfig: () => ({}) });
 const ws = join(root, 'ws');
 mkdirSync(ws);
-let r = importMaiBotExtras({ dbPath: oldPath, slang, stickers, workspacePath: ws });
+let r = await importMaiBotExtras({ dbPath: oldPath, slang, stickers, workspacePath: ws });
 assert.equal(r.emojis, 2);
 assert.equal(r.expressions, 3, '像「自称机器人」的不收');
 assert.equal(r.skipped, 1);
 assert.equal(r.terms, 2);
 assert.deepEqual(readdirSync(join(ws, '_stickers')).sort(), ['开心.png', '无语.gif']);
 // 再导一次：不重复
-r = importMaiBotExtras({ dbPath: oldPath, slang, stickers, workspacePath: ws });
+r = await importMaiBotExtras({ dbPath: oldPath, slang, stickers, workspacePath: ws });
 assert.equal(r.emojis, 0); assert.equal(r.emojiDup, 2); assert.equal(r.expressions, 0); assert.equal(r.terms, 0);
 const st = slang.state();
 const g = st.find((c) => c.channelId === 'group:123456');
@@ -102,7 +120,7 @@ assert.ok(lines.some((l) => /不知道哪/.test(l)));
 const own = slang.contextLines('group:123456', 'yyds');
 assert.ok(own.some((l) => /yyds：永远的神/.test(l)));
 // 不导表情：只动说法
-r = importMaiBotExtras({ dbPath: oldPath, slang, stickers, workspacePath: null, expressions: false, jargons: false });
+r = await importMaiBotExtras({ dbPath: oldPath, slang, stickers, workspacePath: null, expressions: false, jargons: false });
 assert.ok(r.warnings.some((w) => /工作区/.test(w)));
 
 // 新版表结构
@@ -112,9 +130,147 @@ assert.equal(y.schema, 'new');
 assert.deepEqual(y.emojis.map((e) => e.name), ['一只猫猫在笑'], '只要 image_type = emoji');
 assert.deepEqual(y.expressions.map((e) => [e.style, e.channelId]), [['说一声来了老弟', 'group:654321'], ['全局说法', 'global']]);
 assert.deepEqual(y.jargons.map((j) => [j.term, j.channelId]), [['awsl', 'group:654321'], ['xswl', 'global']]);
-r = importMaiBotExtras({ dbPath: newPath, slang, stickers, workspacePath: ws, maxEmojis: 5 });
+r = await importMaiBotExtras({ dbPath: newPath, slang, stickers, workspacePath: ws, maxEmojis: 5 });
 assert.equal(r.emojis + r.emojiDup, 1, '同一张图（和旧库那张字节一样）算重复');
 
+// ── #118：导入的表情也要看图打标 ──
+// 导进来的表情没标签就进不了「按感觉挑」的池子（那边只认有标签的）⇒ 导入这条路也得打标。
+// 麦麦的描述常常是整句（「这是一张表情包，一只猫猫在笑」）→ 捡不出标签 → 只能靠看图。
+{
+	const ws2 = join(root, 'ws-vision');
+	mkdirSync(ws2);
+	const seen = [];
+	const vision = async (prompt, images) => {
+		assert.ok(Array.isArray(images) && images.length === 1, '一次只看一张图');
+		seen.push(images[0].name);
+		return '卖萌、可爱';
+	};
+	const tagged = await importMaiBotExtras({ dbPath: newPath, slang, stickers, workspacePath: ws2, vision });
+	assert.equal(tagged.emojis, 1, '导入了一张');
+	const row = stickers.collected().find((x) => x.workspacePath === ws2);
+	assert.deepEqual(row.tags, ['卖萌', '可爱'], '标签真写进 kv 里了（不是「函数被调用了」）');
+	assert.equal(row.tagsBy, 'vision', '来源标成 vision');
+	assert.equal(tagged.emojiTagged, 1, '打上标签的张数要报出来');
+	assert.deepEqual(seen, ['一只猫猫在笑.png'], '模型确实被叫去看这张图了');
+
+	// 不给 vision：只导入、不打标（跟以前一样）
+	const ws3 = join(root, 'ws-plain');
+	mkdirSync(ws3);
+	const plain = await importMaiBotExtras({ dbPath: newPath, slang, stickers, workspacePath: ws3 });
+	assert.equal(plain.emojis, 1);
+	assert.deepEqual(stickers.collected().find((x) => x.workspacePath === ws3).tags, [], '没给 vision 就不打标');
+	assert.equal(plain.emojiTagged, 0, '没给 vision 就不打标');
+
+	// 重复导入的老表情也接着打标（它可能一直都没标签 —— 就是主人现在这批）
+	const again = await importMaiBotExtras({ dbPath: newPath, slang, stickers, workspacePath: ws3, vision });
+	assert.equal(again.emojis, 0, '重复的不再存一遍');
+	assert.equal(again.emojiDup, 1, '是重复');
+	assert.equal(again.emojiTagged, 1, '重复导入的老表情也接着打标');
+	assert.deepEqual(stickers.collected().find((x) => x.workspacePath === ws3).tags, ['卖萌', '可爱'], '标签真写进 kv 里了');
+
+	// 已经有标签的重复表情：不再问模型，也不能算成「这次看图打上的」（否则面板的数字在骗人）
+	const seenBefore = seen.length;
+	const third = await importMaiBotExtras({ dbPath: newPath, slang, stickers, workspacePath: ws3, vision });
+	assert.equal(third.emojiTagged, 0, '本来就有标签的不能算成这次打上的');
+	assert.equal(seen.length, seenBefore, '已经有标签的不再问模型');
+}
+
+// ── #118：重复导入的老表情不能把「看图打标」的额度吃光 ──
+// 额度是留给「真要问模型」的那几次的：已经有标签的老表情，tagByVision 会直接返回旧标签、
+// 根本不问模型 —— 它们一分额度都不该吃。否则额度被老表情吃光，真正要打标的新图一张都轮不上
+// （导多少遍都不收敛，跟 #118 修的是同一个症状）。
+{
+	const wsB = join(root, 'ws-budget');
+	mkdirSync(wsB);
+	// 库里先有一张带标签的老表情（麦麦那边有 3 条同图的记录 → 导入时全是重复）
+	const old = stickers.importImage({ bytes: GIF, mediaType: 'image/gif', name: 'old.gif', workspacePath: wsB, from: '测试', tags: ['柴犬'] });
+	assert.equal(old.ok, true, '老表情先入库');
+	const budgetPath = emojiOnlyDb('budget', [
+		{ file: 'old.gif', bytes: GIF, usage: 9 },
+		{ file: 'old.gif', bytes: GIF, usage: 8 },
+		{ file: 'old.gif', bytes: GIF, usage: 7 },
+		{ file: 'new.png', bytes: PNG, usage: 1 }
+	]);
+	let asked = 0;
+	const res = await importMaiBotExtras({
+		dbPath: budgetPath, slang, stickers, workspacePath: wsB,
+		vision: async () => { asked++; return '卖萌、可爱'; },
+		maxEmojis: 3
+	});
+	assert.equal(res.emojiDup, 3, '老表情那 3 条都是重复');
+	assert.equal(res.emojis, 1, '新图还是导进去了');
+	const fresh = stickers.collected().find((x) => x.workspacePath === wsB && x.file !== old.file);
+	assert.ok(fresh, '新图入库了');
+	assert.deepEqual(fresh.tags, ['卖萌', '可爱'], '额度被老表情吃光的话，这张新图就永远打不上标签');
+	assert.equal(fresh.tagsBy, 'vision');
+	assert.equal(res.emojiTagged, 1, '只有新图算「这次打上的」');
+	assert.equal(asked, 1, '模型只被叫去看那张新图（老表情有标签，不该问）');
+}
+
+// ── #118：面板报的张数按文件算，不按记录算 ──
+// 同一个文件在麦麦那边可能有多条记录（导入一条 + 重复一条）：只有 1 张图被打上标签，
+// 报成 2 张就是在骗人。
+{
+	const wsC = join(root, 'ws-count');
+	mkdirSync(wsC);
+	const samePath = emojiOnlyDb('same', [
+		{ file: 'a.png', bytes: PNG, usage: 9 },
+		{ file: 'a.png', bytes: PNG, usage: 8 }
+	]);
+	const res = await importMaiBotExtras({ dbPath: samePath, slang, stickers, workspacePath: wsC, vision: async () => '卖萌、可爱', maxEmojis: 5 });
+	assert.equal(res.emojis, 1, '一张图只导进去一次');
+	assert.equal(res.emojiDup, 1, '第二条是重复');
+	assert.equal(res.emojiTagged, 1, '同一张文件只算一张（不是两条记录两张）');
+	const row = stickers.collected().find((x) => x.workspacePath === wsC);
+	assert.deepEqual(row.tags, ['卖萌', '可爱'], '标签真写进 kv 里了');
+}
+
+// 描述里带标签词的：走 summary 路径（没问模型），面板上仍是这一张有标签 → 记 1
+{
+	const wsS = join(root, 'ws-summary');
+	mkdirSync(wsS);
+	const sumPath = emojiOnlyDb('summary', [
+		{ file: 'a.png', bytes: PNG, usage: 9, description: '柴犬笑' },
+		{ file: 'a.png', bytes: PNG, usage: 8, description: '柴犬笑' }
+	]);
+	let asked = 0;
+	const res = await importMaiBotExtras({ dbPath: sumPath, slang, stickers, workspacePath: wsS, vision: async () => { asked++; return '卖萌、可爱'; }, maxEmojis: 5 });
+	assert.equal(res.emojis, 1);
+	assert.equal(res.emojiDup, 1);
+	assert.equal(res.emojiTagged, 1, 'summary 捡出标签的，这一张也算有标签');
+	assert.equal(asked, 0, 'summary 已经够用，不必问模型');
+	const row = stickers.collected().find((x) => x.workspacePath === wsS);
+	assert.deepEqual(row.tags, ['柴犬笑'], '标签来自 summary');
+	assert.equal(row.tagsBy, 'summary');
+}
+
 assert.throws(() => readMaiBotExtras(join(root, 'nope.db')), /找不到/);
+
+// ── #118：面板点「导入」这条路也要打标 ──
+// 路由得把看图能力传下去、并且等导入跑完再回（不等就只回一个 ok，面板显示「导入了 undefined 张」）
+{
+	const ws4 = join(root, 'ws-route');
+	mkdirSync(ws4);
+	let sent = null;
+	await handleV07Route({
+		method: 'POST', path: '/import/maibot-extras/apply', url: new URL('http://localhost/import/maibot-extras/apply'),
+		req: {}, res: {}, send: (status, obj) => { sent = { status, ...obj }; },
+		readBody: async () => JSON.stringify({ dbPath: newPath }), sameOrigin: () => true,
+		deps: {
+			db, getConfig: () => ({}), saveConfig: () => {}, stickers, slang,
+			gateway: { workspacePath: () => ws4, titleOf: (c) => c },
+			llmRouter: { call: async () => '卖萌、可爱' }
+		}
+	});
+	assert.equal(sent.ok, true);
+	assert.equal(sent.emojis, 1, '路由要等导入跑完再回（不等就只回一个 ok，面板显示「导入了 undefined 张」）');
+	assert.equal(sent.emojiTagged, 1, '打上标签的张数要报出来');
+	const row = stickers.collected().find((x) => x.workspacePath === ws4);
+	assert.deepEqual(row.tags, ['卖萌', '可爱'], '标签真写进 kv 里了（路由要把 vision 传下去）');
+}
+
 rmSync(root, { recursive: true, force: true });
 console.log('✓ 麦麦表情 / 表达方式 / 黑话：两代表结构、按聊天分、全局补进所有聊天、过滤、不重复');
+console.log('✓ 麦麦导入的表情也看图打标（kv 里真的有了标签）');
+console.log('✓ 重复导入的老表情不吃打标额度，真正要打标的新图照样打上（#118）');
+console.log('✓ 打上标签的张数按文件算，同图两条记录只算一张');

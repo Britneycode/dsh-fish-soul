@@ -108,6 +108,25 @@ test('什么都没有的空壳消息仍然丢掉', () => {
   assert.deepEqual(filterUseful([{}, { text: '', tips: '', shareAweme: null }]), [])
 })
 
+test('协议控制帧不算消息（#128 串会话根因）', () => {
+  // kind=50001 且带 command_type 的控制帧（登录态同步、会话标记等）也有
+  // convId / seq / senderId。放它们过判据，会被当成「这轮读到的会话」，它的
+  // convId 写进游标 ⇒ 多轮轮询后所有会话被写成同一个人（记忆记错人、回复发错窗口）。
+  const control = { kind: 50001, text: '', tips: '', shareAweme: null,
+    convId: CONV_ID, seq: '99', senderId: PEER, raw: { command_type: 1 } }
+  assert.deepEqual(filterUseful([control]), [], 'kind=50001 的控制帧必须丢掉')
+
+  // raw.command_type 存在但 kind 不是 50001 —— 也是控制帧，同样丢。
+  const ctOnly = { kind: 7, text: '', tips: '', shareAweme: null,
+    convId: CONV_ID, seq: '98', senderId: PEER, raw: { command_type: 2 } }
+  assert.deepEqual(filterUseful([ctOnly]), [], '带 command_type 的帧必须丢掉')
+
+  // 真消息（文本 + command_type 不在 raw 里）不受影响。
+  const real = { kind: 7, text: '在吗', tips: '', shareAweme: null,
+    convId: CONV_ID, seq: '1', senderId: PEER, raw: { text: '在吗' } }
+  assert.equal(filterUseful([real]).length, 1, '真文本消息必须留下')
+})
+
 test('接口消息不带昵称时，用唯一会话 ID 兜底', async () => {
   const b = fakeBrowser([capture([node({ payload: { text: '在吗' } })])])
   assert.equal(await resolveConvId(b, UNAME), CONV_ID, 'senderName 为空也要能定出会话')

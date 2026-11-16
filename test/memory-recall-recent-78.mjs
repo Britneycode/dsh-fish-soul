@@ -23,10 +23,17 @@ const NOW = Date.parse('2026-11-16T12:00:00Z');
 const clock = { now: () => NOW };
 const ok = (n) => console.log('✓', n);
 
-/** 每个用例一份干净的库：夹具互不干扰。 */
+/**
+ * 每个用例一份干净的库：夹具互不干扰。
+ *
+ * 🔴 openDatabase() 在**模块加载时**就把 DSH_HOME 定死了（见 lib/db.js），
+ * 之后再改 process.env.DSH_HOME 不生效 —— 所以隔离用例靠清表，不靠换环境变量。
+ * 不清表的话前一条用例造的夹具会漏进下一条，断言里的 id 就对不上（真踩过：
+ * 一条用例里 id 1 其实是上一条用例留下的）。
+ */
 function setup() {
-	process.env.DSH_HOME = tmpHome('memory-recall-recent-78-');
 	const db = openDatabase();
+	db.exec('DELETE FROM memory; DELETE FROM vec; DELETE FROM kv; DELETE FROM person;');
 	const insert = db.prepare(`INSERT INTO memory (character_id, owner_id, channel, channel_id, kind, content, keywords,
 		importance, emotion, created_at, updated_at, status)
 		VALUES ('feiyu', 'self', 'bili', 'bili:video:x', 'event', ?, ?, ?, 0, ?, ?, 'active')`);
@@ -97,6 +104,55 @@ test('时间意图只重排命中的记忆，不把对不上的塞进召回', ()
 	assert.ok(!hit.some((m) => String(m.content).includes('企鹅')), '对不上词的记忆不能被时间加权捞出来');
 	db.close();
 	ok('只影响排序，不新增记忆');
+});
+
+test('只靠泛词对上的记忆，不许被时间加权提上来', () => {
+	// 🔴 真机事故：「上次那个梗」里对上「那个」的那条（一条刷视频的）被提到了第一 ——
+	// 问的是梗，答的却是刷视频，等于想起了一件没发生的事。
+	// 泛词（那个/干/事…）不算内容词：命中它们不代表命中了话题。
+	const { db, add, recall } = setup();
+	const fresh = add('我在B站刷到狗狗的视频《狗子日常》，也挺好笑', 1, 0);
+	// 只靠泛词沾边的：正文里有「故事」这种泛词，但没有任何一个实词（刷/视频）对上
+	const weak = add('她讲了个故事，结局很治愈', 1, 0);
+	add('企鹅在冰棍摊前排队', 1, 0);
+
+	const hit = recall('你刚才刷了什么视频呀？', 10);
+	assert.ok(hit.some((m) => m.id === fresh), '真正对上的要被想起');
+	assert.ok(!hit.some((m) => m.id === weak), '只靠泛词沾边的不能被时间加权捞出来');
+
+	db.close();
+	ok('泛词不算内容词，不编造没发生过的事');
+});
+
+test('真机那条误召回：问「梗」，刷视频的记忆不能被提上来', () => {
+	// 🔴 真机原文（#714）：正文里有「那个」「故事」，但没有「梗」——
+	// 它只是靠泛词「那个」沾了边。以前被提到第一条，问的是梗、答的却是刷视频。
+	const { db, add, explain } = setup();
+	const wrong = add('我在B站刷到哔哩哔哩大会员 的视频《可以再对我说一遍那个故事吗》：刷到BLG夺冠的燃剪', 1, 0);
+	const right = add('他说的那个梗是高中班主任的班主任', 3, 40);
+
+	// 判据是「有没有被时间加权」，不是「排第几」——
+	// 它本来就能靠 BM25 原生分进前列（正文里也有「刷」「视频」这些词），
+	// 被时间加权才会把它顶到「最近的那批」里，那才是编造。
+	const hit = explain('上次那个梗', 9);
+	assert.ok(hit.recalled.some((m) => m.id === right), '真正提到「梗」的那条要能被想起');
+	const wrongHit = [...hit.recalled, ...hit.others].find((c) => c.id === wrong);
+	assert.equal(wrongHit?.recency ?? 1, 1, '只靠泛词「那个」沾边的不能被时间加权');
+	db.close();
+	ok('泛词沾边不算命中话题');
+});
+
+test('泛词「干」也算不上话题：昨天的日记不能冒充「刚才」', () => {
+	// 「我刚才在干嘛」里的「干」是泛词（指代那个动作），命中它不代表命中了话题。
+	// 以前这条会把昨天的日记提到第一条 —— 问「刚才」，答案却是昨天的日记。
+	const { db, add, recall } = setup();
+	const diary = add('2026-11-15 的日记：今天没什么事，平得有点发闷', 1, 1);
+	const real = add('未云私聊问我在干嘛，我回说刚吃完饭', 1, 0);
+	const hit = recall('我刚才在干嘛', 5);
+	assert.ok(hit.some((m) => m.id === real), '正文含「干嘛」的这条要能被想起');
+	assert.notEqual(hit[0]?.id, diary.id, '只靠泛词「干」对上的不能排第一');
+	db.close();
+	ok('泛词不算内容词，不编造没发生过的事');
 });
 
 test('遗忘曲线没被时间加权改掉：重要度 >= 3 恒不衰减', () => {

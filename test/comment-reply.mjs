@@ -74,7 +74,7 @@ const watched = (b) => b.watch({ bvid: 'BVtest1', source: 'recommend' }, false, 
 	assert.equal(got.replied, '');
 }
 
-// ── 2. 开着：回一条，带 root=rpid、parent=0，额度 +1 ──
+// ── 2. 开着：回一条，带 root=parent=rpid（二级评论形状），额度 +1 ──
 {
 	reset();
 	const b = makeBrowser();
@@ -82,7 +82,7 @@ const watched = (b) => b.watch({ bvid: 'BVtest1', source: 'recommend' }, false, 
 	assert.equal(sent.length, 1, '应该回一条');
 	assert.equal(sent[0].oid, 42);
 	assert.equal(sent[0].root, '222', 'root 必须是挑中那条评论的 rpid');
-	assert.equal(sent[0].parent, 0);
+	assert.equal(sent[0].parent, '222', 'parent 必须是被回那条的 rpid（0 会发成顶层评论）');
 	assert.ok(sent[0].message.includes('2019'), '内容来自模型那句');
 	assert.equal(got.replied, sent[0].message);
 	assert.equal(b.repliedToday(), 1);

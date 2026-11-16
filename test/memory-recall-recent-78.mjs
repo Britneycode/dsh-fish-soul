@@ -155,6 +155,18 @@ test('实词不能被误当泛词：问「故事」要能想起含「故事」�
 	ok('实词不被误当泛词');
 });
 
+test('「谁」是问法不是话题：日记不能靠它被提上来', () => {
+	// 「刚才那个梗是谁说的」里的「谁」是疑问代词。
+	// 它要是被当内容词，一条只是提到「说的」的日记就会被提上来 —— 问「梗」、答日记。
+	const { db, add, explain } = setup();
+	const diary = add('今天他说的那些事我都记着', 1, 0);
+	const res = explain('刚才那个梗是谁说的', 9);
+	const hit = [...res.recalled, ...res.others].find((c) => c.id === diary);
+	assert.equal(hit?.recency ?? 1, 1, '靠疑问代词「谁」沾边的记忆不能被时间加权');
+	db.close();
+	ok('疑问代词不算内容词');
+});
+
 test('遗忘曲线没被时间加权改掉：重要度 >= 3 恒不衰减', () => {
 	const { db, add, explain } = setup();
 	add('我在B站刷到猫猫视频', 3, 40);

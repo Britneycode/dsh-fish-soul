@@ -30,6 +30,17 @@ const ins = db.prepare(`INSERT INTO memory (character_id, owner_id, channel, kin
 const seed = (owner, kind, content) => Number(ins.run(owner, kind, content, NOW, NOW).lastInsertRowid);
 const ownerOf = (id) => db.prepare('SELECT owner_id FROM memory WHERE id = ?').get(id).owner_id;
 
+// 一篇由 sourceId 衍生的周记（weekly_source 指向来源 + 周记自己的向量）
+const seedDerivedWeekly = (sourceId) => {
+	const weeklyId = Number(db.prepare(`INSERT INTO memory (character_id, owner_id, channel, kind, content, keywords, importance, emotion, source_session, created_at, updated_at, status)
+		VALUES ('feiyu', 'user:p_a', 'qq-private', 'weekly', '阿甲的周记', '', 2, 0, 'weekly', ?, ?, 'active')`).run(NOW, NOW).lastInsertRowid);
+	db.prepare('INSERT INTO weekly_source (summary_id, source_id) VALUES (?, ?)').run(weeklyId, sourceId);
+	db.prepare("INSERT INTO vec(memory_id, model_id, dim, generation_id, blob) VALUES (?, 'test', 1, 1, x'00')").run(weeklyId);
+	return weeklyId;
+};
+const weeklyState = (id) => db.prepare('SELECT status, valid_to FROM memory WHERE id = ?').get(id);
+const vecCount = (id) => db.prepare('SELECT COUNT(*) n FROM vec WHERE memory_id = ?').get(id).n;
+
 let ids = null;
 function reset() {
 	db.exec('DELETE FROM memory');
@@ -84,6 +95,85 @@ test('周记不搬（派生周记不许被改）', () => {
 	assert.equal(r.changed, 1);
 	assert.equal(ownerOf(ids.weekly), 'user:p_a', '周记留在原地');
 	assert.equal(db.prepare('SELECT kind FROM memory WHERE id = ?').get(ids.weekly).kind, 'weekly');
+});
+
+// 🔴 搬 owner 的副作用：来源记忆改了 owner → weekly_source_changed 触发器把它的周记标废。
+//    周记一旦标废就回不来了（weekly_protect 挡着改回 active），而提示只写「搬给了 N 条」——
+//    用户点一次，相关周记就永久从检索里消失。所以 owner 变了不算「来源内容变了」。
+test('搬来源记忆的 owner：派生周记照样有效（不标废、向量不删）', () => {
+	reset();
+	const src = ids.fact;
+	const weeklyId = seedDerivedWeekly(src);
+	assert.equal(weeklyState(weeklyId).status, 'active', '前置：周记一开始是有效的');
+	assert.equal(vecCount(weeklyId), 1, '前置：周记带着向量');
+	const r = bulkMemory({ db, clock, worker, ids: [src], action: 'owner', value: 'user:p_b' });
+	assert.equal(r.changed, 1);
+	assert.equal(ownerOf(src), 'user:p_b', '前置：记忆确实搬走了（不然下面这些断言等于没测）');
+	assert.equal(weeklyState(weeklyId).status, 'active', '搬主人不改内容，周记不该被标废');
+	assert.equal(weeklyState(weeklyId).valid_to, null, '周记不该被写 valid_to');
+	assert.equal(vecCount(weeklyId), 1, '周记的向量不该被删');
+});
+
+test('来源内容变了：周记照样被标废、向量被删（这条不能被一起放过）', () => {
+	reset();
+	const src = ids.fact;
+	const weeklyId = seedDerivedWeekly(src);
+	db.prepare('UPDATE memory SET content = ?, updated_at = ? WHERE id = ?').run('阿甲喜欢狗', NOW + 1, src);
+	assert.equal(weeklyState(weeklyId).status, 'outdated', '内容变了 → 周记该失效');
+	assert.equal(vecCount(weeklyId), 0, '内容变了 → 周记的向量该删');
+});
+
+test('老库的旧触发器定义：openDatabase 会把它换成新的', () => {
+	reset();
+	// 造一个老库：weekly_source_changed 还是旧定义（owner_id 在 OF 列表里）
+	db.exec('DROP TRIGGER IF EXISTS weekly_source_changed');
+	db.exec(`CREATE TRIGGER weekly_source_changed AFTER UPDATE OF content,status,valid_to,visibility,owner_id,channel,channel_id,kind,about ON memory
+		WHEN OLD.content IS NOT NEW.content OR OLD.status IS NOT NEW.status OR OLD.valid_to IS NOT NEW.valid_to OR OLD.visibility IS NOT NEW.visibility OR OLD.owner_id IS NOT NEW.owner_id OR OLD.channel IS NOT NEW.channel OR OLD.channel_id IS NOT NEW.channel_id OR OLD.kind IS NOT NEW.kind OR OLD.about IS NOT NEW.about
+		BEGIN
+		 UPDATE memory SET status='outdated', valid_to=NEW.updated_at, updated_at=NEW.updated_at WHERE id IN (SELECT summary_id FROM weekly_source WHERE source_id=OLD.id) AND status='active';
+		 DELETE FROM vec WHERE memory_id IN (SELECT summary_id FROM weekly_source WHERE source_id=OLD.id);
+		END;`);
+	const ofColumns = () => (/AFTER UPDATE OF ([^\s]+) ON/.exec(
+		db.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'weekly_source_changed'").get().sql) ?? ['', ''])[1].split(',');
+	assert.ok(ofColumns().includes('owner_id'), '前置：造出来的确实是旧定义');
+
+	// 旧定义下搬 owner 确实会把周记标废（这正是那个副作用）
+	const src = ids.fact;
+	const weeklyId = seedDerivedWeekly(src);
+	bulkMemory({ db, clock, worker, ids: [src], action: 'owner', value: 'user:p_b' });
+	assert.equal(weeklyState(weeklyId).status, 'outdated', '前置：旧定义确实会标废周记');
+
+	// 走一次 openDatabase（= 重启一次）：迁移该把定义换成新的
+	const db2 = openDatabase();
+	db2.close();
+	assert.ok(!ofColumns().includes('owner_id'), '老库的触发器定义必须被换掉（迁移没生效）');
+
+	// 换掉之后再搬：周记不再被标废
+	reset();
+	const src2 = ids.fact;
+	const weeklyId2 = seedDerivedWeekly(src2);
+	bulkMemory({ db, clock, worker, ids: [src2], action: 'owner', value: 'user:p_b' });
+	assert.equal(weeklyState(weeklyId2).status, 'active', '换完定义后搬 owner 不该标废周记');
+	assert.equal(vecCount(weeklyId2), 1, '换完定义后周记的向量不该被删');
+});
+
+test('搬的整段在一个事务里：weekly_protect 不会对别的连接短暂缺席', { skip: typeof db.function !== 'function' ? '需要 node:sqlite 的 db.function（node ≥ 22.13）' : false }, () => {
+	reset();
+	// 另一个连接：事务提交之前，它看到的还是提交前的状态
+	const db2 = openDatabase();
+	let seen = null;
+	db.function('probe_weekly_protect', () => {
+		seen = !!db2.prepare("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = 'weekly_protect'").get();
+		return 0;
+	});
+	db.exec('CREATE TRIGGER probe BEFORE UPDATE ON memory BEGIN SELECT probe_weekly_protect(); END;');
+	try {
+		bulkMemory({ db, clock, worker, ids: [ids.fact], action: 'owner', value: 'user:p_b' });
+	} finally {
+		db.exec('DROP TRIGGER IF EXISTS probe');
+		db2.close();
+	}
+	assert.equal(seen, true, '搬的过程中 weekly_protect 不能对别的连接消失（那一瞬间谁都能改周记）');
 });
 
 test('dryRun 只数不改', () => {

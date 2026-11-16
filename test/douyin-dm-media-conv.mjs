@@ -185,14 +185,17 @@ test('douyin-api 里挑响应/挑结构都不再把媒体消息当空', async ()
     new URL('../lib/channels/vendor/douyin-bridge/douyin-api.mjs', import.meta.url),
     'utf8',
   )
-  const countLine = src.slice(src.indexOf('const countUseful'), src.indexOf('const countUseful') + 300)
+  // 判据本体已收口到 `isUsefulMessage`（全仓唯一一份，三个调用点都走它）。
+  // 断言对象跟着契约变：不再查某个局部变量长什么样，而是查
+  // ① 判据本体认 convId/seq/senderId；② 两处调用点真的走了它，没有内联副本。
+  const predLine = src.slice(src.indexOf('export function isUsefulMessage'), src.indexOf('export function isUsefulMessage') + 400)
   assert.ok(
-    /m\.convId \|\| m\.seq \|\| m\.senderId/.test(countLine),
-    'countUseful 要认 convId/seq/senderId，否则只发媒体的新结构会被判成「解不出」',
+    /m\.convId \|\| m\.seq \|\| m\.senderId/.test(predLine),
+    'isUsefulMessage 要认 convId/seq/senderId，否则只发媒体的新结构会被判成「解不出」',
   )
   assert.ok(
-    !/const countUseful = \(list\) => list\.filter\(\(m\) => m\.text \|\| m\.tips \|\| m\.shareAweme\)\.length/.test(src),
-    'countUseful 不能退回只认文本的旧判据',
+    !/[^a-zA-Z]m\.text \|\| m\.tips \|\| m\.shareAweme \|\| m\.convId/.test(src.replace(predLine, '')),
+    '除了 isUsefulMessage 本体，别处不能再出现内联的同一套判据（#128 就是内联副本漏修）',
   )
 })
 

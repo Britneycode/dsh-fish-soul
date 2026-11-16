@@ -6,7 +6,7 @@
 // ⇒ 永远进不了「按感觉挑」的池子 ⇒ 她只能反复用那几张有标签的。
 import assert from 'node:assert/strict';
 import { tmpHome } from './_tmp.mjs';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const home = tmpHome('dsh-sticker-backfill-');
@@ -85,16 +85,19 @@ const box = new StickerBox({ db, getConfig: () => ({ collect: true, perDay: 10 }
 	ok('模型看不清 → 当失败，不写成标签');
 }
 
-// ── 4. 图读不到（文件不在）→ 跳过，不影响别的 ──
+// ── 4. 图读不到（文件已经不在了）→ 不算待办、不报「读不到」（#118）──
 {
 	seed([
 		{ file: '不存在.gif', hash: 'h9', workspacePath: ws, tags: [], tagsBy: '', at: 1 },
 		{ file: '没标签A.gif', hash: 'h2', workspacePath: ws, tags: [], tagsBy: '', at: 2 }
 	]);
 	const r = await box.backfillTags({ workspacePath: ws, vision: async () => '可爱', embedder: null });
-	assert.equal(r.skipped, 1, '读不到的那张跳过');
+	assert.equal(r.total, 1, '文件不在的记录不算待办（也不占 limit）');
 	assert.equal(r.tagged, 1, '另一张照打');
-	ok('图读不到 → 跳过，不影响别的');
+	assert.equal(r.skipped, 0);
+	assert.equal(r.failures.file_unreadable, undefined, '不再报「文件读不到」');
+	assert.ok(box.collected().find((x) => x.file === '不存在.gif'), 'kv 记录不删（主人的数据，删不删交给面板）');
+	ok('文件已经没了 → 不算待办、不报「读不到」，记录本身留着');
 }
 
 // ── 5. 补完标签顺手补向量（embedStickers 只认有标签的，顺序不能反）──
@@ -167,4 +170,30 @@ console.log('\nsticker-backfill ok');
 	assert.ok(logs.some((l) => l.includes('抛错') && l.includes('通道 500')), '③ 抛错要留痕并带上原因');
 
 	ok('三种失败各留一行（图没进去 / 看不清 / 回的格式不对，日志里分得开）');
+}
+
+// ── 9. 死记录不再永久占用补标签（#118）──
+// 文件已经没了的记录以前每次点「补标签」都报一遍「文件读不到」，永远不收敛，还占着 limit。
+{
+	seed([
+		{ file: '死记录.gif', hash: 'hdead', workspacePath: ws, tags: [], tagsBy: '', at: 1 },
+		{ file: '没标签A.gif', hash: 'h2', workspacePath: ws, tags: [], tagsBy: '', at: 2 }
+	]);
+	const first = await box.backfillTags({ workspacePath: ws, vision: async () => '可爱', embedder: null, opts: { limit: 1 } });
+	assert.equal(first.total, 1, '死记录不进待办');
+	assert.equal(first.tagged, 1, '死记录不能把 limit 吃掉（否则活的那张永远轮不上）');
+	assert.equal(first.failures.file_unreadable, undefined, '不再报「文件读不到」');
+	const second = await box.backfillTags({ workspacePath: ws, vision: async () => '可爱', embedder: null });
+	assert.equal(second.total, 0, '第二次没有待办了（收敛了）');
+	assert.deepEqual(second.failures, {}, '不再报同一批「文件读不到」');
+	assert.ok(box.collected().find((x) => x.file === '死记录.gif'), '死记录还在 kv 里（没被偷偷删）');
+	ok('死记录不再每次冒出来：重复补标签不再报「文件读不到」');
+}
+
+// ── 10. 面板上「补标签」旁边那个数字也得把死记录算掉（#118）──
+// 数字一直不为 0 → 按钮永远亮着 → 她会一直点，看到的却是同一批「文件读不到」。
+{
+	const ui = readFileSync(new URL('../lib/client.soul.js', import.meta.url), 'utf8');
+	assert.match(ui, /untaggedCount = items\.filter\([^;]*x\.exists !== false/, '没标签的数字不能把文件已经没了的算进去');
+	ok('面板「没标签 N 张」不含文件已经没了的记录');
 }

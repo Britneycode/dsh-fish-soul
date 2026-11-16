@@ -54,12 +54,12 @@ async function within(ms, fn) {
  * alive(expr) 里命中的表达式照常返回（模拟「这一条命令还能回」）。
  */
 function stuckBrowser({ alive = () => false } = {}) {
-	const br = { evals: [], sends: [], gotos: [] }
+	const br = { evals: [], sends: [], gotos: [], t0: Date.now() }
 	br.sessionId = 'S1'
 	br.addPreloadScript = () => {}
 	br.eval = (expr, opts = {}) => {
 		const ms = Number(opts.timeoutMs) || 0
-		br.evals.push({ expr: String(expr), ms })
+		br.evals.push({ expr: String(expr), ms, at: Date.now() - br.t0 })
 		if (alive(String(expr))) return Promise.resolve(true)
 		if (ms > 0) {
 			return new Promise((_, reject) => {
@@ -70,7 +70,7 @@ function stuckBrowser({ alive = () => false } = {}) {
 	}
 	br.send = (method, params, sessionId, timeoutMs) => {
 		const ms = Number(timeoutMs) || 0
-		br.sends.push({ method, ms })
+		br.sends.push({ method, ms, at: Date.now() - br.t0 })
 		if (ms > 0) {
 			return new Promise((_, reject) => {
 				setTimeout(() => reject(new Error(`CDP ${method} 超时（${ms}ms）`)), ms)
@@ -170,6 +170,22 @@ test('页面卡死时 next() 的 changed 循环有总预算（轮数不能乘成
 	const reads = br.evals.filter((e) => /feed-active-video/.test(e.expr)).length
 	assert.ok(reads < 8, `读当前视频的轮数要有总预算兜着，实际 ${reads} 轮`)
 	assert.ok(evalTimeouts(br).every((ms) => ms > 0 && ms <= 200), `eval 必须带 timeoutMs：${evalTimeouts(br)}`)
+})
+
+test('next() 预算耗尽后不再发起后续分支的 send（不能补挂一串超时）', async () => {
+	// 点「下一条」失败 ⇒ 键盘 / 滚轮分支会被尝试，页面卡死 ⇒ 每个调用都超时。
+	// 预算给得只够走到第一个 send：修好后，它在预算耗尽处停住（不再发起滚轮那串）；
+	// 修好前，预算耗尽后仍会继续发起（每次再等一个超时）。
+	const budget = 400
+	const br = stuckBrowser()
+	const inst = mk(br, { timing: { evalTimeoutMs: 200, nextBudgetMs: budget } })
+	const t = Date.now()
+	const moved = await within(2500, () => inst.next(br, '111'))
+	assert.equal(moved, false)
+	assert.ok(Date.now() - t < 2500, '必须有界返回')
+	// 关键断言：预算只够一次 send 时，就不能有第二次 send（修前会有）。
+	assert.equal(br.sends.length, 1, `预算不够就该停在第一次 send，实际 ${JSON.stringify(br.sends)}`)
+	assert.ok(br.sends.every((s) => s.at < budget + 60), `发起时刻必须在预算内：${JSON.stringify(br.sends)}`)
 })
 
 test('页面卡死时 ensureRecommend 有界返回', async () => {

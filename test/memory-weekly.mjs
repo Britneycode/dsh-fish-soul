@@ -58,5 +58,14 @@ try {
  const sources=await handleSoulRoute({method:'GET',path:'/memory/weekly/sources',url:new URL(`http://localhost/memory/weekly/sources?summaryId=${r.id}`),req:{},res:{},send:(status,obj)=>sent={status,...obj},readBody:async()=>'',sameOrigin:()=>true,deps});
  assert(sources);assert.equal(sent.sources.length,2);
  assert.equal((await route('POST','/inspector/memory-edit',{id:second.id,content:'改'})).ok,false);
+ // 搬来源记忆的 owner 不该把周记标废（#126）：owner 变了 ≠ 来源内容变了，周记照样有效
+ const src2=add('只搬主人的来源');
+ const w2=Number(db.prepare(`INSERT INTO memory (character_id,owner_id,channel,channel_id,kind,content,keywords,importance,emotion,source_session,created_at,updated_at,status)
+   VALUES ('feiyu','user:a','private','private:a','weekly','第二篇周记','',2,0,'weekly',?,?,'active')`).run(now,now).lastInsertRowid);
+ db.prepare('INSERT INTO weekly_source (summary_id,source_id) VALUES (?,?)').run(w2,src2);
+ db.prepare("INSERT INTO vec(memory_id,model_id,dim,generation_id,blob) VALUES(?, 'test',1,1,x'00')").run(w2);
+ db.prepare("UPDATE memory SET owner_id='user:z' WHERE id=?").run(src2);
+ assert.equal(db.prepare('SELECT status FROM memory WHERE id=?').get(w2).status,'active','搬主人不该把周记标废');
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM vec WHERE memory_id=?').get(w2).n,1,'周记的向量不该被删');
  console.log('✓ 周记分周分隐私范围、保留原文和来源、失效保护、并发及失败安全、路由权限');
 } finally {db.close();rmSync(home,{recursive:true,force:true});}

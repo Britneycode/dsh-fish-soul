@@ -229,3 +229,66 @@ test('没有 sec_uid 的自身推送不入库、不触发回复', async () => {
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM douyin_inbox').get().n, 0);
   } finally { db.close(); }
 });
+
+// ── #128 的第二处根因：控制帧不能当「这一轮读到的会话」 ──────────────────────
+//
+// `isUsefulMessage` 以前有 3 份副本，`pickMessages` 里那份是内联的、没挡控制帧。
+// 控制帧（kind=50001、text 空、带 convId/seq/senderId）于是能通过
+// 「响应内部只有一个会话」的判定，它的 convId 就成了这一轮读到的会话 ——
+// 多轮下来不同会话被写成同一个 convId。
+function controlFrame(id, { seq = 1, senderId = '100001', time = 0 } = {}) {
+  const v = (n) => { n = BigInt(n); const b = []; while (n >= 128n) { b.push(Number(n & 127n) | 128); n >>= 7n; } b.push(Number(n)); return Buffer.from(b); };
+  const field = (fid, n) => Buffer.concat([v(fid * 8), v(n)]);
+  const bytes = (fid, b) => Buffer.concat([v(fid * 8 + 2), v(b.length), b]);
+  // kind=50001（#6）、正文 JSON 里带 command_type（控制帧的标志）、带 convId/seq/senderId
+  const m = Buffer.concat([
+    bytes(1, Buffer.from(id)), field(2, 1), field(6, 50001), field(7, senderId),
+    bytes(8, Buffer.from(JSON.stringify({ command_type: 1 }))),
+    field(10, time), bytes(17, Buffer.from(String(seq))),
+  ]);
+  return { kind: 'pb', url: 'https://imapi.douyin.com/v1/message/get_by_conversation', b64: bytes(6, bytes(301, bytes(1, m))).toString('base64') };
+}
+
+test('控制帧不能被当成「这一轮读到的会话」（#128 串会话第二处根因）', () => {
+  // 只有控制帧的响应：里面没有任何真消息 ⇒ pickMessages 不能认它。
+  const onlyControl = pickMessages([controlFrame(convId)]);
+  assert.equal(onlyControl.ok, false, '只有控制帧的响应不能算「读到了会话」');
+  assert.equal(onlyControl.convId, undefined, '更不能把控制帧的 convId 当成读到的会话 ID');
+});
+
+test('控制帧的会话不能赢过真消息的会话（哪怕它时间更新）', () => {
+  // 这一条是决定性的：修好前 `pickMessages` 按「消息时间最新」挑响应，
+  // 控制帧时间更新就会被选中 —— 它带的 convId 就成了这一轮读到的会话，
+  // 于是别的会话被写成这个 convId（#128 的串会话）。
+  const real = response(convId, '真的消息', { time: 1700000060000 });
+  const control = controlFrame('0:1:100001:999999', { time: 1700000999000 }); // 另一个会话 + 时间更新
+  for (const list of [[control, real], [real, control]]) {
+    const result = pickMessages(list);
+    assert.equal(result.ok, true);
+    assert.equal(result.convId, convId, '控制帧时间更新也不能把会话抢过去');
+    assert.deepEqual(result.messages.map((m) => m.text), ['真的消息']);
+  }
+});
+
+test('控制帧混进真消息响应内部时，不能把它算成第二个会话', () => {
+  // 一条真消息 + 一条控制帧（同一个 convId）：控制帧被挡掉后，响应内部仍然
+  // 只有一个会话 ⇒ 可以正常选中（而不是因为「混了多个会话」被丢弃）。
+  const v = (n) => { n = BigInt(n); const b = []; while (n >= 128n) { b.push(Number(n & 127n) | 128); n >>= 7n; } b.push(Number(n)); return Buffer.from(b); };
+  const field = (fid, n) => Buffer.concat([v(fid * 8), v(n)]);
+  const bytes = (fid, b) => Buffer.concat([v(fid * 8 + 2), v(b.length), b]);
+  const real = (() => {
+    const m = Buffer.concat([bytes(1, Buffer.from(convId)), field(2, 1), field(6, 7), field(7, '200002'),
+      bytes(8, Buffer.from(JSON.stringify({ text: '在吗' }))), field(10, 1700000060000), field(17, 1)]);
+    return bytes(1, m);
+  })();
+  const ctrl = (() => {
+    const m = Buffer.concat([bytes(1, Buffer.from(convId)), field(2, 1), field(6, 50001), field(7, '100001'),
+      bytes(8, Buffer.from(JSON.stringify({ command_type: 1 }))), bytes(17, Buffer.from('2'))]);
+    return bytes(1, m);
+  })();
+  const cap = { kind: 'pb', url: 'https://imapi.douyin.com/v1/message/get_by_conversation', b64: bytes(6, bytes(301, Buffer.concat([real, ctrl]))).toString('base64') };
+  const result = pickMessages([cap]);
+  assert.equal(result.ok, true, '真消息还在，响应就该被选中');
+  assert.equal(result.convId, convId);
+  assert.deepEqual(result.messages.map((m) => m.text), ['在吗'], '控制帧不能混进消息列表');
+});

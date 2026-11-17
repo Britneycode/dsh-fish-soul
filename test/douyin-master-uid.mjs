@@ -34,7 +34,7 @@ const makeGw = (cfg) => Object.assign(Object.create(proto), {
 function setMasterRow(douyinUid) {
   db.prepare("DELETE FROM person WHERE canonical_id = 'master'").run();
   db.prepare(
-    "INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, aliases, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master', '19000000001', ?, '未云', '[]', 'close', 1, ?, ?)"
+    "INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, aliases, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master', '12345678', ?, '未云', '[]', 'close', 1, ?, ?)"
   ).run(douyinUid, Date.now(), Date.now());
 }
 

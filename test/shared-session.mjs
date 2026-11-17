@@ -38,8 +38,8 @@ function gateway(cfg) {
 }
 
 const cfg = {
-	qq: { enabled: true }, masterQqUin: '875692618',
-	bili: { enabled: true, masterUid: '172195454', links: ['172195454=875692618', '3777=66666666'] },
+	qq: { enabled: true }, masterQqUin: '12345678',
+	bili: { enabled: true, masterUid: '123456789', links: ['123456789=12345678', '3777=66666666'] },
 	douyin: { enabled: true, masterName: '主人', links: ['douyin:7000000000000000001=12345678'] }
 };
 
@@ -108,12 +108,12 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 {
 	// 1. B站 主人 关联了 QQ：会话开成 QQ 私聊那个，B站 自己不另开
 	const gw = gateway(cfg);
-	const agent = await gw.ensureSession(biliChat('172195454'));
+	const agent = await gw.ensureSession(biliChat('123456789'));
 	const row = gw.chatForSession(agent.id);
-	assert.equal(row.channel_id, 'private:875692618', 'B站 私信要用 QQ 私聊那个会话');
-	assert.equal(findChatSession(db, 'bili', 'bili:172195454'), null, 'B站 不该再有自己的会话');
+	assert.equal(row.channel_id, 'private:12345678', 'B站 私信要用 QQ 私聊那个会话');
+	assert.equal(findChatSession(db, 'bili', 'bili:123456789'), null, 'B站 不该再有自己的会话');
 	assert.match(row.title, /^QQ·/, '标题按 QQ 那边起（不叫 B站·…）');
-	assert.equal(gw.ownerChannelOf(agent), 'private:875692618', '模型 / 暂停这些跟着主通道走');
+	assert.equal(gw.ownerChannelOf(agent), 'private:12345678', '模型 / 暂停这些跟着主通道走');
 	ok('B站 私信关联了 QQ → 用同一个人的 QQ 会话，不另开会话');
 }
 
@@ -137,8 +137,8 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 {
 	// 4. QQ 关着：不并（并了会往一个 QQ 连不上的会话里塞 B站 的话）
 	const gw = gateway({ ...cfg, qq: { enabled: false } });
-	const agent = await gw.ensureSession(biliChat('172195454'));
-	assert.equal(gw.chatForSession(agent.id).channel_id, 'bili:172195454');
+	const agent = await gw.ensureSession(biliChat('123456789'));
+	assert.equal(gw.chatForSession(agent.id).channel_id, 'bili:123456789');
 	ok('QQ 没开 → B站 不并进 QQ 会话');
 }
 
@@ -173,14 +173,14 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 {
 	// 7. 模型跟会话主通道走：B站 的消息不能把同一个会话的模型来回换（换一次 KV cache 就废一次）
 	const withModels = { ...cfg, chatModels: { overrides: [
-		{ channelId: 'bili:172195454', provider: 'ds', model: 'bili-model' },
-		{ channelId: 'private:875692618', provider: 'ds', model: 'qq-model' }
+		{ channelId: 'bili:123456789', provider: 'ds', model: 'bili-model' },
+		{ channelId: 'private:12345678', provider: 'ds', model: 'qq-model' }
 	] } };
 	const gw = gateway(withModels);
-	const agent0 = await gw.ensureSession(biliChat('172195454'));
+	const agent0 = await gw.ensureSession(biliChat('123456789'));
 	const selected = [];
 	const agent = { id: agent0.id, model: { current: () => ({ provider: 'ds', model: 'default-model' }), select: (s) => selected.push(s) } };
-	gw.applyChatModelFor(agent, 'bili:172195454');
+	gw.applyChatModelFor(agent, 'bili:123456789');
 	assert.deepEqual(selected, [{ provider: 'ds', model: 'qq-model' }], '共享会话按 QQ 那边配的模型走');
 	ok('共享会话的模型跟着主通道（QQ）走，B站 的模型配置不改它');
 }
@@ -189,7 +189,7 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 	// 8. 同一批消息只开一个会话：两个平台同时进来不会各建一个
 	created.length = 0;
 	const gw = gateway(cfg);
-	const [a, b] = await Promise.all([gw.ensureSession(biliChat('172195454')), gw.ensureSession({ channelId: 'private:875692618', chatType: 'private', targetId: '875692618', title: '' })]);
+	const [a, b] = await Promise.all([gw.ensureSession(biliChat('123456789')), gw.ensureSession({ channelId: 'private:12345678', chatType: 'private', targetId: '12345678', title: '' })]);
 	assert.equal(a.id, b.id, '两个通道同时来消息也只有一个会话');
 	assert.equal(created.length, 1);
 	ok('QQ 和 B站 同时进来：只建一个会话');

@@ -25,7 +25,7 @@ const fresh = (tag) => {
 };
 const seedMaster = (db, douyinUid = null) => {
 	db.prepare(`INSERT INTO person (canonical_id, qq_uin, bili_uid, douyin_uid, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at)
-		VALUES ('master', '19000000001', '3546699440064926', ?, 'later', 'close', 10, ?, ?)`).run(douyinUid, Date.now(), Date.now());
+		VALUES ('master', '12345678', '1234567879123456', ?, 'later', 'close', 10, ?, ?)`).run(douyinUid, Date.now(), Date.now());
 };
 const memOf = (db, cid) => db.prepare("SELECT COUNT(*) n FROM memory WHERE owner_id = ? AND status='active'").get(`user:${cid}`).n;
 const insertMem = (db, cid, text) => db.prepare(`INSERT INTO memory (character_id, owner_id, channel, channel_id, kind, content, keywords, importance, emotion, source_session, created_at, updated_at, status)
@@ -58,7 +58,7 @@ const insertMem = (db, cid, text) => db.prepare(`INSERT INTO memory (character_i
 	const db = fresh('binding');
 	seedMaster(db);
 	// 模拟真机：绑定表里明明有一条对的
-	setKv(db, `douyin.uin.${UID}`, '19000000001');
+	setKv(db, `douyin.uin.${UID}`, '12345678');
 	const p = resolveOrCreatePlatformPerson(db, { platform: 'douyin', platformId: UID, nickname: '未云', nowMs: Date.now(), masterId: '' });
 	assert.notEqual(p.canonical_id, 'master', '绑定表存在不代表记忆会并到一起（它只管并会话）');
 	ok('绑定表 / links 里有映射也不能替代 masterUid（记忆归属看 person 行）');

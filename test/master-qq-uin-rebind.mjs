@@ -31,7 +31,7 @@ const { openDatabase, resolveOrCreatePerson } = await import('../lib/db.js');
 const ok = (msg) => console.log(`✓ ${msg}`);
 
 const OLD_MASTER = '3374915901'; // 机器人自己的号（曾经误填成主人）
-const NEW_MASTER = '3630958828'; // 真正的主人
+const NEW_MASTER = '19000000001'; // 真正的主人
 
 // ── ① 先按旧号建出 master 行（模拟「以前填错了」的状态）──
 {

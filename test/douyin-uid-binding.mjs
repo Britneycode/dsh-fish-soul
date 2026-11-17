@@ -34,7 +34,7 @@ const { openDatabase, findPersonByDouyin } = await import('../lib/db.js');
 
 const ok = (msg) => console.log(`✓ ${msg}`);
 
-const SELF = '7702399256389125000';
+const SELF = '7000000000000000001';
 const PEER = '1234567890123456789';
 const CONV = `0:1:${SELF}:${PEER}`;
 

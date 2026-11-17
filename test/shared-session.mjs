@@ -40,7 +40,7 @@ function gateway(cfg) {
 const cfg = {
 	qq: { enabled: true }, masterQqUin: '875692618',
 	bili: { enabled: true, masterUid: '172195454', links: ['172195454=875692618', '3777=66666666'] },
-	douyin: { enabled: true, masterName: '主人', links: ['douyin:7702399256389125000=12345678'] }
+	douyin: { enabled: true, masterName: '主人', links: ['douyin:7000000000000000001=12345678'] }
 };
 
 /** douyinUinOf 的方法名（打码机制会改文本，所以从原型上取） */
@@ -58,7 +58,7 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 	//     这条用**真正的攻击姿势**：对应表里配的是数字 uid，
 	//     冒充者把自己的抖音昵称改成那个数字（channelId 的冒号后段就是昵称）。
 	//     旧实现把昵称也放进 keys ⇒ 冒充成立；修好后必须挡住。
-	const TARGET_UID = '7702399256389125000';
+	const TARGET_UID = '7000000000000000001';
 	// 用**裸昵称**配置复现（这正是 PR96 的写法：`links: ['小鱼干=12345678']`）。
 	// 配成 `douyin:<uid>` 时旧正则会把前缀一起吃进左值，反而撞不上 —— 别用那种配置测。
 	const gw = gateway({ ...cfg, douyin: { ...cfg.douyin, links: [`小鱼干=12345678`] } });
@@ -120,7 +120,7 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 {
 	// 2. 抖音 配了「数字 uid = QQ 号」对应表：并进对应的那个 QQ 会话
 	const gw = gateway(cfg);
-	const agent = await gw.ensureSession({ channelId: 'douyin:小鱼干', chatType: 'private', targetId: '小鱼干', title: '', userId: 'douyin:7702399256389125000' });
+	const agent = await gw.ensureSession({ channelId: 'douyin:小鱼干', chatType: 'private', targetId: '小鱼干', title: '', userId: 'douyin:7000000000000000001' });
 	assert.equal(gw.chatForSession(agent.id).channel_id, 'private:12345678');
 	assert.equal(findChatSession(db, 'douyin', 'douyin:小鱼干'), null, '抖音 不该再单开一个会话');
 	ok('抖音 配了 uid 对应表 → 并进对应的 QQ 私聊会话');
@@ -237,10 +237,10 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 	const name = '某人';
 	const convKey = `douyin.conv.${createHash('sha1').update(name).digest('hex').slice(0, 16)}`;
 	db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)").run(convKey, JSON.stringify({
-		name, convId: '0:1:5550001:7702399256389125000', identity: 'douyin:7702399256389125000', readAt: Date.now(),
+		name, convId: '0:1:5550001:7000000000000000001', identity: 'douyin:7000000000000000001', readAt: Date.now(),
 	}));
 	// 只给 channelId（模拟工具 guard 的调用姿势）
-	assert.equal(gw.douyinIdentityOfChannel(`douyin:${name}`), 'douyin:7702399256389125000', '游标里的 identity 是真实 uid，要能反查出来');
+	assert.equal(gw.douyinIdentityOfChannel(`douyin:${name}`), 'douyin:7000000000000000001', '游标里的 identity 是真实 uid，要能反查出来');
 	// 游标里的 name 是昵称 —— 不能拿它当身份
 	assert.equal(gw.douyinIdentityOfChannel('douyin:没这个会话'), '', '查不到就返回空，不猜');
 	// 游标里 identity 是脏的（昵称 / 老格式）→ 不认
@@ -252,7 +252,7 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 
 	// 🔴 关键：`UIN_OF` **必须真的用到**这个反查。
 	//    只测 douyinIdentityOfChannel 是「纯函数绿」，证明不了接线 —— 这条才是接线断言。
-	const gwMaster = gateway({ ...cfg, masterQqUin: '5550001', bili: { enabled: false, links: [] }, douyin: { enabled: true, masterUid: 'douyin:7702399256389125000', links: [] } });
+	const gwMaster = gateway({ ...cfg, masterQqUin: '5550001', bili: { enabled: false, links: [] }, douyin: { enabled: true, masterUid: 'douyin:7000000000000000001', links: [] } });
 	assert.equal(
 		uinOf(gwMaster, { channelId: `douyin:${name}` }),   // 只给 channelId，没有 userId
 		'5550001',
@@ -266,7 +266,7 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 {
 	// 13. 昵称配置（主人的真实写法）+ 二次确认：保留配置，但挡住冒充
 	//
-	// 真机配置就是 `未云=3630958828` 这种**昵称**格式。完全禁掉会让主人白配一次；
+	// 真机配置就是 `未云=19000000001` 这种**昵称**格式。完全禁掉会让主人白配一次；
 	// 完全放行就是 PR #96 的冒充洞。折中：昵称只用来**定位**，
 	// 授权必须有「已确认的事实」—— person 表里这行同时有 douyin_uid + qq_uin。
 	const { createHash } = await import('node:crypto');

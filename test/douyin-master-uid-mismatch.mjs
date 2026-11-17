@@ -2,7 +2,7 @@
  * 「主人身份」填了跟真实 uid 对不上的值（账号短号）时，必须在状态里报出来。
  *
  * 真机踩过（2026-11-14）：设置页 `masterUid` 填了账号短号（`37638767132`），
- * 而真实 uid 是 `2874562949425280`（19 位，从会话 ID 推出来）。
+ * 而真实 uid 是 `7100000000000000001`（19 位，从会话 ID 推出来）。
  * 两者都是纯数字，用户分不出来，界面又写「填数字就行」——
  * 之后认领分支比对不上、静默什么都不发生：昵称候选永远不弹，用户看到「她不理我」。
  *
@@ -38,11 +38,11 @@ function seedConversation(identity) {
 	// ⚠️ 每节独立：这个文件的 db 共用，不清会串（前一节塞的游标会让后一节读到）。
 	db.exec("DELETE FROM kv WHERE key LIKE 'douyin.conv.%'");
 	const ch = channel('douyin:37638767132');
-	seedConversation('douyin:2874562949425280');
+	seedConversation('douyin:7100000000000000001');
 	const m = ch.masterUidMismatch();
 	assert.ok(m !== null, '短号跟真实 uid 对不上 ⇒ 必须报出来（不然就是静默失效）');
 	assert.equal(m.filled, 'douyin:37638767132');
-	assert.deepEqual(m.learned, ['2874562949425280']);
+	assert.deepEqual(m.learned, ['7100000000000000001']);
 	ok('短号对不上真实 uid → 报出 filled / learned');
 }
 
@@ -50,8 +50,8 @@ function seedConversation(identity) {
 {
 	// ⚠️ 每节独立：这个文件的 db 共用，不清会串（前一节塞的游标会让后一节读到）。
 	db.exec("DELETE FROM kv WHERE key LIKE 'douyin.conv.%'");
-	const ch = channel('douyin:2874562949425280');
-	seedConversation('douyin:2874562949425280');
+	const ch = channel('douyin:7100000000000000001');
+	seedConversation('douyin:7100000000000000001');
 	assert.equal(ch.masterUidMismatch(), null, '填对了不该警告');
 	ok('填对真实 uid → 不警告');
 }
@@ -61,7 +61,7 @@ function seedConversation(identity) {
 	// ⚠️ 每节独立：这个文件的 db 共用，不清会串（前一节塞的游标会让后一节读到）。
 	db.exec("DELETE FROM kv WHERE key LIKE 'douyin.conv.%'");
 	const ch = channel('');
-	seedConversation('douyin:2874562949425280');
+	seedConversation('douyin:7100000000000000001');
 	assert.equal(ch.masterUidMismatch(), null, '留空 = 不认主人，不该算错');
 	ok('留空 → 不警告');
 }
@@ -80,7 +80,7 @@ function seedConversation(identity) {
 	// ⚠️ 每节独立：这个文件的 db 共用，不清会串（前一节塞的游标会让后一节读到）。
 	db.exec("DELETE FROM kv WHERE key LIKE 'douyin.conv.%'");
 	const ch = channel('douyin:abc');
-	seedConversation('douyin:2874562949425280');
+	seedConversation('douyin:7100000000000000001');
 	assert.equal(ch.masterUidMismatch(), null);
 	ok('非数字 → 不在这里警告');
 }

@@ -4,7 +4,7 @@
 //  ① master 行同时挂 QQ + B站，但没挂抖音 ⇒ 主人的抖音消息被建成独立 person 行 ⇒
 //     「抖音的记忆跟 QQ/B站 分开」。根因是 `douyin.masterUid` 是空的：认人走
 //     `resolveOrCreatePlatformPerson({ masterId: cfg.masterUid || '' })`，空就认不出主人。
-//  ② `person.douyin_uid` 里混着裸昵称（`Re.`）和截断 uid（`uid:7702399256389125000`），
+//  ② `person.douyin_uid` 里混着裸昵称（`Re.`）和截断 uid（`uid:<被 Number 抹平的 19 位数字>`），
 //     而认人按这一列精确匹配 ⇒ 同一个人的不同写法各占一行。
 //
 // 用法：node scripts/fix-douyin-master-split.mjs [--dry-run]

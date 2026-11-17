@@ -14,8 +14,9 @@
  */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
 const h = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
@@ -42,25 +43,24 @@ if (existsSync(BASELINE_FILE)) {
 	}
 }
 
-// ── 收集要扫的文件：常见源码后缀（跳过 node_modules / .git / 探针目录 / 快照）
-const SKIP_DIRS = new Set(['node_modules', '.git', '.alma-snapshots', 'probe-scratch', 'probe-group', 'probe-gid', 'probe-group-uid', 'probe-webp-tmp', '.benchmark']);
+// ── 收集要扫的文件：**只扫会被提交的文件**。
+// 判据是 git 的视角，不是文件系统的视角：
+//   `git ls-files`                 = 已跟踪
+//   `git ls-files -o --exclude-standard` = 未跟踪但没被忽略（即将提交的）
+// gitignore 的本地文件（docs/handoff.md、history/、探针脚本）不进仓库 ⇒ 不扫、不拦、不占 baseline。
 const SCAN_EXT = /\.(mjs|js|json|md|yml|yaml|txt|css|html|sh)$/;
-function walk(dir, out = []) {
-	for (const name of readdirSync(dir)) {
-		if (SKIP_DIRS.has(name)) continue;
-		const full = join(dir, name);
-		let st;
-		try { st = statSync(full); } catch { continue; }
-		if (st.isDirectory()) walk(full, out);
-		else if (SCAN_EXT.test(name)) out.push(full);
-	}
-	return out;
+function listRepoFiles() {
+	const res = spawnSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' });
+	const untracked = spawnSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8' });
+	if (res.status !== 0) throw new Error(`git ls-files 失败：${res.stderr || '未知'}`);
+	const all = `${res.stdout}\n${untracked.stdout}`;
+	return [...new Set(all.split('\n').map((x) => x.trim()).filter(Boolean))].filter((f) => SCAN_EXT.test(f));
 }
 
 const hits = [];      // 新增命中（要报错）
 const known = [];     // 存量（baseline 覆盖）
-for (const full of walk(root)) {
-	const rel = relative(root, full).split('\\').join('/');
+for (const rel of listRepoFiles()) {
+	const full = join(root, rel);
 	let src;
 	try { src = readFileSync(full, 'utf8'); } catch { continue; }
 	const lines = src.split('\n');

@@ -19,8 +19,8 @@ const { getKv, setKv } = await import('../lib/db.js');
 const { mediaMethods } = await import('../lib/gateway-media.js');
 
 const db = openDatabase();
-const MASTER_UID = 'douyin:7702399256389125000';
-const CONV = '0:1:900001:7702399256389125000';
+const MASTER_UID = 'douyin:7000000000000000001';
+const CONV = '0:1:900001:7000000000000000001';
 
 // 只测这几个方法，不启动整个网关：mediaMethods 是混进 ChatGateway.prototype 的对象
 const proto = mediaMethods;
@@ -34,7 +34,7 @@ const makeGw = (cfg) => Object.assign(Object.create(proto), {
 function setMasterRow(douyinUid) {
   db.prepare("DELETE FROM person WHERE canonical_id = 'master'").run();
   db.prepare(
-    "INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, aliases, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master', '3630958828', ?, '未云', '[]', 'close', 1, ?, ?)"
+    "INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, aliases, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master', '19000000001', ?, '未云', '[]', 'close', 1, ?, ?)"
   ).run(douyinUid, Date.now(), Date.now());
 }
 
@@ -82,7 +82,7 @@ setMasterRow('douyin:111111111111111111');
 }
 
 // ── 5. 脏值不能被当成身份（不能因为填了点什么就放行）──────────────────────
-for (const bad of ['', '  ', '未云', '7702399256389125000', 'douyin:abc', 'uid:123']) {
+for (const bad of ['', '  ', '未云', '7000000000000000001', 'douyin:abc', 'uid:123']) {
   setMasterRow('');
   const gw = makeGw({ masterUid: bad });
   assert.equal(proto.masterDouyinIdentity.call(gw), '', `「${bad}」不是合法身份键`);

@@ -10,6 +10,19 @@ assert.equal(pluginManagerOf(null), null);
 assert.equal(pluginManagerOf({}), null);
 assert.equal(pluginManagerOf({ 'plugin-manager': {} }), null, '没有 updateBundle 不算');
 
+// ⚠️ cordis 的服务能通过 ctx.get(name) 拿到，也能作为属性挂在 ctx 上 —— 两条路都得试。
+//    只做属性访问的话，一键更新永远拿不到服务 ⇒ canApply 恒 false ⇒ 面板上
+//    「更新到」按钮**根本不渲染**（主人问「更新怎么不是一键的」，根因就在这）。
+{
+	const pm = { updateBundle: async () => ({}) };
+	assert.equal(pluginManagerOf({ get: () => pm }), pm, 'ctx.get 能拿到服务');
+	assert.equal(pluginManagerOf({ 'plugin-manager': pm }), pm, 'ctx 上挂着服务');
+	assert.equal(pluginManagerOf({ get: () => pm, 'plugin-manager': pm }), pm, '两条路都通');
+	assert.equal(pluginManagerOf({ get: () => ({}) }), null, 'get 到的不是服务');
+	assert.equal(pluginManagerOf({ get: () => { throw new Error('boom'); } }), null, 'get 抛错要兜住');
+	assert.equal(pluginManagerOf({ get: () => pm, 'plugin-manager': {} }), pm, '属性那条没有也不该盖掉 get 那条');
+}
+
 // 宿主没有服务
 assert.deepEqual(
 	await applyUpdate({ ctx: {}, state }),

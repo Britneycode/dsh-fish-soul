@@ -60,11 +60,11 @@ scripts/verify-group-admin-live.mjs
 # 想推某个月的复盘：git add -f history/2026-12.md
 AGENTS.md
 PROJECT_INDEX.md
-NOW.md
-MAP.md
-RUNBOOK.md
-DECISIONS.md
-RISKS.md
+docs/handoff.md
+docs/architecture.md
+docs/runbook.md
+docs/decisions/
+docs/risks.md
 history/
 
 # 本地基准测试产物，不进仓库

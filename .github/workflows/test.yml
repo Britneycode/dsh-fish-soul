@@ -42,6 +42,18 @@ jobs:
         with:
           node-version: 22
 
+      # 快速闸：语法 + client-lint + 测试链自指，30 秒内出结果。
+      # client-lint 挂在 149 个套件中间太靠后了——面板空白这类错误应该第一时间知道。
+      - name: 快速闸（语法 + client-lint + 测试链自指）
+        if: steps.docs.outputs.only != '1'
+        run: |
+          for f in lib/*.js lib/channels/*.js; do node --check "$f" || exit 1; done
+          node test/client-lint.mjs
+          node test/client-syntax.mjs
+          node test/check-test-chain.mjs
+          node test/check-route-guard.mjs
+          node test/check-client-imports.mjs
+
       # 并行 runner：从 package.json 解析全部套件，并发 4 跑（ubuntu-latest 4 vCPU）
       # 串行 npm test 的命令保留在 package.json，本地照样可用
       #

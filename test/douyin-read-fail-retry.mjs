@@ -19,7 +19,7 @@ const { DouyinChannel } = await import('../lib/channels/douyin.js');
 
 const db = openDatabase();
 const SELF = '900001';
-const PEER = '7702399256389125000';
+const PEER = '7000000000000000001';
 const keyOf = (name) => `douyin.conv.${createHash('sha1').update(String(name)).digest('hex').slice(0, 16)}`;
 
 // 与 lib/channels/douyin.js 里 FAIL_RETRY_MS 保持一致

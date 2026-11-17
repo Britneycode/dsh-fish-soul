@@ -120,11 +120,11 @@ test('推送帧的消息 fromMe 是 null 时也能学到自己的 uid', async ()
     driver: { checkLogin: async () => true, list: async () => ({ ok: true, conversations: [] }) },
   });
   setKv(db, 'douyin.selfUid', '');
-  const convId = '0:1:2874562949425280:7702399256389125169';
+  const convId = '0:1:7100000000000000001:7000000000000000002';
   // 推送帧解出来的形状：fromMe 是 null（帧里没有 sec_uid 可比对），senderId 是会话一侧
-  ch.learnSelfUid(convId, [{ convId, senderId: '7702399256389125169', fromMe: null, text: '在吗' }]);
-  assert.equal(getKv(db, 'douyin.selfUid', ''), '2874562949425280', '另一侧就是我');
-  assert.equal(conversationIdentity(convId, ch.selfUids()), 'douyin:7702399256389125169', '推出对方身份');
+  ch.learnSelfUid(convId, [{ convId, senderId: '7000000000000000002', fromMe: null, text: '在吗' }]);
+  assert.equal(getKv(db, 'douyin.selfUid', ''), '7100000000000000001', '另一侧就是我');
+  assert.equal(conversationIdentity(convId, ch.selfUids()), 'douyin:7000000000000000002', '推出对方身份');
 });
 
 test.after(() => { clearInterval(keepAlive); db.close(); });

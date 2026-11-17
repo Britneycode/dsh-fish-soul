@@ -33,7 +33,7 @@ new DouyinInbox(db).status(); // 建表
 
 const SELF = '900001';
 const STRANGER = '2060933357111416';
-const FRIEND = '2874562949425280';
+const FRIEND = '7100000000000000001';
 const conv = (peer) => `0:1:${SELF}:${peer}`;
 const STRANGER_CONV = conv(STRANGER);
 const FRIEND_CONV = conv(FRIEND);

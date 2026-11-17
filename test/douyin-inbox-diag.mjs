@@ -23,7 +23,7 @@ const { DiagLog, describeEntry } = await import('../lib/diag-log.js');
 
 const db = openDatabase();
 const SELF = '900001';
-const PEER = '7702399256389125000';
+const PEER = '7000000000000000001';
 const keyOf = (name) => `douyin.conv.${createHash('sha1').update(String(name)).digest('hex').slice(0, 16)}`;
 const msg = (id, channelId = 'douyin:Re.') => ({ channelId, messageId: id, text: id, timeMs: Date.now() });
 // key 带会话后缀（`douyin-inbox-gap:douyin:Re.`），按前缀找

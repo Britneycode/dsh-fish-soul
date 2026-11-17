@@ -456,7 +456,7 @@ export async function run(t) {
 	// 6. 抖音刷到的分享：能发抖音私信就发给抖音里的主人，不然走 QQ；抖音私信只放行分享
 	{
 		// 抖音私信目标是一个对象：会话 ID + 主人 uid + 会话名（拿不到就是空串 = 走 QQ）
-		let dyTarget = { channelId: 'douyin:主人抖音', uid: '7702399256389125000', convId: '0:1:10002:7702399256389125000', name: '主人抖音' };
+		let dyTarget = { channelId: 'douyin:主人抖音', uid: '7000000000000000001', convId: '0:1:10002:7000000000000000001', name: '主人抖音' };
 		const sent = [];
 		const scfg = { masterQqUin: '10001', proactive: { enabled: true, activeHours: [0, 24], shareMaxPerDay: 5 } };
 		const life2 = new LifeEngine({ db, clock, getConfig: () => scfg, callLlm: async () => null, deliver: async (c, reason, meta) => { sent.push([c, meta.origin]); return true; }, douyinShareTarget: () => dyTarget });

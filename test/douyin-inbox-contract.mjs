@@ -25,7 +25,7 @@ const { DouyinInbox } = await import('../lib/douyin-inbox.js');
 new DouyinInbox(db).status();
 
 const SELF = '900001';
-const PEER = '7702399256389125000';
+const PEER = '7000000000000000001';
 const CONV = `0:1:${SELF}:${PEER}`;
 const keyOf = (name) => `douyin.conv.${createHash('sha1').update(String(name)).digest('hex').slice(0, 16)}`;
 

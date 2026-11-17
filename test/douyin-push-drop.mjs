@@ -28,7 +28,7 @@ const db = openDatabase();
 new DouyinInbox(db).status(); // 建表
 
 const SELF = '1888295424633712';
-const PEER = '7702399256389125000';
+const PEER = '7000000000000000001';
 const CONV = `0:1:${SELF}:${PEER}`;
 
 // ── ① 纯函数：两条丢弃路径各有原因和记账键 ─────────────────────────────────

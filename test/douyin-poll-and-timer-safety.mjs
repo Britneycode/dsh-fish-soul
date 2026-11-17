@@ -25,7 +25,7 @@ const { Outbox: _Ob } = await import('../lib/outbox.js');
 new _Ob({ db, channel: { send: async () => '' }, windowMs: () => 0 }).stop?.();
 
 const SELF = '900001';
-const PEER = '7702399256389125000';
+const PEER = '7000000000000000001';
 // 先学出「我是谁」，否则 identity 推不出来会走失败路径（轮转测试就测不到了）
 setKv(db, 'douyin.selfUid', SELF);
 const CONV = `0:1:${SELF}:${PEER}`;

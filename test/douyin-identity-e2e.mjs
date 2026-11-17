@@ -13,7 +13,7 @@ const { ChatGateway } = await import('../lib/gateway.js');
 const { DouyinChannel } = await import('../lib/channels/douyin.js');
 
 const SELF = '900001';
-const MASTER = '7702399256389125000';   // 主人的抖音 uid
+const MASTER = '7000000000000000001';   // 主人的抖音 uid
 const STRANGER = '1234567890123456789'; // 陌生人
 const conv = (peer) => `0:1:${SELF}:${peer}`;
 

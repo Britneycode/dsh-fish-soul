@@ -14,10 +14,16 @@ assert.equal(recallStatus({kind:'dsh',recallAt:10,memories:['一条']}).badge,'�
 assert.equal(recallStatus({kind:'sent',recallAt:10,speakerUnknown:true}).badge,'认不出是谁');
 const notes=[],entries=[];
 const gw=Object.assign(Object.create(ChatGateway.prototype),{bound:new Map([['s',{channel_id:'private:1'}]]),turns:new Map(),waiters:new Map(),interjectTurns:new Set(),douyin:null,soul:{recallInfo:()=>({at:10,memories:['一条']})},note:(...a)=>notes.push(a),diag:{add:(...a)=>entries.push(a)},log:()=>{}});
-gw.onSessionEvent({id:'s'},{type:'user/message',data:{message:{source:{kind:'user'}}}});
+gw.onSessionEvent({id:'s'},{type:'user/message',data:{message:{source:{kind:'user'},content:'你的身体是桌宠吗'}}});
 gw.onSessionEvent({id:'s'},{type:'assistant/message',data:{message:{content:[{type:'text',text:'好'}]}}});
 gw.onSessionEvent({id:'s'},{type:'turn/end',data:{reason:{kind:'completed'}}});
 assert(notes.some(([k])=>k==='dsh'));assert(!entries.some(([k])=>k.startsWith('turn-end-failed')),'正常桌面聊天不该记失败');
+// #78：动态里原来只有她的发言，主人会以为自己的话丢了。主人这一轮说的要带上。
+{
+	const dshNote=notes.find(([k])=>k==='dsh');
+	assert.ok(dshNote,'要有一条 dsh 动态');
+	assert.match(dshNote[1].who??'',/主人：你的身体是桌宠吗/,'动态里要能看到主人这一轮说了什么');
+}
 const noteGw=Object.assign(Object.create(ChatGateway.prototype),{decisions:[],titleOf:()=>'',getConfig:()=>({})});
 noteGw.note('reply',{text:'a'});assert.equal(noteGw.decisions[0].recallChecked,undefined);
 noteGw.note('sent',{recallAt:0});assert.equal(noteGw.decisions[0].recallChecked,true);

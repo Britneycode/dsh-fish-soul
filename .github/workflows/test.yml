@@ -53,6 +53,7 @@ jobs:
           node test/check-test-chain.mjs
           node test/check-route-guard.mjs
           node test/check-client-imports.mjs
+          node test/check-secrets.mjs
 
       # 并行 runner：从 package.json 解析全部套件，并发 4 跑（ubuntu-latest 4 vCPU）
       # 串行 npm test 的命令保留在 package.json，本地照样可用

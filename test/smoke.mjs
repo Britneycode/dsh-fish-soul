@@ -1,5 +1,5 @@
 // 本地冒烟测试：模拟 DSH 宿主 ctx，验证会话隔离、零滞后召回、配置合并、导入、待办队列、向量索引。
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import http from 'node:http';
 import assert from 'node:assert/strict';
@@ -681,7 +681,16 @@ assert.ok(cs.json.sessions.chats.every((c) => c.workspacePath === join(home, 'ot
 p = await call('POST', '/life/proactive-config', { dailyMaxCount: 10, activeHours: [8, 24], targets: { masterPrivateChannelId: '', selfGroupChannelIds: [] } });
 assert.equal(p.json.ok, true);
 assert.equal((await call('GET', '/life/state')).json.today.dailyMaxCount, 10);
-ok('路由：连接状态、只能选已登记的工作区、一键迁移、每日上限不再被压成 2');
+// #133：分享相关字段**缺失时要沿用配置里的现值**，不能拿默认值覆盖 ——
+//    否则主人手工关掉兜底（0）后，动一下「主动开口」就被悄悄改回 2。
+p = await call('POST', '/life/proactive-config', { dailyMaxCount: 10, activeHours: [8, 24], shareFallbackDays: 0, shareMaxPerDay: 4, targets: { masterPrivateChannelId: '', selfGroupChannelIds: [] } });
+assert.equal(p.json.ok, true);
+const cfgFile = () => JSON.parse(readFileSync(join(home, 'fish-soul-config.json'), 'utf8'));
+assert.equal(cfgFile().proactive.shareFallbackDays, 0, '显式设 0 要存进去（0 = 关掉兜底）');
+p = await call('POST', '/life/proactive-config', { dailyMaxCount: 10, activeHours: [8, 24], targets: { masterPrivateChannelId: '', selfGroupChannelIds: [] } });
+assert.equal(cfgFile().proactive.shareFallbackDays, 0, '请求没带这个字段时不能把用户设的 0 冲掉');
+assert.equal(cfgFile().proactive.shareMaxPerDay, 4, '请求没带这个字段时不能把用户设的值冲掉');
+ok('路由：连接状态、只能选已登记的工作区、一键迁移、每日上限不再被压成 2；分享字段缺失时沿用现值');
 
 // 19 主动开口：恢复已有会话 → 递触发消息 → 轮次结束发出去才算成功
 const { ChatGateway } = await import('../lib/gateway.js');
@@ -803,7 +812,7 @@ ok('主动配额：自发 ≤ 上限且间隔 ≥ 60 分钟；用户交代的提
 const bl = await import('../lib/channels/bilibili.js');
 const { encodeQr, qrSvg } = await import('../lib/channels/qrcode.js');
 const { findVideoRefs, BiliBrowser } = await import('../lib/browse.js');
-const { statSync, readFileSync, existsSync } = await import('node:fs');
+const { statSync, existsSync } = await import('node:fs');
 
 // 21 纯函数：WBI 签名（文档向量）、大整数、私信归一化、视频引用、二维码
 assert.equal(bl.mixinKey('7cd084941338484aae1ad9425b84077c', '4932caff0ff746eab6f01bf08b70ac45'), MIXIN);

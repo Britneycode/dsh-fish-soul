@@ -327,10 +327,16 @@ export async function run(t) {
 		assert.equal(slife.queueShare({ ...share, title: '第二条' }).ok, true);
 		sdb.prepare("UPDATE pending SET status = 'done' WHERE origin = 'share'").run();
 		assert.match(slife.queueShare({ ...share, title: '第三条' }).error, /今天已经分享过 2 条了/);
-		// 过了 4 个虚拟小时还没发出去的分享作废
-		sdb.prepare("UPDATE pending SET status = 'pending', due_at = ? WHERE reason LIKE '%第二条%'").run(t - 5 * 3600_000);
+		// 过了 12 个虚拟小时还没发出去的分享作废（#133：原来 4 小时，
+		// 「下午刷到的晚上想发」就已经过期了 —— 真机上 2026-11-12 排的那条就是这么没发出去的）
+		sdb.prepare("UPDATE pending SET status = 'pending', due_at = ? WHERE reason LIKE '%第二条%'").run(t - 13 * 3600_000);
 		t += 61 * 60_000; await slife.tick(); await sleep(5);
 		assert.equal(sdb.prepare("SELECT status FROM pending WHERE reason LIKE '%第二条%'").get().status, 'expired');
+		// ⚠️ 但 12 小时之内要还能发（别把「下午刷的晚上发」也作废掉）
+		sdb.prepare("UPDATE pending SET status = 'pending', due_at = ? WHERE reason LIKE '%第二条%'").run(t - 6 * 3600_000);
+		t += 61 * 60_000; await slife.tick(); await sleep(5);
+		assert.notEqual(sdb.prepare("SELECT status FROM pending WHERE reason LIKE '%第二条%'").get().status, 'expired',
+			'6 小时前排的分享不该作废（下午刷的晚上发是正常场景）');
 		cfg.proactive.enabled = false;
 		assert.match(slife.queueShare(share).error, /主动开口关着/);
 		sdb.close();

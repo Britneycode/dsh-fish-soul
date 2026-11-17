@@ -100,9 +100,26 @@ r = await call('/bili/social-log?limit=50');
 assert.ok(!r.items.some((x) => x.text.includes('旧评论')), 'backlog 状态的不能出现在列表里');
 
 // ── limit 上限 50，乱参数回退 20 ──
+// 造到 60 条，真的穿过上限（只有 25 条时断言是虚的：数据不够本身就会回 25）
+for (let i = 25; i < 60; i++) insSeen.run(`BV${String(i).padStart(3, '0')}`, `视频${i}`, 1000 + i, 1000 + i);
 r = await call('/bili/seen?limit=999');
-assert.equal(r.items.length, 25, `limit 超上限要收住，实际 ${r.items.length}`);
+assert.equal(r.items.length, 50, `limit 超上限要收到 50，实际 ${r.items.length}`);
 r = await call('/bili/seen?limit=abc');
 assert.equal(r.items.length, 20, `limit 乱参数要回退 20，实际 ${r.items.length}`);
+
+// ── 同毫秒游标边界：固化「整组跳过」的显性契约 ──
+// 游标是「at < before」严格小于：同一毫秒的多条若跨页，下一页会跳过同毫秒剩余的。
+// 这是时间戳游标的已知代价（串行写入基本撞不上），写在这里是让它变成显性契约而不是偷偷发生。
+db.prepare("DELETE FROM bili_seen").run();
+db.prepare(`INSERT INTO bili_seen (bvid, title, owner_name, source, impression, skipped, liked, favorited, seen_at, seen_real_at) VALUES ('BVt1', '同毫秒1', '', 'recommend', '', 0, 0, 0, 5000, 5000)`).run();
+db.prepare(`INSERT INTO bili_seen (bvid, title, owner_name, source, impression, skipped, liked, favorited, seen_at, seen_real_at) VALUES ('BVt2', '同毫秒2', '', 'recommend', '', 0, 0, 0, 5000, 5000)`).run();
+db.prepare(`INSERT INTO bili_seen (bvid, title, owner_name, source, impression, skipped, liked, favorited, seen_at, seen_real_at) VALUES ('BVt3', '同毫秒3', '', 'recommend', '', 0, 0, 0, 5000, 5000)`).run();
+r = await call('/bili/seen?limit=1');
+assert.equal(r.items.length, 1, '第一页只回 1 条');
+assert.ok(r.next !== null, '还有更多时 next 不能是 null');
+r = await call(`/bili/seen?before=${r.next}&limit=10`);
+// 第一页的那条 at=5000，严格小于游标：同毫秒剩余的两条被整组跳过（已知代价）
+assert.equal(r.items.length, 0, `同毫秒剩余的被跳过（契约），实际 ${r.items.length}`);
+assert.equal(r.next, null, '跳过后没有更多了');
 
 ok('分页接口：第一页 / 翻页 / 翻完 / backlog 排除 / limit 钳制，全对得上');

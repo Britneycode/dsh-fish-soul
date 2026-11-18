@@ -107,6 +107,8 @@ test('capabilities 只声明能力，不做事', () => {
 test('ChatGateway 构造后 douyinAdapter 已就位，且跟着 gw.db 换库', async () => {
 	const { ChatGateway } = await import('../lib/gateway.js');
 	const db = openDatabase();
+	// 旧库里有主人的会话 ID —— 快照旧 db 的话，下面换库后仍会读到这个值
+	setKv(db, `douyin.convId.douyin:${MASTER_UID}`, '0:1:900001:7000000000000000001');
 	const gw = new ChatGateway({
 		ctx: { get: () => undefined }, db, clock: { now: () => Date.now() },
 		getConfig: () => ({ masterQqUin: '12345678', douyin: { enabled: true, masterUid: `douyin:${MASTER_UID}` } }),
@@ -114,11 +116,60 @@ test('ChatGateway 构造后 douyinAdapter 已就位，且跟着 gw.db 换库', a
 		soul: { memorizeUnanswered: () => {}, recallInfo: () => ({ memories: [], at: 0, unknown: false }) }
 	});
 	assert.ok(gw.douyinAdapter instanceof DouyinAdapter, '构造时就建好了');
-	// 换库要跟着换（老测试 `gw.db = fresh` 的用法）
+	assert.equal(await gw.masterDouyinConvId(), '0:1:900001:7000000000000000001', '旧库里读得到会话 ID');
+	// 换库要跟着换（老测试 `gw.db = fresh` 的用法）。新库是空的 ⇒ 必须读不到，
+	// 否则说明适配器快照了旧库。
 	const fresh = new DatabaseSync(':memory:');
 	fresh.exec('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
 	gw.db = fresh;
-	assert.equal(await gw.masterDouyinConvId(), '', '换库后读到的是新库（没有会话 ID）');
+	assert.equal(await gw.masterDouyinConvId(), '', '换库后读的是新库（空库 ⇒ 没有会话 ID）');
+});
+
+// ── 配置归一：适配器自己算出来的和网关老实现一致 ─────────────
+test('douyinConfig 的归一规则：布尔严格、字符串 trim、数组过滤、数值兜底', () => {
+	const db = openDatabase();
+	const ad = new DouyinAdapter({ db, getConfig: () => ({
+		masterQqUin: '12345678',
+		douyin: {
+			enabled: 'yes', autoReply: 1, masterName: '  未云  ', masterUid: ' douyin:123 ',
+			shareCard: 'true', allowList: [' a ', '', 'b'], replyAll: 'true',
+			groups: [' g1 ', ''], groupReply: 'true', callNames: ['叫 ', ''],
+			batchMs: '5000', replyWindowMinutes: 'not-a-number'
+		}
+	}) });
+	const c = ad.douyinConfig();
+	assert.equal(c.enabled, false, '非布尔一律 false（不靠真值判断）');
+	assert.equal(c.autoReply, false, '非布尔一律 false');
+	assert.equal(c.masterName, '未云', '字符串要 trim');
+	assert.equal(c.masterUid, 'douyin:123', '主人身份要 trim');
+	assert.equal(c.shareCard, false, '非布尔一律 false');
+	assert.deepEqual(c.allowList, ['a', 'b'], '数组：trim + 去空');
+	assert.equal(c.replyAll, false);
+	assert.deepEqual(c.groups, ['g1']);
+	assert.equal(c.groupReply, false);
+	assert.deepEqual(c.callNames, ['叫']);
+	assert.equal(c.batchMs, 5000, '数值字符串要归一成数');
+	assert.equal(c.replyWindowMinutes, 120, '非法的回复窗口走兜底');
+});
+
+// ── own douyinConfig 兜底：手搓 this 只有它，没有 getConfig ──
+test('手搓 this 只有 own douyinConfig 时，用它当配置源', async () => {
+	const { mediaMethods } = await import('../lib/gateway-media.js');
+	const db = openDatabase();
+	const self = Object.assign(Object.create(mediaMethods), {
+		db,
+		douyinConfig: () => ({ enabled: true, masterUid: `douyin:${MASTER_UID}`, masterName: '未云' })
+	});
+	// 没有 getConfig：以前这个 this 上的 masterDouyinIdentity 就是靠 douyinConfig 拿配置的
+	assert.equal(self.masterDouyinIdentity(), `douyin:${MASTER_UID}`, 'own douyinConfig 是配置源');
+});
+
+// ── 会话标题转发 ───────────────────────────────────────────
+test('抖音会话标题由适配器产出（私聊 / 群聊）', () => {
+	const db = openDatabase();
+	const ad = new DouyinAdapter({ db, getConfig: () => ({}) });
+	assert.equal(ad.title({ targetId: '未云', chatType: 'private' }), '抖音·未云');
+	assert.equal(ad.title({ targetId: '某个群', chatType: 'group' }), '抖音群·某个群');
 });
 
 console.log('douyin-adapter ok');

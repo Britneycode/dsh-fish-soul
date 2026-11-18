@@ -29,7 +29,7 @@ test('入站图片的两个远程字段都传递限额，不能读取本地 URL'
   const download = async (url, opts) => { calls.push({ url, ...opts }); return null; };
   assert.equal(await fetchImageBytes({ url: 'https://example.test/image' }, download), null);
   assert.equal(await fetchImageBytes({ file: 'https://example.test/image' }, download), null);
-  assert.deepEqual(calls.map(x => x.maxBytes), [10 * 1024 * 1024, 10 * 1024 * 1024]);
+  assert.deepEqual([...new Set(calls.map(x => x.maxBytes))], [10 * 1024 * 1024], '所有尝试都带限额（#147：同一源会重试一次，按次断言不可靠）');
 });
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');

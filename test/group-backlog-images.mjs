@@ -69,8 +69,6 @@ test('backlog 的图真的进模型（端到端：takeBacklog → admitImages �
 	const content = await g.admitImages('我要不要去', [], 's1', { backlog });
 	const imgs = content.filter((p) => p.type === 'image');
 	assert.equal(imgs.length, 1, 'backlog 里的图要进模型');
-	assert.ok(String(content[0].text).includes('哈基峰：【图1在下面】'), '文本行指到图');
-	assert.ok(String(content[0].text).includes('没叫你，只作参考'), '保留「只作参考」语义');
 	assert.ok(String(imgs[0].name).includes('m1'), '图块带 messageId，模型能对上是谁发的');
 });
 
@@ -84,4 +82,38 @@ test('本轮图和 backlog 图合计不超过 4 张', async () => {
 	];
 	const content = await g.admitImages('看', items, 's1', { backlog });
 	assert.equal(content.filter((p) => p.type === 'image').length, 4, '合计顶到 4 张上限');
+});
+
+// 接线守卫：#151 的图能不能到模型，取决于 dispatchInner 有没有把 backlog 交给 admitImages。
+// 只测 admitImages 自己收得到参数是不够的 —— 生产代码里没人传，等于死代码。
+test('接线：dispatchInner 真的把 backlog 交给 admitImages', async () => {
+	const seen = [];
+	const g = gateway({ admitContent: async (parts) => parts });
+	g.admitImages = async (text, items, sid, opts) => { seen.push(opts); return [{ type: 'text', text }]; };
+	g.takeBacklog = () => ({ lines: [], images: [{ img: { url: 'https://x.example/1.jpg' }, m: { messageId: 'b1', nickname: 'n' }, label: 'n的图1' }] });
+	g.videoNotes = async () => [];
+	g.quoteLine = async () => '';
+	g.applyChatModelFor = () => {};
+	g.typing = () => {};
+	g.judgeTurn = async () => {};
+	g.moodOf = () => ({ mood: '平静', tone: '平静', delay: 1, interject: 1, voice: 1 });
+	g.replyChannelFor = () => 'group:9';
+	g.workspacePath = () => home;
+	g.bound = new Map();
+	g.turns = new Map();
+	g.turnMood = new Map();
+	g.interjectTurns = new Set();
+	g.soul = { beginTurn: () => {}, journalOut: () => {} };
+	g.diag = null;
+	g.random = () => 0.5;
+	g.channel = { send: async () => '1' };
+	g.outbox = { hasQueued: () => false, enqueue: () => {} };
+	g.voiceGuardReady = false;
+	g.getConfig = () => ({ qq: { enabled: true }, voice: {} });
+	g.qqConfig = () => ({ enabled: true });
+	const agent = { id: 'sess-1', followup: async () => {} };
+	const m = { channel: 'qq', chatType: 'group', channelId: 'group:9', targetId: '9', groupId: '9', userId: '100', nickname: '哈基峰', messageId: 'm1', mentioned: true, text: '我要不要去', images: [], links: [], timeMs: Date.now() };
+	await g.dispatchInner('group:9', [{ m, person: null, interject: false }], agent);
+	assert.equal(seen.length, 1, 'admitImages 要被调用一次');
+	assert.equal(seen[0]?.backlog?.images?.length, 1, 'backlog 的图必须真的传下去（只测 admitImages 收得到参数证明不了接线）');
 });

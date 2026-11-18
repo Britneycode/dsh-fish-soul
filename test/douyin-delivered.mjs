@@ -140,12 +140,17 @@ function makeChannel(driverFor) {
 	assert.match(ui, /unconfirmed: \["[^"]+", "warning"\]/,
 		'动态页要认 unconfirmed，否则显示的是原始英文 key');
 
+	// PR4：sendDouyin 的实现搬到适配器了（gateway-media.js 只剩一行转发），
+	// 这条断言跟着改检查对象 —— 不是放宽强度，是「代码搬走了，断言要跟着搬」。
+	const adapter = readFileSync(new URL('../lib/douyin-adapter.js', import.meta.url), 'utf8');
+	assert.match(adapter, /delivered: false, parts: \[\]/, 'sendDouyin 要有结构化的失败返回');
 	const media = readFileSync(new URL('../lib/gateway-media.js', import.meta.url), 'utf8');
-	assert.match(media, /delivered: false, parts: \[\]/, 'sendDouyin 要有结构化的失败返回');
+	assert.match(media, /async sendDouyin\(row, text, images = \[\], convId = ''\) \{\s*return await adapterOf\(this\)\.send\(/,
+		'sendDouyin 仍要留在 mediaMethods 上（旧调用方不能改），但实现走适配器');
 	// 契约变更（2026-11-10）：不再是「一律不发」，而是「没有目标会话 ID 就不发」。
 	// 真实防线是 sendDouyin 里那条会话 ID 校验（DouyinChannel.send 还会再挡一道）。
-	assert.match(media, /没有确认过这个抖音会话的身份/, '未确认目标不能发送');
-	assert.match(media, /const target = String\(convId/, 'sendDouyin 必须真的用到目标会话 ID');
+	assert.match(adapter, /没有确认过这个抖音会话的身份/, '未确认目标不能发送');
+	assert.match(adapter, /const target = String\(convId/, 'sendDouyin 必须真的用到目标会话 ID');
 	ok('上层：sent / unconfirmed / failed 三态齐全，UI 认得新 kind');
 }
 

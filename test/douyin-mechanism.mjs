@@ -17,14 +17,13 @@ const URL_WITH_ID = '看看这个 https://www.douyin.com/video/72345678901234567
 const URL_WITH_SHORT = 'https://v.douyin.com/abc123/ 这个';
 
 // ── 适配器的方法就是那两个纯函数 ────────────────────────────
-test('适配器的 refs / videoIds 就是纯函数的实现', () => {
+test('适配器的 refs 就是 findDouyinRefs 的实现；作品 ID 走导出的纯函数', () => {
 	const db = openDatabase();
 	const ad = new DouyinAdapter({ db, getConfig: () => ({}) });
 	const refs = ad.refs(URL_WITH_ID);
 	assert.ok(refs.ids.includes('7234567890123456789'), '要认出作品 ID');
 	assert.ok(ad.refs(URL_WITH_SHORT).shorts.length > 0, '要认出短链');
-	assert.deepEqual(ad.videoIds(URL_WITH_ID), ['7234567890123456789']);
-	assert.deepEqual(douyinVideoIdsOf(URL_WITH_ID), ['7234567890123456789'], '导出的纯函数与适配器方法一致');
+	assert.deepEqual(douyinVideoIdsOf(URL_WITH_ID), ['7234567890123456789']);
 });
 
 // ── 接线：网关的 videoNotes 经适配器拿 refs ────────────────

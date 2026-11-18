@@ -292,7 +292,8 @@ export async function run(t) {
 		await g(991, 30003, '有没有人推荐个电影');
 		await waitFor(() => fups('group:991').length === 1);
 		assert.equal(turns.at(-1).interject, true);
-		assert.deepEqual(turns.at(-1).backlog, ['u20002：今天下雨了好烦']);
+		assert.deepEqual(turns.at(-1).backlog.lines, ['u20002：今天下雨了好烦'], 'backlog 文字行不变');
+		assert.deepEqual(turns.at(-1).backlog.images, [], '这条没图，不该带出图');
 		assert.equal(gw.decisions[0].kind, 'interject'); assert.match(gw.decisions[0].reason, /自己想插一句（100%）/);
 		assert.equal(gw.turnState(fups('group:991')[0].id).replyTo, null, '插话不引用');
 		await g(991, 30003, '真的没人吗大家');

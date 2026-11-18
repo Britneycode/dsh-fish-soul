@@ -30,7 +30,7 @@ const gateway = (diag) => Object.assign(Object.create(ChatGateway.prototype), {
 	log: () => {},
 	diag,
 	stickers: null,
-	imageDownload: async () => PNG,
+	imageDownload: async () => ({ ok: true, bytes: PNG }),
 });
 
 test('入站图片下载放宽到 20 秒', async () => {
@@ -53,7 +53,7 @@ test('同一个源失败后再试一次，两个源各试各的', async () => {
 test('下载失败落 diag（只带主机名），且能在 diag-log 路由读出来', async () => {
 	const diag = new DiagLog({ db, log: () => {} });
 	const g = gateway(diag);
-	g.imageDownload = async () => null;
+	g.imageDownload = async () => ({ ok: false, reason: 'download' });
 	await g.admitImages('看图', [{ m: { images: [{ url: 'https://i0.hdslb.com/bfs/big.jpg' }], messageId: '1', nickname: 'n' } }], 's1');
 	const call = mount({ getConfig: () => ({}), db, diag, worker: { coverageSnapshot: () => null, lastProbeLatencyMs: null }, soul: {} });
 	const list = await call('/diag-log');
@@ -66,6 +66,8 @@ test('下载失败落 diag（只带主机名），且能在 diag-log 路由读�
 test('inline 图超限也落 diag（too-large）', async () => {
 	const diag = new DiagLog({ db, log: () => {} });
 	const g = gateway(diag);
+	// 这条测的是真实分类（inline 过限判死），下载桩会把大图当成功，必须去掉。
+	delete g.imageDownload;
 	await g.admitImages('看图', [{ m: { images: [{ file: 'base64://' + 'A'.repeat(1024 * 1024 * 14) }], messageId: '2', nickname: 'n' } }], 's1');
 	const hit = diag.entries.filter((e) => e.key === 'image-skip');
 	assert.equal(hit.at(-1).detail.reason, 'too-large');

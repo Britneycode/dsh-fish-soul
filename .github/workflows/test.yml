@@ -58,10 +58,19 @@ jobs:
       # 并行 runner：从 package.json 解析全部套件，并发 4 跑（ubuntu-latest 4 vCPU）
       # 串行 npm test 的命令保留在 package.json，本地照样可用
       #
-      # FISH_SOUL_CDP_WAIT_MS：douyin-browser 那套要真启 Chromium，等 CDP 端口默认 30 秒。
-      # 并发 4 时它可能和 smoke / comment-video 这类长任务撞在同一批（4 vCPU 被抢满），
-      # Chromium 冷启动就会超 30 秒 → 报「端口没响应」。CI 上放宽到 90 秒（本地不受影响）。
-      - run: node test/parallel.mjs 4
+      # 🔴 douyin-browser 那套要**真启 Chromium**，单独串行跑，不进并行批。
+      #    原因：它和 smoke.mjs（88 秒）撞在同一批时，4 vCPU 被 smoke 抢满，
+      #    Chromium 冷启动根本起不来 → 报「浏览器起来了但 CDP 端口没响应」。
+      #    FISH_SOUL_CDP_WAIT_MS 放宽到 90 秒**也救不了**——不是等得不够久，
+      #    是 CPU 根本没有。等多久都没用，得让它自己占一批。
+      #    （2026-11-18 实测：并行批里它跑了 102.5 秒仍然超时；单独跑 53 秒通过。）
+      - run: node test/parallel.mjs 4 --skip douyin-browser
         if: steps.docs.outputs.only != '1'
+        env:
+          FISH_SOUL_CDP_WAIT_MS: '90000'
+
+      - name: 抖音浏览器套件（真启 Chromium，单独跑）
+        if: steps.docs.outputs.only != '1'
+        run: node test/douyin-browser.mjs
         env:
           FISH_SOUL_CDP_WAIT_MS: '90000'

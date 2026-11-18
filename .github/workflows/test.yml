@@ -59,11 +59,12 @@ jobs:
       # 串行 npm test 的命令保留在 package.json，本地照样可用
       #
       # 🔴 douyin-browser 那套要**真启 Chromium**，单独串行跑，不进并行批。
-      #    原因：它和 smoke.mjs（88 秒）撞在同一批时，4 vCPU 被 smoke 抢满，
-      #    Chromium 冷启动根本起不来 → 报「浏览器起来了但 CDP 端口没响应」。
-      #    FISH_SOUL_CDP_WAIT_MS 放宽到 90 秒**也救不了**——不是等得不够久，
-      #    是 CPU 根本没有。等多久都没用，得让它自己占一批。
-      #    （2026-11-18 实测：并行批里它跑了 102.5 秒仍然超时；单独跑 53 秒通过。）
+      #    现象：并发 4 时它和 smoke.mjs（88 秒）这类长任务撞在同一批，
+      #    Chromium 冷启动超时 → 报「浏览器起来了但 CDP 端口没响应」。
+      #    （2026-11-18 实测：并行批里跑了 102.5 秒仍超时，串行跑约 47~53 秒通过。）
+      #    FISH_SOUL_CDP_WAIT_MS 放宽到 90 秒没解决 —— 可见不是「等得不够久」，
+      #    更像是并发下的资源争用。归因未完全证实，但隔离后已稳定通过。
+      #    隔离只针对这一个套件：另两个真启 Chromium 的套件仍在并行批里正常跑。
       - run: node test/parallel.mjs 4 --skip douyin-browser
         if: steps.docs.outputs.only != '1'
         env:

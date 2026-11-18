@@ -71,7 +71,56 @@ test('settle：适配器把结算交给收件箱', () => {
 	assert.doesNotThrow(() => bare.settle([1], true, ''));
 });
 
-// ── 接线：网关的 turn state 真的通过适配器吸收路由 ─────────
+// ── 接线：dispatch 写进 source 的路由字段 ─────────────────
+//
+// 这条守的是「写侧」：dispatch 算出来的路由字段要真的进 followup 的 source 顶层。
+// 少了它，适配器的 routeOf 整个坏了也没人发现（测试 1 打的是适配器单测层，
+// 测试 4/5 自己往 source 里塞字段、不经过 dispatch）。
+test('网关：dispatch 抖音批 → followup source 顶层带 convId / inboxIds；QQ 批不带 convId', async () => {
+	const db = openDatabase();
+	const gw = new ChatGateway({
+		ctx: { get: () => undefined }, db, clock: { now: () => Date.now() },
+		getConfig: () => ({ masterQqUin: '12345678', douyin: { enabled: true, masterUid: 'douyin:1234567890123456789' } }),
+		log: () => {}, channel: { connected: true },
+		douyin: { connected: true, send: async () => ({ ok: true, delivered: true }), inbox: { settle: () => {} } },
+		soul: {
+			memorizeUnanswered: () => {}, recallInfo: () => ({ memories: [], at: 0, unknown: false }),
+			beginTurn: () => {}, endTurn: () => {}
+		}
+	});
+	const followups = [];
+	// 假 agent：只提供 dispatchInner 用到的东西，followup 把 source 记下来
+	const agent = {
+		id: 'sess-d', options: {},
+		followup: async (msg) => { followups.push(msg); return { id: 'f1' }; }
+	};
+	gw.ensureSession = async () => agent;
+	gw.applyChatModelFor = () => {};
+	gw.typing = () => {};
+	gw.admitImages = async (text) => text;
+	gw.videoNotes = async () => [];
+	gw.runExclusiveForSession = async (_id, fn) => fn();
+
+	// 抖音一批：带 convId + inboxId
+	await gw.dispatch('douyin:某人', [
+		{ m: { userId: 'douyin:1234567890123456789', nickname: '某人', messageId: 'm1', chatType: 'private', targetId: '某人', inboxId: 42, convId: CONV, timeMs: Date.now() }, person: null }
+	]);
+	assert.equal(followups.length, 1, '要发出一个 followup');
+	const src = followups[0].source;
+	assert.deepEqual(src.inboxIds, [42], 'inboxIds 要在 source 顶层');
+	assert.equal(src.convId, CONV, 'convId 要在 source 顶层');
+	// 字段名不能变：宿主重放旧格式消息靠的就是这两个键
+	assert.ok(Object.hasOwn(src, 'convId') && Object.hasOwn(src, 'inboxIds'), '字段名固定为 convId / inboxIds');
+
+	// QQ 一批：不带 convId
+	followups.length = 0;
+	await gw.dispatch('private:12345678', [
+		{ m: { userId: '12345678', nickname: '主人', messageId: 'm2', chatType: 'private', targetId: '12345678', timeMs: Date.now() }, person: null }
+	]);
+	assert.equal(followups.length, 1);
+	assert.equal(Object.hasOwn(followups[0].source, 'convId'), false, 'QQ 批不带 convId');
+	assert.equal(Object.hasOwn(followups[0].source, 'inboxIds'), false, 'QQ 批不带 inboxIds');
+});
 test('网关：宿主重放带 convId 的抖音消息 → turn state 认得出 convId', () => {
 	const db = openDatabase();
 	const settled = [];
@@ -126,8 +175,8 @@ test('网关：回复发出去 → 收件箱经适配器结算（ids 就是这�
 	});
 	// 这一轮结束 → 触发发送 → 结算
 	gw.onSessionEvent({ id: 'sess-1' }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
-	// sendReply 是异步的：等它走完
-	await new Promise((r) => setTimeout(r, 50));
+	// sendReply 是异步的：轮询等结算发生（不用固定 sleep —— 固定间隔会变成时序 flake）
+	for (let i = 0; i < 100 && settled.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
 	assert.equal(sent.length, 1, '回复要发到抖音');
 	assert.equal(sent[0].convId, CONV, '带原会话 ID 发（昵称不算证据）');
 	assert.equal(settled.length, 1, '收件箱要被结算');

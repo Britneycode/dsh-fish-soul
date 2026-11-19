@@ -35,7 +35,7 @@ const ok = (n) => console.log('✓', n);
 	let now = 2_000_000;
 	const d = new DiagLog({ db, now: () => now });
 	d.add('mount-no-ctx', { sessionId: 's1' });
-	now += 61_000; // 超过 DEDUPE_MS（60s）
+	now += 6 * 60_000; // 超过 DEDUPE_MS（5 分钟）
 	d.add('mount-no-ctx', { sessionId: 's1' });
 	assert.equal(d.list().length, 2, '过了去重窗口要另起一条');
 	ok('过了去重窗口：另起一条（不会永远合并）');
@@ -62,7 +62,7 @@ const ok = (n) => console.log('✓', n);
 	// ② 上限：塞 250 条，只留 200
 	let now = 3_000_000;
 	const d = new DiagLog({ db, now: () => now });
-	for (let i = 0; i < 250; i++) { d.add('startup-step', { step: i }); now += 61_000; }
+	for (let i = 0; i < 250; i++) { d.add('startup-step', { step: i }); now += 6 * 60_000; } // 推过去重窗口
 	const list = d.list(999);
 	assert.equal(list.length, 200, '最多留 200 条');
 	// 新的在前：最后一条的 step 是 249

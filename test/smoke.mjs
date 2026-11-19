@@ -575,6 +575,12 @@ mkdirSync(join(home, 'other-ws', '_stickers'), { recursive: true });
 writeFileSync(join(home, 'other-ws', '_stickers', 'ok.png'), png);
 writeFileSync(join(home, 'other-ws', '_stickers', 'wow.webp'), webp1);
 writeFileSync(join(home, 'secret.png'), png);
+// 时间观念接线：先给这条聊天种一句「5 小时前」的对方发言 —— beginTurn 必须在
+// journal.add 之前取 lastSpokeAt，否则读到的永远是「刚刚」。这句不推进 followups 计数。
+{
+  const { testHooks: th0 } = await import('../lib/index.js');
+  th0.soul.journal.add('private:10001', { who: '主人', text: '（探针）五小时前那句', at: Date.now() - 5 * 3600_000 });
+}
 const nowSec = () => Math.floor(Date.now() / 1000);
 conn.push({ post_type: 'message', message_type: 'private', sub_type: 'friend', user_id: 10001, message_id: 501, sender: { nickname: '主人' }, message: [{ type: 'text', data: { text: '我想喝冰美式' } }] });
 const f1 = await waitFor(() => host.followups[0]);
@@ -598,6 +604,15 @@ assert.match(f1.msg.content[0].text, /我想喝冰美式/);
 assert.match(host.titles[0][1], /QQ·主人（主人）/);
 const qqBlock = context.text(at(sid1));
 assert.match(qqBlock, /QQ 回复规则/); assert.match(qqBlock, /ok\.png/); assert.match(qqBlock, /冰美式/);
+// 时间观念：这一行要能读出「周几」（以前只有日期和时刻，问「今天周几」只能靠猜）
+assert.match(qqBlock, /虚拟时间 (\d{4}-\d{2}-\d{2}) [\d:]+（周[一二三四五六日]）/, '此刻状态要带星期');
+{
+	const m = /虚拟时间 (\d{4}-\d{2}-\d{2}) [\d:]+（(周[一二三四五六日])）/.exec(qqBlock);
+	assert.ok(m !== null, '星期和日期要在同一行');
+	const expect = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(m[1] + 'T00:00:00Z').getUTCDay()];
+	assert.equal(m[2], expect, '星期必须和日期对得上（算错一天会被抓到）');
+}
+assert.match(qqBlock, /距上次说话 5 小时/, "要报出距上次说话多久（种进去的那句是 5 小时前）");
 const turn = (id, text, msg) => {
 	handlers['session/event']({ id }, { type: 'user/message', data: msg });
 	handlers['session/event']({ id }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text }] } } });

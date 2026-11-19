@@ -6,7 +6,7 @@ import { registerRoutes } from '../lib/routes.js';
 const NOW = 1700000000000;
 
 /** 最小 harness：内存 DB + 打桩 deps + gate 捕获真实 handler（与 smoke 同款手法）。 */
-function makeHarness() {
+function makeHarness(personaOverride) {
 	const db = new DatabaseSync(':memory:');
 	db.exec(`
 		CREATE TABLE person (
@@ -37,7 +37,7 @@ function makeHarness() {
 		stateSnapshot() { return { today: { dailyMoodTone: '慵懒' }, clock: {}, proactiveConfig: {} }; },
 	};
 
-	const persona = { name: 'feiyu', anchor: '锚', routine: '日常', staticText: '鱼鱼是软软的一小只。'.repeat(40) };
+	const persona = personaOverride ?? { name: 'feiyu', anchor: '锚', routine: '日常', staticText: '鱼鱼是软软的一小只。'.repeat(40) };
 
 	let handler = null;
 	registerRoutes({}, {
@@ -119,6 +119,19 @@ function makeHarness() {
 	assert.equal(code, 200);
 	assert.equal(payload.master.displayName, '主人');
 	assert.equal(payload.master.interactionCount, 0);
+}
+
+// GET /life/context：上游新版 deps.persona 是函数（() => ({name,brief})），端点同样要吃下
+{
+	const h = makeHarness(() => ({ name: 'feiyu', brief: '函数形态的简短人格。'.repeat(30) }));
+	h.seedMaster(88);
+	const { code, payload } = await h.call('GET', '/life/context');
+	assert.equal(code, 200);
+	assert.equal(payload.persona.name, 'feiyu');
+	assert.equal(payload.persona.brief.length, 300);
+	assert.ok(payload.persona.brief.startsWith('函数形态的简短人格。'));
+	assert.equal(payload.persona.anchor, '');
+	assert.equal(payload.persona.routine, '');
 }
 
 // POST /life/interaction click：计数 +1、时间更新、写 kv、不写记忆

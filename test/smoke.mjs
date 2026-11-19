@@ -621,6 +621,27 @@ await sleep(400);
 assert.equal(ob.sends.length, before);
 ok('只有 QQ / 主动触发的轮次才外发；[不回] 不发');
 
+// 12b 熟人传话：从**工具入口**走一遍，认人要真的把会话换成平台 uid。
+//
+// 为什么单独立这一条：test/relay-to-friend.mjs 直接调 gateway.relayToFriend(fromId, ...)，
+// fromId 是测试自己传的 —— 工具到网关之间那层「从会话反查 uid」从来没被测过。
+// 0.18.7~0.18.11 那里写成 relaySenderId(db, session)（多传一个 db，session 位置被顶掉），
+// 函数恒返回空串，白名单里的人传话一律回「认不出你是谁」，而 16 组断言全绿。
+{
+	const saved = await call('POST', '/relay/config', { enabled: true, allowList: ['qq:10001', 'qq:20002'], perDay: 10 });
+	assert.equal(saved.json.ok, true, '传话配置要能存进去：' + saved.json.error);
+	const sentBefore = ob.sends.length;
+	const r = await tools.relay_to_friend.execute({ to: '20002', platform: 'qq', text: '明天的会推迟到下午' }, at(sid1));
+	assert.doesNotMatch(r, /认不出你是谁/, '白名单里的私聊发起人不能被当成认不出（参数错位 bug 的症状）');
+	assert.match(r, /带到了/, '要真的带过去，实际：' + r);
+	const relayed = ob.sends.slice(sentBefore).find((x) => x.action === 'send_private_msg' && x.params.user_id === 20002);
+	assert.ok(relayed, '要真发到收件人那个 QQ 号上');
+	assert.match(relayed.params.message[0].data.text, /托我带句话/, '收件人要看得出这是转达、不是她自己的话');
+	ok('12b 传话走工具入口：会话 → 平台 uid 认得出来，白名单放行并真的发出去');
+	// 还原：后面的用例依赖「传话默认关」
+	await call('POST', '/relay/config', { enabled: false, allowList: [], perDay: 5 });
+}
+
 // 14 陌生人临时会话：不回，但记下这个人
 conn.push({ post_type: 'message', message_type: 'private', sub_type: 'group', user_id: 55555, message_id: 601, sender: { nickname: '路人' }, message: [{ type: 'text', data: { text: '在吗加个好友' } }] });
 await sleep(500);

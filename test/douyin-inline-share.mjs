@@ -185,4 +185,59 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false 
 	ok('纯链接：只发卡片，不发多余的空文字');
 }
 
+// 🔴 顺序：按原顺序交错发（文字、卡、文字、卡），不是「卡片全先发」。
+//
+//    真机那句话的形态是「文字\n\n链接\n\n文字\n\n链接」。卡片全先发的话，
+//    对方看到的是「卡、卡、文字、文字」—— 文字和链接的配对关系没了。
+{
+	const events = [];
+	const adapter = new DouyinAdapter({
+		db: () => ({}),
+		getConfig: () => ({ douyin: { enabled: true, shareCard: true } }),
+		inbox: () => null,
+		channel: () => ({
+			async shareCard(p) { events.push(`card:${p.videoId}`); return { ok: true, verified: true }; },
+			async send(name, parts) {
+				events.push(`text:${parts.filter((x) => x.type === 'text').map((x) => x.text).join('|')}`);
+				return { ok: true, delivered: true, parts: [] };
+			}
+		}),
+		sendText: async () => ({ ok: false }),
+		note: () => {}, log: () => {}, diag: () => {}
+	});
+	const reply = [
+		'猫跳舞那个 扭得特别有灵性',
+		'https://www.douyin.com/video/7707911549709601777',
+		'还有个桌宠小鲸鱼的 结尾直接扭头走人',
+		'https://www.douyin.com/video/7680160212863652'
+	].join('\n\n');
+	await adapter.send({ channel_id: 'douyin:未云' }, reply, [], '0:1:123:456');
+	assert.deepEqual(events, [
+		'text:猫跳舞那个 扭得特别有灵性',
+		'card:7707911549709601777',
+		'text:还有个桌宠小鲸鱼的 结尾直接扭头走人',
+		'card:7680160212863652'
+	], `🔴 必须按原顺序交错发，实际：${JSON.stringify(events)}`);
+	ok('顺序：文字、卡、文字、卡（配对关系保住）');
+}
+
+// 连续的文字段要合并成一次 send（每张卡都要走分享面板，别在卡之间反复进会话）
+{
+	const sends = [];
+	const adapter = new DouyinAdapter({
+		db: () => ({}),
+		getConfig: () => ({ douyin: { enabled: true, shareCard: true } }),
+		inbox: () => null,
+		channel: () => ({
+			async shareCard() { return { ok: true, verified: true }; },
+			async send(name, parts) { sends.push(parts.length); return { ok: true, delivered: true, parts: [] }; }
+		}),
+		sendText: async () => ({ ok: false }),
+		note: () => {}, log: () => {}, diag: () => {}
+	});
+	await adapter.send({ channel_id: 'douyin:未云' }, '第一段\n\n第二段\n\n第三段', [], '0:1:123:456');
+	assert.deepEqual(sends, [3], `连续文字段要合并成一次 send，实际 ${JSON.stringify(sends)}`);
+	ok('连续文字段合并成一次 send（不逐段进会话）');
+}
+
 console.log('抖音链接自动发卡片：测试全部通过');

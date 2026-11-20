@@ -263,6 +263,19 @@ try {
 		assert.equal(s.postJobs.pending('video'), null, '没传上去就不该落「结果未知」');
 	}
 
+	// B25：这次没被拦 → 验证计数清零（跟 blocked() 是一对） ───────────────────
+	//
+	// blocked() 涨「连续被拦的次数」，verifyCleared() 把它清零：验证过去了，下次从 6 小时起算。
+	// 视频路径上也必须调 —— 不然一条视频发成功，图文那边还在按「连续第 3 次被拦」退避 24 小时。
+	{
+		resetVideoQuota();
+		videoMode = 'ok';
+		setKv(db, 'douyin.verify.count', 3);
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, true, r.error);
+		assert.equal(Number(getKv(db, 'douyin.verify.count', 0)) || 0, 0, '发成功了要把验证计数清零（下次从 6 小时起算）');
+	}
+
 	// B20：点了发布但没等到确认 → 落 unknown，后续发布被拦住 ────────────────
 	//
 	// 「可能已经发出去了」⇒ 不能自动重发（重发 = 再生成一条 = 再花一次钱），
@@ -281,7 +294,7 @@ try {
 		assert.equal(genCalls, genBefore, '被拦住时不能再调生成（不花钱）');
 	}
 
-	console.log('✓ 抖音视频作品：kind 分流、图文与视频额度分开、生成不占浏览器锁、生成失败不发布、额度用完不花钱、点发布前先持久化、重启恢复与核实记账、mp4 路径落账、发完清旧视频、碰到验证要退避、没登录要提醒、发布中断落 unknown 且挡住后续');
+	console.log('✓ 抖音视频作品：kind 分流、图文与视频额度分开、生成不占浏览器锁、生成失败不发布、额度用完不花钱、点发布前先持久化、重启恢复与核实记账、mp4 路径落账、发完清旧视频、碰到验证要退避、没登录要提醒、发完清验证计数、发布中断落 unknown 且挡住后续');
 } finally {
 	db.close();
 	rmSync(home, { recursive: true, force: true });

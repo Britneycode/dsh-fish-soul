@@ -9,10 +9,13 @@
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildSubmit, generateVideo, isMp4Bytes, pruneVideos, readPoll, videoErrorText, videoGenConfig } from '../lib/video-gen.js';
+import { createSafeDownloadStream } from '../lib/safe-download.js';
 
 // 每个用例一个临时目录，跑完就删（不留一堆视频在 TMPDIR 里）
 const madeDirs = new Set();
@@ -51,33 +54,6 @@ const bytesRes = (buf, contentLength = null) => ({
 	})
 });
 
-// 没有 Content-Length，但流式送来的字节超过上限
-const oversizeRes = () => ({
-	ok: true,
-	status: 200,
-	headers: { get: () => null },
-	body: new ReadableStream({
-		start(c) {
-			c.enqueue(new Uint8Array(Buffer.alloc(512, 1)));
-			c.enqueue(new Uint8Array(Buffer.alloc(4096, 1)));
-			c.close();
-		}
-	})
-});
-
-// 送一半就断（连接断了）
-const brokenRes = () => ({
-	ok: true,
-	status: 200,
-	headers: { get: () => null },
-	body: new ReadableStream({
-		pull(c) {
-			if (this.step === undefined) { this.step = 0; c.enqueue(new Uint8Array(MP4)); return; }
-			c.error(new Error('连接断了'));
-		}
-	})
-});
-
 function stubFetch(handler) {
 	const calls = [];
 	const fn = async (url, opts = {}) => {
@@ -95,6 +71,42 @@ function queueFetch(list) {
 		if (!q.length) throw new Error('桩子用完了：多发了请求');
 		return q.shift();
 	});
+}
+
+/**
+ * 假下载器：只管给字节，不管网络。
+ * 真实下载走 lib/safe-download.js（逐跳校验、只连公网），这里替掉它是为了测 video-gen 自己的逻辑。
+ */
+function fakeDownload(bytes, { headers = {} } = {}) {
+	const seen = [];
+	const fn = async (url, opts = {}) => {
+		seen.push({ url: String(url), opts });
+		return { status: 200, headers, body: (async function* () { yield bytes; })() };
+	};
+	fn.seen = seen;
+	return fn;
+}
+
+// 真的走 safe-download 的下载器，只把网络换成假的：lookup / request 可注入
+function netStub({ answers = [{ address: '8.8.8.8', family: 4 }], responses = [] } = {}) {
+	const seen = [];
+	const stream = createSafeDownloadStream({
+		lookup: async (host) => (typeof answers === 'function' ? answers(host) : answers),
+		request: (url, opts, cb) => {
+			seen.push({ url: url.href, opts });
+			const req = new EventEmitter();
+			req.end = () => queueMicrotask(() => {
+				const next = responses.shift();
+				if (!next) return req.emit('error', Error('unexpected request'));
+				const res = Readable.from((next.body ?? []).map((x) => Buffer.from(x)));
+				res.statusCode = next.status ?? 200;
+				res.headers = next.headers ?? {};
+				cb(res);
+			});
+			return req;
+		}
+	});
+	return { stream, seen };
 }
 
 const cfgOf = (raw = {}) => videoGenConfig({
@@ -260,10 +272,9 @@ test('A17 生成成功：mp4 落盘，路径是绝对的，内容一模一样', 
 	const dir = dirOf('ok');
 	const fetchImpl = queueFetch([
 		jsonRes({ id: 'task-1' }),
-		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } }),
-		bytesRes(MP4)
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
 	]);
-	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dir, fetchImpl, sleep: async () => {}, now: () => 0 });
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dir, fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: fakeDownload(MP4) });
 	assert.equal(r.ok, true, r.error);
 	assert.equal(r.provider, 'volc');
 	assert.ok(r.file.endsWith('.mp4'), r.file);
@@ -279,10 +290,14 @@ test('A18 下载中途断：不能留 .part，也不能留半个 mp4', async () 
 	const dir = dirOf('broken');
 	const fetchImpl = queueFetch([
 		jsonRes({ id: 'task-1' }),
-		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } }),
-		brokenRes()
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
 	]);
-	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dir, fetchImpl, sleep: async () => {}, now: () => 0 });
+	const downloadImpl = async () => ({
+		status: 200,
+		headers: {},
+		body: (async function* () { yield MP4; throw new Error('连接断了'); })()
+	});
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dir, fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl });
 	assert.equal(r.ok, false);
 	assert.equal(r.code, 'DOWNLOAD_FAILED');
 	assert.deepEqual(readdirSync(dir), [], '目录里不该剩任何文件');
@@ -290,22 +305,20 @@ test('A18 下载中途断：不能留 .part，也不能留半个 mp4', async () 
 
 test('A19 太大：声明的大小超了就拒，没声明但流式超了也拒', async () => {
 	const dir = dirOf('toobig');
-	const declared = queueFetch([
+	const declared = netStub({ responses: [{ status: 200, headers: { 'content-length': '999999' }, body: [MP4] }] });
+	const r1 = await generateVideo(cfgOf({ maxBytes: 1024 }), { prompt: '一只鱼', outDir: dir, fetchImpl: queueFetch([
 		jsonRes({ id: 'task-1' }),
-		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } }),
-		bytesRes(MP4, 999999)
-	]);
-	const r1 = await generateVideo(cfgOf({ maxBytes: 1024 }), { prompt: '一只鱼', outDir: dir, fetchImpl: declared, sleep: async () => {}, now: () => 0 });
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
+	]), sleep: async () => {}, now: () => 0, downloadImpl: declared.stream });
 	assert.equal(r1.ok, false);
 	assert.equal(r1.code, 'TOO_LARGE', '声明的大小也要拦');
 	assert.deepEqual(readdirSync(dir), []);
 
-	const streamed = queueFetch([
+	const streamed = netStub({ responses: [{ status: 200, body: [Buffer.alloc(512, 1), Buffer.alloc(4096, 1)] }] });
+	const r2 = await generateVideo(cfgOf({ maxBytes: 1024 }), { prompt: '一只鱼', outDir: dir, fetchImpl: queueFetch([
 		jsonRes({ id: 'task-1' }),
-		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } }),
-		oversizeRes()
-	]);
-	const r2 = await generateVideo(cfgOf({ maxBytes: 1024 }), { prompt: '一只鱼', outDir: dir, fetchImpl: streamed, sleep: async () => {}, now: () => 0 });
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
+	]), sleep: async () => {}, now: () => 0, downloadImpl: streamed.stream });
 	assert.equal(r2.ok, false);
 	assert.equal(r2.code, 'TOO_LARGE', '实际字节超了也要拦，不能只信 Content-Length');
 	assert.deepEqual(readdirSync(dir), []);
@@ -315,10 +328,9 @@ test('A20 不是视频：文件头不对就删掉，不能把假货留在盘上'
 	const dir = dirOf('fake');
 	const fetchImpl = queueFetch([
 		jsonRes({ id: 'task-1' }),
-		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } }),
-		bytesRes(Buffer.from('notavideo'))
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
 	]);
-	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dir, fetchImpl, sleep: async () => {}, now: () => 0 });
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dir, fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: fakeDownload(Buffer.from('notavideo')) });
 	assert.equal(r.ok, false);
 	assert.equal(r.code, 'BAD_VIDEO');
 	assert.deepEqual(readdirSync(dir), [], '不是视频的文件要删掉');
@@ -360,7 +372,8 @@ test('A23 mp4 头：认 ftyp，不认别的', () => {
 
 test('A24 错误文案：每种失败都给人话，不能把代码甩给用户', () => {
 	const codes = ['DISABLED', 'NOT_CONFIGURED', 'SUBMIT_FAILED', 'POLL_TIMEOUT', 'TASK_FAILED', 'TASK_EXPIRED',
-		'DOWNLOAD_FAILED', 'TOO_LARGE', 'NO_URL', 'BAD_VIDEO', 'NO_SPACE', 'UNKNOWN'];
+		'DOWNLOAD_FAILED', 'TOO_LARGE', 'NO_URL', 'BAD_VIDEO', 'NO_SPACE', 'UNKNOWN',
+		'NETWORK', 'NO_PERMISSION', 'TIMEOUT', 'QUOTA'];
 	for (const code of codes) {
 		const text = videoErrorText(code);
 		assert.ok(text && text.length > 0, code);
@@ -377,10 +390,225 @@ test('A25 任务过期：过期单独一种结果，不能当成普通失败', a
 	assert.equal(r.code, 'TASK_EXPIRED');
 });
 
-test('A26 查进度请求失败：要说清是查进度炸了，不是任务本身失败', async () => {
-	const fetchImpl = queueFetch([jsonRes({ id: 'task-1' }), jsonRes({}, 502)]);
+test('A26 查进度请求失败：5xx 会重试几次才放弃，且要说清是查进度炸了', async () => {
+	let polls = 0;
+	const fetchImpl = stubFetch((url, opts, n) => {
+		if (n === 1) return jsonRes({ id: 'task-1' });
+		polls++;
+		return jsonRes({}, 502);
+	});
 	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('pollfail'), fetchImpl, sleep: async () => {}, now: () => 0 });
 	assert.equal(r.ok, false);
 	assert.equal(r.code, 'UNKNOWN');
 	assert.ok(r.error.includes('查进度'), r.error);
+	assert.equal(polls, 4, '502 要退避重试 3 次（1s/2s/4s）才放弃');
+});
+
+test('A27 轮询（MiniMax）：认官方的状态枚举 Success / Fail / Preparing', () => {
+	const ok = readPoll('minimax', { status: 'Success' });
+	assert.equal(ok.state, 'succeeded', '官方枚举是 Success，不是 succeeded');
+	const bad = readPoll('minimax', { status: 'Fail', base_resp: { status_code: 1004, status_msg: 'login fail' } });
+	assert.equal(bad.state, 'failed');
+	assert.ok(bad.error.includes('login fail'), bad.error);
+	assert.equal(readPoll('minimax', { status: 'Preparing' }).state, 'running');
+	assert.equal(readPoll('minimax', { status: 'Queueing' }).state, 'running');
+	assert.equal(readPoll('minimax', { status: 'Processing' }).state, 'running');
+});
+
+test('A28 下载请求要带鉴权头', async () => {
+	const net = netStub({ responses: [{ status: 200, body: [MP4] }] });
+	const fetchImpl = queueFetch([
+		jsonRes({ id: 'task-1' }),
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
+	]);
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('auth'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: net.stream });
+	assert.equal(r.ok, true, r.error);
+	assert.equal(net.seen.length, 1);
+	assert.equal(net.seen[0].opts.headers.authorization, 'Bearer key-123');
+});
+
+test('A29 私网地址不能下：provider 回 127.0.0.1 也不能真去连', async () => {
+	for (const url of ['http://127.0.0.1/x.mp4', 'http://127.0.0.1:1/x.mp4', 'http://10.0.0.5/x.mp4', 'http://192.168.1.7/x.mp4']) {
+		const net = netStub({ responses: [{ status: 200, body: [MP4] }] });
+		const fetchImpl = queueFetch([
+			jsonRes({ id: 'task-1' }),
+			jsonRes({ status: 'succeeded', content: { video_url: url } })
+		]);
+		const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('private'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: net.stream });
+		assert.equal(r.ok, false, url);
+		assert.equal(net.seen.length, 0, `不能真的去连 ${url}`);
+	}
+	// 域名解析到私网也一样不行
+	const net = netStub({ answers: [{ address: '10.1.2.3', family: 4 }], responses: [{ status: 200, body: [MP4] }] });
+	const fetchImpl = queueFetch([
+		jsonRes({ id: 'task-1' }),
+		jsonRes({ status: 'succeeded', content: { video_url: 'http://internal.test/x.mp4' } })
+	]);
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('private-dns'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: net.stream });
+	assert.equal(r.ok, false);
+	assert.equal(net.seen.length, 0, '解析到私网也不能连');
+});
+
+test('A30 302 跳进私网要被挡住：不能真去私网取', async () => {
+	const net = netStub({ responses: [{ status: 302, headers: { location: 'http://127.0.0.1/private' } }] });
+	const fetchImpl = queueFetch([
+		jsonRes({ id: 'task-1' }),
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
+	]);
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('redir'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: net.stream });
+	assert.equal(r.ok, false);
+	assert.equal(net.seen.length, 1, '只跳一次，私网那一跳不能真发请求');
+});
+
+test('A31 cfg 没归一也不死循环：漏 pollBudgetMs 也要有上界', async () => {
+	let t = 0;
+	const now = () => (t += 60_000); // 每次问一次时间就往前推一分钟
+	const fetchImpl = stubFetch((url, opts, n) => {
+		if (n === 1) return jsonRes({ id: 'task-1' });
+		if (n > 40) throw new Error('轮询次数失控');
+		return jsonRes({ status: 'running' });
+	});
+	const r = await generateVideo({ enabled: true, baseURL: 'https://api.example', apiKey: 'key-123', model: 'model-x', timeoutMs: 30000 }, {
+		prompt: '一只鱼', outDir: dirOf('nonorm'), fetchImpl, sleep: async () => {}, now
+	});
+	assert.equal(r.ok, false);
+	assert.ok(['POLL_TIMEOUT', 'UNKNOWN'].includes(r.code), r.code);
+	assert.ok(fetchImpl.calls.length <= 30, `发了 ${fetchImpl.calls.length} 次请求，超出上界`);
+});
+
+test('A32 时钟坏掉（NaN）也不能把任务查到没边', async () => {
+	const fetchImpl = stubFetch((url, opts, n) => {
+		if (n === 1) return jsonRes({ id: 'task-1' });
+		if (n > 10) throw new Error('轮询次数失控');
+		return jsonRes({ status: 'running' });
+	});
+	const r = await generateVideo(cfgOf({ pollIntervalMs: 100, pollBudgetMs: 5 }), {
+		prompt: '一只鱼', outDir: dirOf('badclock'), fetchImpl, now: () => NaN
+	});
+	assert.equal(r.ok, false);
+	assert.ok(fetchImpl.calls.length <= 3, `发了 ${fetchImpl.calls.length} 次请求，超出上界`);
+});
+
+test('A33 错误文案不带本机绝对路径，也不带原始错误码', async () => {
+	const outDir = join(dirOf('notdir'), 'iam-a-file');
+	writeFileSync(outDir, 'x');
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir, fetchImpl: queueFetch([]), sleep: async () => {}, now: () => 0 });
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 'NOT_CONFIGURED');
+	assert.ok(!/[A-Za-z]:[\\/]/.test(r.error), `文案里带绝对路径：${r.error}`);
+	assert.ok(!r.error.includes('EEXIST'), `文案里带原始错误码：${r.error}`);
+	assert.ok(!r.error.includes('mkdir'), r.error);
+});
+
+test('A34 磁盘满（ENOSPC）要报 NO_SPACE，不是笼统的下载失败', async () => {
+	const dir = dirOf('nospc');
+	const downloadImpl = async () => ({
+		status: 200,
+		headers: {},
+		body: (async function* () {
+			yield MP4;
+			const e = new Error('no space left on device');
+			e.code = 'ENOSPC';
+			throw e;
+		})()
+	});
+	const fetchImpl = queueFetch([
+		jsonRes({ id: 'task-1' }),
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
+	]);
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dir, fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl });
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 'NO_SPACE');
+	assert.deepEqual(readdirSync(dir), [], '半截文件要删掉');
+});
+
+test('A35 provider 回显的 key 不能进用户可见的文案', async () => {
+	const key = 'sk-secret-key-123456';
+	const fetchImpl = queueFetch([
+		jsonRes({ id: 'task-1' }),
+		jsonRes({ status: 'failed', error: { message: `Incorrect API key provided: ${key}` } })
+	]);
+	const r = await generateVideo(cfgOf({ apiKey: key }), { prompt: '一只鱼', outDir: dirOf('scrub'), fetchImpl, sleep: async () => {}, now: () => 0 });
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 'TASK_FAILED');
+	assert.ok(!r.error.includes('sk-oebajw'), `文案里带 key：${r.error}`);
+});
+
+test('A36 轮询遇到 5xx 会重试：重试后成功就照样算成功', async () => {
+	const fetchImpl = stubFetch((url, opts, n) => {
+		if (n === 1) return jsonRes({ id: 'task-1' });
+		if (n === 2) return jsonRes({}, 502);
+		return jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } });
+	});
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('retry502'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: fakeDownload(MP4) });
+	assert.equal(r.ok, true, r.error);
+	assert.ok(fetchImpl.calls.length >= 3, `轮询了 ${fetchImpl.calls.length - 1} 次`);
+});
+
+test('A37 清理：超龄的删掉', () => {
+	const dir = dirOf('prune-age');
+	const p = join(dir, 'old.mp4');
+	writeFileSync(p, 'x');
+	const t = new Date(Date.now() - 10 * 86400000);
+	utimesSync(p, t, t);
+	const removed = pruneVideos(dir, { keepDays: 3, maxFiles: 20, maxBytes: 500 * 1024 * 1024 });
+	assert.equal(removed, 1);
+	assert.ok(!existsSync(p), '超龄的删掉');
+});
+
+test('A38 清理：超量的从最旧的开始删', () => {
+	const dir = dirOf('prune-size');
+	const names = ['v0.mp4', 'v1.mp4', 'v2.mp4'];
+	names.forEach((n, i) => {
+		const p = join(dir, n);
+		writeFileSync(p, Buffer.alloc(100, 1));
+		const t = new Date(Date.now() - (names.length - i) * 1000); // v2 最新
+		utimesSync(p, t, t);
+	});
+	const removed = pruneVideos(dir, { keepDays: 3, maxFiles: 20, maxBytes: 250 });
+	assert.equal(removed, 1);
+	assert.ok(!existsSync(join(dir, 'v0.mp4')), '最旧的删掉');
+	assert.ok(existsSync(join(dir, 'v1.mp4')));
+	assert.ok(existsSync(join(dir, 'v2.mp4')));
+});
+
+test('A39 fetch 直接抛异常：不能把英文原文甩给用户', async () => {
+	const fetchImpl = async () => {
+		const e = new TypeError('fetch failed');
+		e.cause = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+		throw e;
+	};
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('throw'), fetchImpl, sleep: async () => {}, now: () => 0 });
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 'NETWORK');
+	assert.ok(!r.error.includes('fetch failed'), r.error);
+	assert.ok(/[一-龥]/.test(r.error), r.error);
+});
+
+test('A40 openai 兼容：视频对象里没有地址时，字节从 /videos/{id}/content 取', async () => {
+	const fetchImpl = stubFetch((url, opts, n) => {
+		if (n === 1) return jsonRes({ id: 'vid-1' });
+		if (n === 2) return jsonRes({ id: 'vid-1', status: 'completed', progress: 100 });
+		return bytesRes(MP4);
+	});
+	const r = await generateVideo(cfgOf({ provider: 'openai-compat' }), { prompt: '一只鱼', outDir: dirOf('oai'), fetchImpl, sleep: async () => {}, now: () => 0 });
+	assert.equal(r.ok, true, r.error);
+	const last = fetchImpl.calls[fetchImpl.calls.length - 1];
+	assert.ok(last.url.endsWith('/videos/vid-1/content'), last.url);
+	assert.equal(last.opts.headers.Authorization, 'Bearer key-123');
+	assert.ok(existsSync(r.file));
+});
+
+test('A41 MiniMax 完整流程：成功给的是 file_id，要再问一次要下载地址', async () => {
+	const fetchImpl = stubFetch((url, opts, n) => {
+		if (n === 1) return jsonRes({ task_id: 'task-1' });
+		if (n === 2) return jsonRes({ status: 'Success', file_id: 'file-1', base_resp: { status_code: 0, status_msg: 'success' } });
+		if (n === 3) return jsonRes({ file: { file_id: 'file-1', download_url: 'https://cdn.example/v.mp4' }, base_resp: { status_code: 0, status_msg: 'success' } });
+		return jsonRes({});
+	});
+	const r = await generateVideo(cfgOf({ provider: 'minimax' }), { prompt: '一只鱼', outDir: dirOf('mm'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: fakeDownload(MP4) });
+	assert.equal(r.ok, true, r.error);
+	const ask = fetchImpl.calls[2];
+	assert.ok(ask.url.includes('/v1/files/retrieve'), ask.url);
+	assert.ok(ask.url.includes('file_id=file-1'), ask.url);
 });

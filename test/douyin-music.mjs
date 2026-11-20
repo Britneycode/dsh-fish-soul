@@ -35,9 +35,11 @@ const cardHtml = (name, { apply = true, count = '1479.4万人使用' } = {}) => 
     </div>
   </div>`;
 
-async function fixture({ attach = true, removePanel = false, duplicate = false, apply = true, songs = ['晚风心里吹'] } = {}) {
-  const cards = songs.map((n) => cardHtml(n, { apply })).join('')
+async function fixture({ attach = true, removePanel = false, duplicate = false, apply = true, wrap = false, songs = ['晚风心里吹'] } = {}) {
+  const inner = songs.map((n) => cardHtml(n, { apply })).join('')
     + (duplicate ? cardHtml('晚风心里吹', { apply }) : '');
+  // wrap：模拟抖音在歌卡之上再加一层列表包裹层（类名也带 card-container）。
+  const cards = wrap ? `<div class="card-container-list">${inner}</div>` : inner;
   const html = `<!doctype html><meta charset="utf-8"><style>
     .semi-sidesheet { display:none; position:fixed; top:80px; left:20px; width:500px; height:300px; background:#ddd; }
     .semi-sidesheet-content { width:100%; height:100%; }
@@ -85,6 +87,13 @@ try {
   const list2 = await driver.listRecommendedMusic();
   assert.deepEqual(list2.songs, ['晚风心里吹', '人生路漫漫主歌'], '计数行不混进歌名列表');
   assert.deepEqual(list2.counts, { 晚风心里吹: 1, 人生路漫漫主歌: 1 }, '每首歌计数都是 1');
+
+  // 歌卡之上多一层带 card-container 类名的列表包裹层：不能把所有歌塌成一行。
+  await fixture({ wrap: true, songs: ['晚风心里吹', '人生路漫漫主歌'] });
+  const listWrapped = await driver.listRecommendedMusic();
+  assert.deepEqual(listWrapped.songs, ['晚风心里吹', '人生路漫漫主歌'], '包裹层不能让所有歌塌成一行');
+  assert.deepEqual(listWrapped.counts, { 晚风心里吹: 1, 人生路漫漫主歌: 1 }, '包裹层下每首歌计数仍是 1');
+  await driver.closeMusicPanel();
 
   await fixture({ attach: false, removePanel: true });
   assert.equal((await driver.listRecommendedMusic()).ok, true);

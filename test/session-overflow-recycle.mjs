@@ -1,5 +1,5 @@
 /**
- * 上下文满了 / 撞 400 之后，这个聊天要能自己换一条新会话，不能一直哑掉。
+ * 上下文满了 / 撞 400 / 换模型被宿主挡了之后，这个聊天要能自己换一条新会话，不能一直哑掉。
  *
  * 症状（主人报的）：一个对话上下文满了之后，或者不小心触发了 400，再说话她就不回复了。
  *
@@ -8,11 +8,13 @@
  * 于是那个聊天**永久**不回话，只能人工重启或换人格。
  *
  * 契约：
- *   ① 撞上「上下文超限」这一类，要么当场换新会话再试一次，要么至少把这条会话标成死的，
+ *   ① 撞上「上下文超限」或「换模型被宿主挡了」这一类，要么当场换新会话再试一次，要么至少把这条会话标成死的，
  *      下一条消息进来时换新的 —— 不能继续拿它去撞同一个错。
- *   ② 只有这一类才换。普通 provider 抖动（限额 / 超时 / 内容过滤）换会话是害人的：
+ *   ② 只有这两类才换。普通 provider 抖动（限额 / 超时 / 内容过滤）换会话是害人的：
  *      语境全丢、还白烧一轮。
  *   ③ 换完要说清为什么（运行日志留痕），不能静默重来。
+ *   ④ 换模型被挡（MODEL_SWITCH_COMPACTION_FAILED）也是粘性的：模型没换成功，下一轮又会去换、
+ *      又撞同一个错 ⇒ 不换会话，那个聊天就永久哑掉。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -149,6 +151,42 @@ test('超限这一轮要留痕（运行日志能看出为什么换）', async ()
 	assert.equal(hit.kind, 'session');
 	assert.equal(hit.channelId, chat4.channelId, '要指到那个聊天上');
 	ok('换会话留痕');
+});
+
+/** 造一条「换模型被宿主的压缩闸门挡了」的 turn/end。 */
+const switchBlockedTurnEnd = (gw, sessionId, channelId) => {
+	gw.onSessionEvent({ id: sessionId }, { type: 'user/message', data: { message: { id: 'm1', source: { kind: 'fish-soul/qq', channelId } } } });
+	gw.onSessionEvent({ id: sessionId }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'MODEL_SWITCH_COMPACTION_FAILED', message: 'Cannot switch to p/m: context compaction failed: summary is not smaller than the shadowed content (1027 estimated framed tokens >= 1018). The previous request model is preserved; retry or select a model with a larger context window.' } } } });
+};
+
+test('换模型被挡（模型切换压缩失败）：下一条消息要换一条新会话', async () => {
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30005'");
+	const chat5 = { ...chat, channelId: 'private:30005', targetId: '30005' };
+	const { gw, created, resumed } = makeGateway();
+	const first = await gw.ensureSession(chat5);
+	assert.equal(created.length, 1, '第一次要新建会话');
+	switchBlockedTurnEnd(gw, first.id, chat5.channelId);
+	const second = await gw.ensureSession(chat5);
+	assert.notEqual(second.id, first.id, '换模型被挡的会话不能继续用来接新消息（下一轮还会撞同一个错）');
+	assert.equal(resumed.length, 0, '死会话不该被恢复回来');
+	assert.equal(created.length, 2, '应该新建第二条会话');
+	const row = db.prepare("SELECT status FROM chat_session WHERE session_id = ?").get(first.id);
+	assert.equal(row?.status, 'retired', '旧会话要标 retired，否则重启后又被捡回来');
+	ok('换模型被挡后自动换新会话');
+});
+
+test('换模型被挡这一轮也要留痕（运行日志能看出为什么换）', async () => {
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30006'");
+	const chat6 = { ...chat, channelId: 'private:30006', targetId: '30006' };
+	const { gw } = makeGateway();
+	const first = await gw.ensureSession(chat6);
+	switchBlockedTurnEnd(gw, first.id, chat6.channelId);
+	await gw.ensureSession(chat6);
+	const hit = gw.decisions.find((d) => /换模型/.test(String(d.reason ?? '')));
+	assert.ok(hit, `运行日志要记下为什么换会话，实际：${JSON.stringify(gw.decisions.slice(0, 3))}`);
+	assert.equal(hit.kind, 'session');
+	assert.equal(hit.channelId, chat6.channelId, '要指到那个聊天上');
+	ok('换模型被挡留痕');
 });
 
 console.log('session-overflow-recycle: all assertions passed');

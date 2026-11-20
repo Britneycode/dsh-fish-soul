@@ -133,10 +133,13 @@ try {
 
   await fixture({ duplicate: true, attach: false });
   assert.equal((await driver.listRecommendedMusic()).ok, true);
+  // 面板开好后按钮要过 400ms 才渲染（fixture 的 setTimeout），等足再点
+  await new Promise((r) => setTimeout(r, 1200));
+  assert.equal(await br.eval(`document.querySelectorAll('.apply-btn').length`), 2, '两张同名卡的按钮都渲染出来了');
   result = await driver.publishNote({ music: '晚风心里吹', allowDuplicate: true });
   assert.equal(result.ok, false);
-  assert.match(result.error, /未确认/);
   assert.equal(await br.eval('window.publishCount'), 0, '同名但编辑页没确认歌名，仍然不发布');
+  assert.match(result.error, /配乐失败/, '失败原因要说清是配乐这一步');
   await driver.closeMusicPanel();
   console.log('✓ 抖音配乐（本地 Chromium 模拟真机三层卡片结构）：歌名不重复、计数行不混入、正确选歌、未确认/无按钮时不发布、同名点第一张');
 } finally {

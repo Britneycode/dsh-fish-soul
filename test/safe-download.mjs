@@ -31,6 +31,7 @@ test('公开 IPv4 才可连接：私网、环回、保留网段和 IPv6 全拒�
 test('DNS 重绑定防护：固定已验证 IP，保留 TLS 服务器名与 Host', async () => {
  let n=0;const f=fixture({answers:()=>{n++;return [{address:n===1?'8.8.8.8':'127.0.0.1',family:4}]}});
  assert.equal((await get(f)).toString(),'abcd');assert.equal(n,1);assert.equal(f.seen[0].opts.hostname,'8.8.8.8');assert.equal(f.seen[0].opts.servername,'cdn.example');assert.equal(f.seen[0].opts.headers.host,'cdn.example');
+ assert.equal(f.seen[0].opts.headers.servername,undefined,'servername 只用于 TLS SNI，不该进 HTTP 头');
  const dual=fixture({answers:[{address:'2606:4700:4700::1111',family:6},{address:'8.8.8.8',family:4}]});assert.equal((await get(dual)).toString(),'abcd');
  const only6=fixture({answers:[{address:'2606:4700:4700::1111',family:6}]});assert.equal(await get(only6),null);
 });

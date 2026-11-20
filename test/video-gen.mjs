@@ -10,6 +10,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { EventEmitter } from 'node:events';
+import { createServer } from 'node:http';
 import { Readable } from 'node:stream';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -165,13 +166,14 @@ test('A3 提交（MiniMax）：路径和时长字段', () => {
 	assert.ok(s.headers.Authorization.includes('key-123'));
 });
 
-test('A4 提交（openai 兼容）：路径、prompt 和 seconds', () => {
+test('A4 提交（openai 兼容）：路径、prompt、size 是像素尺寸、seconds 吸附到 4/8/12', () => {
 	const cfg = cfgOf({ provider: 'openai-compat', durationSec: 6 });
 	const s = buildSubmit('openai-compat', cfg, '一只鱼');
 	assert.ok(s.url.endsWith('/videos'), s.url);
 	assert.equal(s.method, 'POST');
 	assert.equal(s.body.prompt, '一只鱼');
-	assert.equal(s.body.seconds, cfg.durationSec);
+	assert.equal(s.body.seconds, 8, 'openai 只认 4/8/12，6 秒要吸附到 8');
+	assert.equal(s.body.size, '720x1280', 'size 是像素尺寸，不是比例');
 	assert.ok(s.headers.Authorization.includes('key-123'));
 });
 
@@ -415,16 +417,16 @@ test('A27 轮询（MiniMax）：认官方的状态枚举 Success / Fail / Prepar
 	assert.equal(readPoll('minimax', { status: 'Processing' }).state, 'running');
 });
 
-test('A28 下载请求要带鉴权头', async () => {
+test('A28 下载请求要带鉴权头（跟 baseURL 同源时）', async () => {
 	const net = netStub({ responses: [{ status: 200, body: [MP4] }] });
 	const fetchImpl = queueFetch([
 		jsonRes({ id: 'task-1' }),
-		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://api.example/v.mp4' } })
 	]);
 	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('auth'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: net.stream });
 	assert.equal(r.ok, true, r.error);
 	assert.equal(net.seen.length, 1);
-	assert.equal(net.seen[0].opts.headers.authorization, 'Bearer key-123');
+	assert.equal(net.seen[0].opts.headers.authorization, 'Bearer key-123', '同源下载才带 key');
 });
 
 test('A29 私网地址不能下：provider 回 127.0.0.1 也不能真去连', async () => {
@@ -612,4 +614,116 @@ test('A41 MiniMax 完整流程：成功给的是 file_id，要再问一次要下
 	const ask = fetchImpl.calls[2];
 	assert.ok(ask.url.includes('/v1/files/retrieve'), ask.url);
 	assert.ok(ask.url.includes('file_id=file-1'), ask.url);
+});
+
+test('A42 默认下载器自己挡私网：真起一个 127.0.0.1 服务，它一个请求都收不到', async () => {
+	let hits = 0;
+	const srv = createServer((req, res) => { hits++; res.end('x'); });
+	await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+	const port = srv.address().port;
+	try {
+		const fetchImpl = queueFetch([
+			jsonRes({ id: 'task-1' }),
+			jsonRes({ status: 'succeeded', content: { video_url: `http://127.0.0.1:${port}/x.mp4` } })
+		]);
+		// 故意**不注入** downloadImpl：这里测的是 video-gen 自己默认那个下载器挡不挡得住
+		const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('default-dl'), fetchImpl, sleep: async () => {}, now: () => 0 });
+		assert.equal(r.ok, false, '私网地址不能下载成功');
+		assert.equal(hits, 0, `私网服务收到了 ${hits} 个请求`);
+	} finally {
+		srv.closeAllConnections?.();
+		await new Promise((r) => srv.close(r));
+	}
+});
+
+test('A43 轮询（MiniMax）：Fail 的真实原因在 task.error 里，base_resp 正常也不能吞掉', async () => {
+	const v2 = readPoll('minimax', {
+		task: { status: 'Fail', error: { code: '1026', message: 'video description contains sensitive content' } },
+		base_resp: { status_code: 0, status_msg: 'success' }
+	});
+	assert.equal(v2.state, 'failed');
+	assert.ok(v2.error.includes('sensitive content'), `v2 的失败原因丢了：${v2.error}`);
+	assert.ok(!v2.error.includes('对方没说失败原因'), `失败原因被吞成默认文案：${v2.error}`);
+
+	const failed = readPoll('minimax', {
+		task: { status: 'Failed', error: { code: '1004', message: 'invalid api key' } },
+		base_resp: { status_code: 0 }
+	});
+	assert.equal(failed.state, 'failed');
+	assert.ok(failed.error.includes('invalid api key'), failed.error);
+
+	// 端到端：真实原因要一路带到用户看得见的文案里
+	const fetchImpl = queueFetch([
+		jsonRes({ task_id: 'task-1' }),
+		jsonRes({
+			task: { status: 'Fail', error: { code: '1026', message: 'video description contains sensitive content' } },
+			base_resp: { status_code: 0, status_msg: 'success' }
+		})
+	]);
+	const r = await generateVideo(cfgOf({ provider: 'minimax' }), { prompt: '一只鱼', outDir: dirOf('mmfail'), fetchImpl, sleep: async () => {}, now: () => 0 });
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 'TASK_FAILED');
+	assert.ok(r.error.includes('sensitive content'), `失败原因丢了：${r.error}`);
+});
+
+test('A44 轮询有硬上限：时钟不动也只能查这么多轮', async () => {
+	// pollIntervalMs 配 1ms 也要被钳到 1000ms：不然 maxPolls 会变成六十万轮
+	// 时钟故意不动（now 恒为 1000）：预算判断永远不触发，只剩硬上限能收住它
+	let polls = 0;
+	const fetchImpl = stubFetch((url, opts, n) => {
+		if (n === 1) return jsonRes({ id: 'task-1' });
+		polls++;
+		if (polls > 500) throw new Error('轮询次数失控');
+		return jsonRes({ status: 'running' });
+	});
+	const r = await generateVideo(cfgOf({ pollIntervalMs: 1, pollBudgetMs: 10000 }), {
+		prompt: '一只鱼', outDir: dirOf('maxpolls'), fetchImpl, sleep: async () => {}, now: () => 1000
+	});
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 'POLL_TIMEOUT', `不该靠报错收场（说明没按上限停）：${r.code}`);
+	assert.ok(polls <= 12, `轮询了 ${polls} 次，超出硬上限 12（间隔钳到 1000ms、预算 10s 时）`);
+});
+
+test('A45 JWT 形状的 key 也不能漏：通用正则不认它，只能靠「知道自己用的 key」', async () => {
+	// MiniMax 官方就是 JWT 风格的 key（不是 sk- 开头），形状兜底正则兜不住
+	const key = 'eyJhbGciOiJIUzI1NiJ9.xxx.yyy';
+	const fetchImpl = queueFetch([
+		jsonRes({ id: 'task-1' }),
+		jsonRes({ status: 'failed', error: { message: `Incorrect API key provided: ${key}` } })
+	]);
+	const r = await generateVideo(cfgOf({ apiKey: key }), { prompt: '一只鱼', outDir: dirOf('scrub-jwt'), fetchImpl, sleep: async () => {}, now: () => 0 });
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 'TASK_FAILED');
+	assert.ok(!r.error.includes(key), `文案里带完整 key：${r.error}`);
+	assert.ok(!r.error.includes(key.slice(0, 12)), `文案里带 key 前半段：${r.error}`);
+});
+
+test('A46 跨源下载不带 key：付费 key 不能发给 provider 回的第三方域名', async () => {
+	const net = netStub({ responses: [{ status: 200, body: [MP4] }] });
+	const fetchImpl = queueFetch([
+		jsonRes({ id: 'task-1' }),
+		jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/v.mp4' } })
+	]);
+	// baseURL 是 https://api.example，下载地址在 cdn.example —— 不同源
+	const r = await generateVideo(cfgOf(), { prompt: '一只鱼', outDir: dirOf('cross'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: net.stream });
+	assert.equal(r.ok, true, r.error);
+	assert.equal(net.seen.length, 1);
+	assert.equal(net.seen[0].opts.headers.authorization, undefined, `跨源下载不能带 key：${JSON.stringify(net.seen[0].opts.headers)}`);
+	assert.ok(!JSON.stringify(net.seen[0].opts.headers).includes('key-123'), 'key 不能出现在跨源请求头里');
+});
+
+test('A47 openai 兼容：size 是合法像素尺寸、seconds 只在 4/8/12 里', () => {
+	const sizes = new Set(['1280x720', '720x1280', '1024x1024']);
+	const want = { '16:9': '1280x720', '9:16': '720x1280', '1:1': '1024x1024' };
+	for (const ratio of ['16:9', '9:16', '1:1']) {
+		const s = buildSubmit('openai-compat', cfgOf({ provider: 'openai-compat', aspectRatio: ratio }), '一只鱼');
+		assert.ok(sizes.has(s.body.size), `${ratio} 映射成了非法 size：${s.body.size}`);
+		assert.equal(s.body.size, want[ratio], `${ratio} 的 size 映射不对`);
+		assert.notEqual(s.body.size, ratio, 'size 不能是比例本身');
+		assert.ok([4, 8, 12].includes(s.body.seconds), `非法 seconds：${s.body.seconds}`);
+	}
+	for (const [sec, expect] of [[2, 4], [4, 4], [5, 8], [8, 8], [9, 12], [12, 12]]) {
+		const s = buildSubmit('openai-compat', cfgOf({ provider: 'openai-compat', durationSec: sec }), '一只鱼');
+		assert.equal(s.body.seconds, expect, `${sec} 秒应吸附到 ${expect}`);
+	}
 });

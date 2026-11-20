@@ -121,7 +121,11 @@ const make = () => {
 	return current;
 };
 /** 把当天的视频额度清零（视频一天最多几条，验别的分支前先腾出额度）。 */
-const resetVideoQuota = () => setKv(db, 'douyin.video.day', { date: '2026-11-09', count: 0, tries: 0, lastVirtual: 0 });
+// 「花掉的次数」也一起清（douyin.video.gen.day）—— 两笔账要能分别验。
+const resetVideoQuota = () => {
+	setKv(db, 'douyin.video.day', { date: '2026-11-09', count: 0, tries: 0, lastVirtual: 0 });
+	setKv(db, 'douyin.video.gen.day', { date: '2026-11-09', count: 0 });
+};
 
 try {
 	let s = make();
@@ -276,6 +280,25 @@ try {
 		assert.equal(Number(getKv(db, 'douyin.verify.count', 0)) || 0, 0, '发成功了要把验证计数清零（下次从 6 小时起算）');
 	}
 
+	// B26：钱花出去的次数也受每日上限保护（force 也不例外） ─────────────────
+	//
+	// 「今天最多几条」护的是**发成功的条数**：生成成功但发布失败时 count 不涨 ⇒
+	// 再点一次「现在发一条」又生成一条 = 又花一次钱，当天能点出好几笔钱。
+	// 所以另记一笔「今天生成过几条」，在 generate 之前就卡住。
+	{
+		resetVideoQuota();
+		videoMode = 'notLoggedIn'; // 生成成功、发布失败：钱花了，作品没发出去
+		const genBefore = genCalls;
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, false, '没登录发不出去');
+		assert.equal(genCalls, genBefore + 1, '生成过一次（钱花出去了）');
+		// 再点一次「现在发一条」：不许再生成
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, false, '今天花过钱了就不该再生成');
+		assert.match(String(r.error ?? ''), /最多 1 条/, '要提示今天已经用完当天的量');
+		assert.equal(genCalls, genBefore + 1, '不能再生成（不花钱）');
+	}
+
 	// B20：点了发布但没等到确认 → 落 unknown，后续发布被拦住 ────────────────
 	//
 	// 「可能已经发出去了」⇒ 不能自动重发（重发 = 再生成一条 = 再花一次钱），
@@ -294,7 +317,7 @@ try {
 		assert.equal(genCalls, genBefore, '被拦住时不能再调生成（不花钱）');
 	}
 
-	console.log('✓ 抖音视频作品：kind 分流、图文与视频额度分开、生成不占浏览器锁、生成失败不发布、额度用完不花钱、点发布前先持久化、重启恢复与核实记账、mp4 路径落账、发完清旧视频、碰到验证要退避、没登录要提醒、发完清验证计数、发布中断落 unknown 且挡住后续');
+	console.log('✓ 抖音视频作品：kind 分流、图文与视频额度分开、生成不占浏览器锁、生成失败不发布、额度用完不花钱、点发布前先持久化、重启恢复与核实记账、mp4 路径落账、发完清旧视频、碰到验证要退避、没登录要提醒、发完清验证计数、花过的次数也受上限、发布中断落 unknown 且挡住后续');
 } finally {
 	db.close();
 	rmSync(home, { recursive: true, force: true });

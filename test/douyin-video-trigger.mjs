@@ -22,6 +22,7 @@ const { openDatabase, getKv, setKv } = await import('../lib/db.js');
 const dy = await import('../lib/douyin-social.js');
 const { DouyinSocial, douyinSocialDriver } = dy;
 const PAGE_TIMING = dy.PAGE_TIMING;
+const VIDEO_LOCK_MARGIN_MS = dy.VIDEO_LOCK_MARGIN_MS;
 const { registerRoutes } = await import('../lib/routes.js');
 
 const db = openDatabase();
@@ -153,6 +154,43 @@ try {
 		assert.equal(getKv(db, 'douyin.video.day', null)?.count, 1, '视频额度记在 douyin.video.day');
 	}
 
+	// ── 视频自己的三道闸：开关 / 概率 / 尝试次数 ─────────────────────────────
+	//
+	// 这三道是「不乱花钱」的全部闸门，删掉任何一道测试都该红。
+	// （图文那套在 smoke-social.mjs 里有六条对照，视频这三条之前一条都没有。）
+	{
+		day = '2026-11-14';
+		// ① 视频开关关着 → 一次都不许试（图文开着也不行）
+		{
+			const s = make({ getConfig: () => ({ ...douyinCfg, video: { ...douyinCfg.video, enabled: false } }) });
+			resetCalls();
+			genCalls.length = 0;
+			assert.equal(s.maybePost({ parts: partsOf(), slot: { availability: 'idle' }, mood: '', kind: 'video' }), false, '视频开关关着不许触发');
+			await new Promise((r) => setTimeout(r, 20));
+			assert.equal(calls.prepareVideo, 0, '视频开关关着不许走到发布');
+			assert.equal(genCalls.length, 0, '视频开关关着不许花钱');
+		}
+		// ② 概率没抽中 → 不试（random 0.5 ≫ 1%）
+		{
+			const s = make({ random: () => 0.5 });
+			resetCalls();
+			genCalls.length = 0;
+			assert.equal(s.maybePost({ parts: partsOf(), slot: { availability: 'idle' }, mood: '', kind: 'video' }), false, '概率没抽中不许触发');
+			await new Promise((r) => setTimeout(r, 20));
+			assert.equal(genCalls.length, 0, '没抽中不许花钱');
+		}
+		// ③ 今天的尝试次数用完 → 不再试（生成一次 = 花一次钱）
+		{
+			setKv(db, 'douyin.video.day', { date: day, count: 0, tries: 1, lastVirtual: 0 });
+			const s = make();
+			resetCalls();
+			genCalls.length = 0;
+			assert.equal(s.maybePost({ parts: partsOf(), slot: { availability: 'idle' }, mood: '', kind: 'video' }), false, '今天的尝试次数用完了就不再试');
+			await new Promise((r) => setTimeout(r, 20));
+			assert.equal(genCalls.length, 0, '尝试次数用完不许再花钱');
+		}
+	}
+
 	// ── B18：浏览器锁的时长从转码预算推导 ────────────────────────────────────
 	//
 	// exclusive 超时只报错、锁要等 fn 真结束才放 ⇒ 锁预算必须比转码预算长，
@@ -167,8 +205,9 @@ try {
 		assert.equal(r.ok, true, r.error);
 		const lock = locks.find((x) => x.label === '发抖音视频');
 		assert.ok(lock, '发视频要占浏览器锁');
-		assert.equal(lock.opts.maxMs, PAGE_TIMING.transcodeBudgetMs + 120_000, '锁预算要从转码预算推导，不能写死');
+		assert.equal(lock.opts.maxMs, PAGE_TIMING.transcodeBudgetMs + VIDEO_LOCK_MARGIN_MS, '锁预算要从转码预算推导，不能写死');
 		assert.ok(lock.opts.maxMs > PAGE_TIMING.transcodeBudgetMs, '锁预算要比转码预算长（锁要等 fn 真结束才放）');
+		assert.ok(lock.opts.maxMs >= PAGE_TIMING.transcodeBudgetMs + 120_000, '锁余量至少 2 分钟（锁里除转码还有探活 / 导航 / 填表 / 发布确认）');
 	}
 
 	// ── B19：点「发布」之前先持久化（时序，不是「被调过」） ───────────────────

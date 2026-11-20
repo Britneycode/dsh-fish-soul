@@ -206,6 +206,7 @@ try {
 		const lock = locks.find((x) => x.label === '发抖音视频');
 		assert.ok(lock, '发视频要占浏览器锁');
 		assert.equal(lock.opts.maxMs, PAGE_TIMING.transcodeBudgetMs + VIDEO_LOCK_MARGIN_MS, '锁预算要从转码预算推导，不能写死');
+		assert.equal(VIDEO_LOCK_MARGIN_MS, PAGE_TIMING.gotoTimeoutMs + PAGE_TIMING.waitBudgetMs + 5 * PAGE_TIMING.evalTimeoutMs + 60_000, '锁余量要从各环节超时推导，不是写死的常量');
 		assert.ok(lock.opts.maxMs > PAGE_TIMING.transcodeBudgetMs, '锁预算要比转码预算长（锁要等 fn 真结束才放）');
 		assert.ok(lock.opts.maxMs >= PAGE_TIMING.transcodeBudgetMs + 120_000, '锁余量至少 2 分钟（锁里除转码还有探活 / 导航 / 填表 / 发布确认）');
 	}

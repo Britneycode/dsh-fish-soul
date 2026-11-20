@@ -15,7 +15,7 @@ import { Readable } from 'node:stream';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildSubmit, generateVideo, isMp4Bytes, pruneVideos, readPoll, videoErrorText, videoGenConfig } from '../lib/video-gen.js';
+import { buildSubmit, durationFor, generateVideo, isMp4Bytes, minimaxResolutionOk, pruneVideos, readPoll, videoErrorText, videoGenConfig } from '../lib/video-gen.js';
 import { createSafeDownloadStream } from '../lib/safe-download.js';
 
 // 每个用例一个临时目录，跑完就删（不留一堆视频在 TMPDIR 里）
@@ -784,3 +784,91 @@ test('A51 readPoll 自己吐出来的失败原因也不能带 key（这一层自
 	assert.equal(r.state, 'failed');
 	assert.ok(!r.error.includes(key), `readPoll 的返回值里带 key：${r.error}`);
 });
+
+test('A52 MiniMax 分辨率：按配置走，不再写死 768P', () => {
+	// 官方 resolution 枚举：480P / 768P / 2K（档位跟模型绑着，见 A53）
+	for (const res of ['480P', '768P', '2K']) {
+		const s = buildSubmit('minimax', cfgOf({ provider: 'minimax', model: 'MiniMax-H3', resolution: res }), '一只鱼');
+		assert.equal(s.body.resolution, res, `分辨率没透传：${res}`);
+	}
+	assert.equal(videoGenConfig({}).resolution, '768P', '默认 768P');
+	assert.equal(videoGenConfig({ resolution: '4K' }).resolution, '768P', '白名单外的退回 768P');
+	assert.equal(videoGenConfig({ resolution: '2k' }).resolution, '768P', '官方枚举是 2K，大小写不对也退回默认值');
+	assert.equal(videoGenConfig({ resolution: ' 768P ' }).resolution, '768P', '两边空格要去掉');
+});
+
+test('A53 MiniMax 分辨率跟模型绑着：只有 MiniMax-H3 能要 2K', () => {
+	// 官方 schema 原文：H3 支持 768P / 2K；Highspeed / Lite / Max 只有 480P / 768P（2K is not supported）
+	assert.equal(minimaxResolutionOk('MiniMax-H3', '2K'), true);
+	assert.equal(minimaxResolutionOk('MiniMax-H3', '768P'), true);
+	assert.equal(minimaxResolutionOk('MiniMax-H3-Highspeed', '2K'), false);
+	assert.equal(minimaxResolutionOk('MiniMax-H3-Lite', '2K'), false);
+	assert.equal(minimaxResolutionOk('MiniMax-H3-Max', '2K'), false);
+	// 非 2K 一律放行：480P / 768P 四个变体都支持
+	for (const m of ['MiniMax-H3', 'MiniMax-H3-Highspeed', 'MiniMax-H3-Lite', 'MiniMax-H3-Max']) {
+		assert.equal(minimaxResolutionOk(m, '768P'), true, m);
+		assert.equal(minimaxResolutionOk(m, '480P'), true, m);
+	}
+	// ⚠️ 品牌名 MiniMax 本身就带 "Max"（Mini + Max）：不能拿 max 子串去判，MiniMax-H3 要放行
+	assert.equal(minimaxResolutionOk('MiniMax-H3', '2K'), true, 'MiniMax 自带 Max，别误杀');
+	assert.equal(minimaxResolutionOk('minimax-h3-highspeed', '2K'), false, '大小写不敏感');
+	assert.equal(minimaxResolutionOk('minimax-h3-max', '2K'), false, '大小写不敏感');
+	// 认不出来的模型名不拦（用户可能用别名或自建 endpoint）
+	assert.equal(minimaxResolutionOk('my-proxy/h3', '2K'), true);
+});
+
+test('A54 分辨率跟模型对不上：一个请求都不发', async () => {
+	const fetchImpl = queueFetch([jsonRes({ task_id: 'x' })]);
+	const r = await generateVideo(cfgOf({ provider: 'minimax', model: 'MiniMax-H3-Highspeed', resolution: '2K' }), {
+		prompt: '一只鱼', outDir: dirOf('mm2k'), fetchImpl, sleep: async () => {}, now: () => 0
+	});
+	assert.equal(r.ok, false);
+	assert.equal(r.code, 'NOT_CONFIGURED');
+	assert.ok(r.error.includes('2K'), `文案要说明白是 2K 的问题：${r.error}`);
+	assert.equal(fetchImpl.calls.length, 0, '错配不能提交出去让对方拒（提交是花钱的）');
+});
+
+test('A55 MiniMax 带比例：官方 t2va 要求给具体比例', () => {
+	for (const ratio of ['16:9', '9:16', '1:1']) {
+		const s = buildSubmit('minimax', cfgOf({ provider: 'minimax', aspectRatio: ratio }), '一只鱼');
+		assert.equal(s.body.ratio, ratio, `比例没透传：${ratio}`);
+	}
+	// 官方 ratio 枚举：adaptive / 21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16 —— 我们这三个都在里面
+	const official = new Set(['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16']);
+	for (const ratio of ['16:9', '9:16', '1:1']) assert.ok(official.has(ratio), `${ratio} 不在官方枚举里`);
+});
+
+test('A56 MiniMax 时长是整数：4~15，Max 变体 5~15', () => {
+	assert.equal(durationFor('minimax', { durationSec: 5.5 }), 6, '小数要取整（官方 schema 是 integer）');
+	assert.ok(Number.isInteger(durationFor('minimax', { durationSec: 5.5 })), '取整后还得是整数');
+	assert.equal(durationFor('minimax', { durationSec: 4 }), 4);
+	assert.equal(durationFor('minimax', { durationSec: 15 }), 15);
+	assert.equal(durationFor('minimax', { durationSec: 2 }), 4, '下限 4');
+	assert.equal(durationFor('minimax', { durationSec: 99 }), 15, '上限 15');
+	// 官方 schema：MiniMax-H3-Max 是 5–15（4 秒不支持），其余变体是 4–15
+	assert.equal(durationFor('minimax', { durationSec: 4, model: 'MiniMax-H3-Max' }), 5, 'Max 不支持 4 秒');
+	assert.equal(durationFor('minimax', { durationSec: 4, model: 'MiniMax-H3' }), 4);
+	assert.equal(durationFor('minimax', { durationSec: 4, model: 'MiniMax-H3-Lite' }), 4);
+	assert.equal(durationFor('minimax', { durationSec: 4, model: 'MiniMax-H3-Highspeed' }), 4);
+	// 提交出去的值也得是整数
+	const s = buildSubmit('minimax', cfgOf({ provider: 'minimax', durationSec: 5.5 }), '一只鱼');
+	assert.ok(Number.isInteger(s.body.duration), `body.duration 要整数：${s.body.duration}`);
+});
+
+test('A57 videoErrorText 这一层自己也要洗 key（不经 readPoll 的 detail 也得干净）', () => {
+	// 两层防线：readPoll 那层洗一遍，成文案这层再洗一遍。少一层都可能被别处的 detail 带出去
+	const key = 'sk-zzzzzz-1234-abcd';
+	const t = videoErrorText('SUBMIT_FAILED', `Incorrect API key provided: ${key}`, key);
+	assert.ok(!t.includes(key), `文案里带完整 key：${t}`);
+	assert.ok(!t.includes(key.slice(0, 8)), `文案里带 key 前半段：${t}`);
+	assert.ok(/[一-龥]/.test(t), t);
+});
+
+test('A58 readPoll（MiniMax）：失败原因里的 key 也要洗掉', () => {
+	const key = 'eyJhbGciOiJIUzI1NiJ9.xxx.yyy';
+	const r = readPoll('minimax', { task: { status: 'Fail', error: { message: `Incorrect API key provided: ${key}` } } }, { apiKey: key });
+	assert.equal(r.state, 'failed');
+	assert.ok(!r.error.includes(key), `minimax 分支带 key：${r.error}`);
+	assert.ok(!r.error.includes(key.slice(0, 12)), `minimax 分支带 key 前半段：${r.error}`);
+});
+

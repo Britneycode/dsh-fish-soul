@@ -18,6 +18,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { tmpHome } from './_tmp.mjs';
 
 const home = tmpHome('dsh-session-overflow-');
@@ -218,14 +219,17 @@ test('换出来的新会话要直接建在目标模型上（不然下一轮又�
 	ok('新会话带目标模型');
 });
 
-test('换会话要沿用同一个工作区（人设卡 / 板块都在那儿）', async () => {
+test('换会话要沿用原来那条会话的工作区（人设卡 / 板块都在那儿）', async () => {
 	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30009'");
 	const chat9 = { ...chat, channelId: 'private:30009', targetId: '30009' };
 	const { gw, created } = makeGateway();
 	const first = await gw.ensureSession(chat9);
+	// 这条会话的工作区是单独指定的（人设卡 / 板块都在那儿）——换会话不能把它换回默认的那个
+	const custom = join(home, 'ws-custom');
+	db.prepare("UPDATE chat_session SET workspace_path = ? WHERE session_id = ?").run(custom, first.id);
 	switchBlockedTurnEnd(gw, first.id, chat9.channelId);
 	await gw.ensureSession(chat9);
-	assert.equal(created[1].meta.cwd, created[0].meta.cwd, '换会话不能把工作区换掉');
+	assert.equal(created[1].meta.cwd, custom, '换会话要沿用这条会话自己的工作区');
 	ok('工作区不变');
 });
 test('两种坏法都踩过的会话，换完要把两个名单都清干净（别留残条目）', async () => {

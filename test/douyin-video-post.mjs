@@ -54,7 +54,8 @@ jobsDb.close();
 // ── 抖音那一套（假 driver / 假 host / 假 clock / 假视频生成器） ─────────────
 const calls = { renderCard: 0, prepareNote: 0, listRecommendedMusic: 0, closeMusicPanel: 0, publishNote: 0, prepareVideo: 0, publishVideo: 0 };
 let musicThrows = false;
-let publishVideoFails = false;
+// 发布这一步的几种结局：ok（发出去）/ fail（点了但没等到确认）/ needsVerify（要验证）/ notLoggedIn（创作者中心没登录）
+let videoMode = 'ok';
 let statusAtSubmit = '';
 let current = null;
 const driver = {
@@ -63,12 +64,18 @@ const driver = {
 	listRecommendedMusic: async () => { calls.listRecommendedMusic++; if (musicThrows) throw new Error('视频路径不该碰配乐'); return { ok: true, songs: ['歌'] }; },
 	closeMusicPanel: async () => { calls.closeMusicPanel++; },
 	publishNote: async ({ beforeSubmit }) => { calls.publishNote++; await beforeSubmit(); return { ok: true, musicPicked: true }; },
-	prepareVideo: async () => { calls.prepareVideo++; return { ok: true }; },
+	prepareVideo: async () => {
+		calls.prepareVideo++;
+		if (videoMode === 'notLoggedIn') return { ok: false, code: 'NOT_LOGGED_IN', error: '创作者中心没登录：在抖音浏览器里打开 creator.douyin.com 登录一次' };
+		return { ok: true };
+	},
 	publishVideo: async ({ beforeSubmit }) => {
 		calls.publishVideo++;
+		// 要验证是在点发布**之前**被拦下来的：没点过就不该落「结果未知」。
+		if (videoMode === 'needsVerify') return { ok: false, code: 'NEEDS_VERIFY', error: '抖音要验证（短信 / 滑块）才能发' };
 		await beforeSubmit();
 		statusAtSubmit = String(current.postJobs.pending()?.status ?? '');
-		if (publishVideoFails) return { ok: false, code: 'NOT_CONFIRMED', error: '点了发布，但没等到「已发布」' };
+		if (videoMode === 'fail') return { ok: false, code: 'NOT_CONFIRMED', error: '点了发布，但没等到「已发布」' };
 		return { ok: true };
 	},
 };
@@ -94,6 +101,8 @@ const videoGen = {
 	},
 };
 const notes = [];
+const notifies = [];
+const pruned = [];
 const config = {
 	enabled: true,
 	post: { enabled: true, perDay: 1 },
@@ -104,11 +113,15 @@ const make = () => {
 	current = new DouyinSocial({
 		db, clock, host, driver, getConfig: () => config, callLlm, persona: () => ({ name: '鱼' }),
 		cardDir: join(home, 'cards'), videoGen,
+		// 清旧视频的可注入桩：真删盘上的 mp4 不是这个套件要验的东西。
+		videoPrune: (dir) => { pruned.push(dir); },
 		note: (k, x) => notes.push({ k, ...x }),
-		notify: () => {},
+		notify: (k, m) => notifies.push({ key: k, msg: m }),
 	});
 	return current;
 };
+/** 把当天的视频额度清零（视频一天最多几条，验别的分支前先腾出额度）。 */
+const resetVideoQuota = () => setKv(db, 'douyin.video.day', { date: '2026-11-09', count: 0, tries: 0, lastVirtual: 0 });
 
 try {
 	let s = make();
@@ -201,7 +214,74 @@ try {
 	assert.equal(getKv(db, 'douyin.video.day', null)?.count, videoCountBefore + 1, '视频核实后记到视频额度');
 	assert.equal(getKv(db, 'douyin.post.day', null)?.count, postCountBefore, '图文额度不动');
 
-	console.log('✓ 抖音视频作品：kind 分流、图文与视频额度分开、生成不占浏览器锁、生成失败不发布、额度用完不花钱、点发布前先持久化、重启恢复与核实记账');
+	// B23 / B24：视频文件落账 + 发完清旧 mp4 ────────────────────────────────
+	//
+	// B23 守的是「崩了也知道视频在哪」：prepared() 把 mp4 路径记进账本，
+	//      删掉这行 ⇒ 崩了只能重新生成（再花一次钱），而测试照样绿。
+	// B24 守的是「盘上不能无限堆 mp4」：单条上限 100MB，不清理就是真金白银在涨。
+	{
+		resetVideoQuota();
+		videoMode = 'ok';
+		pruned.length = 0;
+		const genBefore = genCalls;
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, true, r.error);
+		assert.equal(genCalls, genBefore + 1, '发一次生成一次');
+		const row = db.prepare("SELECT * FROM douyin_post_job WHERE kind='video' ORDER BY id DESC LIMIT 1").get();
+		assert.equal(row.status, 'confirmed', '发成功了任务要落 confirmed');
+		assert.equal(row.card_path, join(home, 'douyin-videos', 'v1.mp4'), '账本要记下 mp4 的路径（崩了知道视频在哪）');
+		assert.equal(pruned.length, 1, '发完要调一次清理');
+		assert.equal(pruned[0], s.videoDir, '清理的就是视频目录（跟生成落盘的是同一个）');
+	}
+
+	// B21：碰到验证 → 退避计数 + 停一段时间 + 提醒主人 ────────────────────
+	{
+		resetVideoQuota();
+		videoMode = 'needsVerify';
+		const before = Number(getKv(db, 'douyin.verify.count', 0)) || 0;
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, false, '要验证时发不出去');
+		assert.equal(Number(getKv(db, 'douyin.verify.count', 0)) || 0, before + 1, '碰到验证要涨退避计数');
+		assert.ok(s.blockedUntil > Date.now(), '碰到验证要停一段时间');
+		assert.ok(notifies.some((x) => x.key === 'douyin.verify'), '要提醒主人去验证');
+		// 验证是点发布**之前**被拦的 ⇒ 任务落 failed（不是 unknown），不挡后面的发布
+		assert.equal(s.postJobs.pending('video'), null, '没点过发布就不该落「结果未知」');
+		setKv(db, 'douyin.verify.count', 0);
+		s = make();
+	}
+
+	// B22：创作者中心没登录 → 提醒主人去登录 ────────────────────────────────
+	{
+		resetVideoQuota();
+		videoMode = 'notLoggedIn';
+		notifies.length = 0;
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, false, '没登录发不出去');
+		const n = notifies.find((x) => x.key === 'douyin.creator');
+		assert.ok(n, '要提醒主人创作者中心没登录');
+		assert.match(String(n.msg ?? ''), /创作者中心没登录/, '提醒里要说清是没登录');
+		assert.equal(s.postJobs.pending('video'), null, '没传上去就不该落「结果未知」');
+	}
+
+	// B20：点了发布但没等到确认 → 落 unknown，后续发布被拦住 ────────────────
+	//
+	// 「可能已经发出去了」⇒ 不能自动重发（重发 = 再生成一条 = 再花一次钱），
+	// 必须人去创作者中心核实。这条语义之前只在账本层测过，social 层没接上。
+	{
+		resetVideoQuota();
+		videoMode = 'fail';
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, false, '没等到确认就是没发成');
+		assert.match(String(r.error ?? ''), /未知/, '要提示结果未知（可能已经发出，要人工核实）');
+		assert.equal(s.postJobs.pending('video')?.status, 'unknown', '点了发布但没等到结果 → 任务落 unknown');
+		const genBefore = genCalls;
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, false, '有未核实的作品时不该再发');
+		assert.match(String(r.error ?? ''), /未知/);
+		assert.equal(genCalls, genBefore, '被拦住时不能再调生成（不花钱）');
+	}
+
+	console.log('✓ 抖音视频作品：kind 分流、图文与视频额度分开、生成不占浏览器锁、生成失败不发布、额度用完不花钱、点发布前先持久化、重启恢复与核实记账、mp4 路径落账、发完清旧视频、碰到验证要退避、没登录要提醒、发布中断落 unknown 且挡住后续');
 } finally {
 	db.close();
 	rmSync(home, { recursive: true, force: true });

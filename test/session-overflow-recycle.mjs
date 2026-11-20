@@ -131,7 +131,7 @@ test('普通失败（限额 / 超时 / 内容过滤）不换会话 —— 换了
 		const { gw, created } = makeGateway();
 		const first = await gw.ensureSession(chat3);
 		gw.onSessionEvent({ id: first.id }, { type: 'user/message', data: { message: { id: 'm1', source: { kind: 'fish-soul/qq', channelId: chat3.channelId } } } });
-		gw.onSessionEvent({ id: first.id }, { type: 'turn/end', data: reason });
+		gw.onSessionEvent({ id: first.id }, { type: 'turn/end', data: { reason } });
 		const again = await gw.ensureSession(chat3);
 		assert.equal(again.id, first.id, `${JSON.stringify(reason)} 不该换会话`);
 		assert.equal(created.length, 1, `${JSON.stringify(reason)} 不该新建会话`);

@@ -132,8 +132,8 @@ test('A1 配置：默认关、provider 只认白名单、时长和次数钳在�
 	assert.equal(videoGenConfig({ provider: '不存在的' }).provider, 'volc', '白名单外的退回 volc');
 	assert.equal(videoGenConfig({ provider: 'minimax' }).provider, 'minimax');
 	assert.equal(videoGenConfig({ provider: 'openai-compat' }).provider, 'openai-compat');
-	assert.equal(videoGenConfig({ durationSec: 999 }).durationSec, 12, '时长上限 12 秒');
-	assert.equal(videoGenConfig({ durationSec: 0 }).durationSec, 2, '时长下限 2 秒');
+	assert.equal(videoGenConfig({ durationSec: 999 }).durationSec, 15, '时长上限 15 秒（MiniMax H3 的上限）');
+	assert.equal(videoGenConfig({ durationSec: 0 }).durationSec, 4, '时长下限 4 秒：2~3 秒火山和 MiniMax 都直接拒');
 	assert.equal(videoGenConfig({ durationSec: 'abc' }).durationSec, 5, '乱的时长退回默认');
 	assert.equal(videoGenConfig({ perDay: -1 }).perDay, 0);
 	assert.equal(videoGenConfig({ perDay: 99 }).perDay, 5);
@@ -731,4 +731,56 @@ test('A47 openai 兼容：size 是官方枚举里的像素尺寸、seconds 是 4
 		const s = buildSubmit('openai-compat', cfgOf({ provider: 'openai-compat', durationSec: sec }), '一只鱼');
 		assert.equal(s.body.seconds, expect, `${sec} 秒应吸附到 ${expect}`);
 	}
+});
+
+test('A48 时长按 provider 收窄：三家的 body 里都是对方认的合法值', () => {
+	// 各家限制不同，超出会被对方拒（火山 4~30 / MiniMax 4~15 整数 / openai 只认 4/8/12）
+	for (const sec of [4, 5, 8, 12, 15]) {
+		const v = buildSubmit('volc', cfgOf({ durationSec: sec }), '一只鱼');
+		assert.ok(Number.isInteger(v.body.duration), `火山时长要是整数：${v.body.duration}`);
+		assert.ok(v.body.duration >= 4 && v.body.duration <= 12, `火山时长越界：${v.body.duration}`);
+
+		const m = buildSubmit('minimax', cfgOf({ provider: 'minimax', durationSec: sec }), '一只鱼');
+		assert.ok(Number.isInteger(m.body.duration), `MiniMax 时长要是整数：${m.body.duration}`);
+		assert.ok(m.body.duration >= 4 && m.body.duration <= 15, `MiniMax 时长越界：${m.body.duration}`);
+
+		const o = buildSubmit('openai-compat', cfgOf({ provider: 'openai-compat', durationSec: sec }), '一只鱼');
+		assert.ok(['4', '8', '12'].includes(o.body.seconds), `openai seconds 非法：${o.body.seconds}`);
+	}
+	// 15 秒：火山收窄到 12（Seedance 1.0 pro 的上限），MiniMax 收 15，openai 吸附到 12
+	assert.equal(buildSubmit('volc', cfgOf({ durationSec: 15 }), '一只鱼').body.duration, 12, '火山要收窄');
+	assert.equal(buildSubmit('minimax', cfgOf({ provider: 'minimax', durationSec: 15 }), '一只鱼').body.duration, 15, 'MiniMax 能到 15');
+	assert.equal(buildSubmit('openai-compat', cfgOf({ provider: 'openai-compat', durationSec: 15 }), '一只鱼').body.seconds, '12');
+});
+
+test('A49 时长下限 4 秒：2~3 秒火山和 MiniMax 都直接拒，得提前抬上去', () => {
+	for (const sec of [0, 1, 2, 3]) {
+		assert.equal(videoGenConfig({ durationSec: sec }).durationSec, 4, `${sec} 秒要抬到 4`);
+	}
+	assert.equal(videoGenConfig({ durationSec: 4 }).durationSec, 4, '4 秒本身合法，别动它');
+	assert.equal(videoGenConfig({ durationSec: 15 }).durationSec, 15, '15 秒是 MiniMax 的上限');
+	assert.equal(videoGenConfig({ durationSec: 99 }).durationSec, 15, '再大也钳到 15');
+});
+
+test('A50 轮询（MiniMax）：v2 的状态和 file_id 都套在 task 里，v1 是平铺', () => {
+	// v2（官方 guides/video-generation）：{ task: { status, file_id, content: { url } } }
+	const v2 = readPoll('minimax', { task: { status: 'Success', file_id: 'file-v2' } });
+	assert.equal(v2.state, 'succeeded');
+	assert.equal(v2.fileId, 'file-v2', 'v2 的 file_id 在 task 里');
+
+	const v2url = readPoll('minimax', { task: { status: 'succeeded', content: { url: 'https://cdn.example/v.mp4' } } });
+	assert.equal(v2url.state, 'succeeded');
+	assert.equal(v2url.url, 'https://cdn.example/v.mp4', 'v2 的地址在 task.content.url');
+
+	// v1（官方 api-reference）：平铺 { status, file_id }
+	const v1 = readPoll('minimax', { status: 'Success', file_id: 'file-v1' });
+	assert.equal(v1.state, 'succeeded');
+	assert.equal(v1.fileId, 'file-v1', 'v1 的 file_id 在顶层');
+});
+
+test('A51 readPoll 自己吐出来的失败原因也不能带 key（这一层自己也刷）', () => {
+	const key = 'sk-secret-abc-123456';
+	const r = readPoll('volc', { status: 'failed', error: { message: `Incorrect API key provided: ${key}` } }, { apiKey: key });
+	assert.equal(r.state, 'failed');
+	assert.ok(!r.error.includes(key), `readPoll 的返回值里带 key：${r.error}`);
 });

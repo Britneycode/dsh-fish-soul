@@ -531,7 +531,8 @@ test('A35 provider 回显的 key 不能进用户可见的文案', async () => {
 	const r = await generateVideo(cfgOf({ apiKey: key }), { prompt: '一只鱼', outDir: dirOf('scrub'), fetchImpl, sleep: async () => {}, now: () => 0 });
 	assert.equal(r.ok, false);
 	assert.equal(r.code, 'TASK_FAILED');
-	assert.ok(!r.error.includes('sk-oebajw'), `文案里带 key：${r.error}`);
+	assert.ok(!r.error.includes(key), `文案里带完整 key：${r.error}`);
+	assert.ok(!r.error.includes(key.slice(0, 8)), `文案里带 key 前半段：${r.error}`);
 });
 
 test('A36 轮询遇到 5xx 会重试：重试后成功就照样算成功', async () => {

@@ -85,6 +85,7 @@ const ok = (n) => console.log('✓', n);
 		[{ key: 'startup-step', detail: { step: 3, name: '人格' }, count: 1 }, /第 3 步.*人格/],
 		[{ key: 'context-size', detail: { chars: 1500, budget: 1200, over80: true }, count: 1 }, /1500 字.*预算 1200.*超 80%/],
 		[{ key: 'resume-failed', detail: { sessionId: 'fish-soul-abc123', reason: 'not found' }, count: 1 }, /会话 fish-soul-ab.*not found/],
+		[{ key: 'session-model-switch-blocked', detail: { code: 'MODEL_SWITCH_COMPACTION_FAILED', channelId: 'private:1' }, count: 1 }, /错误码 MODEL_SWITCH_COMPACTION_FAILED/],
 		[{ key: 'mount-failed', detail: {}, count: 2 }, /重复 2 次/],
 		[{ key: 'x', detail: {}, count: 1 }, /没有细节/]
 	];
@@ -92,6 +93,24 @@ const ok = (n) => console.log('✓', n);
 		assert.match(describeEntry(entry), re, `describeEntry 要说人话：${JSON.stringify(entry)}`);
 	}
 	ok('describeEntry 把常见 detail 翻成人话');
+}
+
+{
+	// ⑤ 会话回收与熔断相关 key 都有中文 label
+	const d = new DiagLog({ db, now: () => 4_500_000 });
+	const expected = {
+		'session-overflow': '上下文超限',
+		'session-model-switch-blocked': '换模型被压缩闸门挡住',
+		'session-overflow-recycle': '上下文满了，已换新会话',
+		'session-switch-recycle': '换模型被挡，已换新会话',
+		'session-switch-preflight': '换模型前预检超窗，直接换新会话',
+		'session-recycle-breaker': '连续换新会话仍超限，已熔断',
+		'session-manual-reset': '手动换了新会话'
+	};
+	for (const k of Object.keys(expected)) d.add(k, { channelId: 'private:1' }, 'warn');
+	const byKey = Object.fromEntries(d.list().map((e) => [e.key, e.label]));
+	for (const [k, label] of Object.entries(expected)) assert.equal(byKey[k], label, `${k} 缺少中文标签`);
+	ok('会话回收与熔断 key 都有中文 label');
 }
 
 {

@@ -267,6 +267,33 @@ ok('抖音评论桥：Node 侧调用（透传 / 异常不外抛 / 桥没装）')
 }
 
 {
+  // [表情:名字] 兜底：模型自己造的格式——库里有的换成真图发，没有的剥掉（跟 QQ 出站同一条兜底）
+  const { DouyinSocial } = await import('../lib/douyin-social.js');
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpHome } = await import('./_tmp.mjs');
+  const ws2 = tmpHome('dy-sticker-fb-') + '/ws';
+  mkdirSync(ws2 + '/_stickers', { recursive: true });
+  const PNG2 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+  writeFileSync(ws2 + '/_stickers/得意猫.png', PNG2);
+  const social = new DouyinSocial({
+    host: { running: false, exclusive: async (n, fn) => fn() },
+    getConfig: () => ({}), log: () => {}, callLlm: async () => '',
+    stickers: { list: () => [{ file: '得意猫.png', tags: ['得意'], exists: true }], resolveFeelRefs: async (t) => ({ text: t, resolved: [] }) },
+    workspacePath: () => ws2,
+  });
+  // 库里有：[表情:得意猫] → 换成真图发出
+  const r1 = await social.replyImages('哈哈 [表情:得意猫]');
+  assert.equal(r1.text.trim(), '哈哈', '[表情:xx] 从文字里换掉');
+  assert.equal(r1.images.length, 1, '换成了一张真图');
+  assert.ok(r1.images[0].bytes.equals(PNG2), '读的是文件本体');
+  // 库里没有：剥掉，不把方括号发到评论里
+  const r2 = await social.replyImages('哈哈 [表情:比耶开心]');
+  assert.equal(r2.text.trim(), '哈哈', '库里没有就剥掉');
+  assert.equal(r2.images.length, 0, '剥掉就是没有图，不是发文字');
+  console.log('✓ [表情:名字] 兜底：库里有的换真图，没有的剥掉');
+}
+
+{
   // 文件不存在：跳过这张，不炸
   const { DouyinSocial } = await import('../lib/douyin-social.js');
   const social = new DouyinSocial({

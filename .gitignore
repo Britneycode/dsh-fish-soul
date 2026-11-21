@@ -14,47 +14,17 @@ probe-*/
 
 # 抖音群聊实测文档 + 只读探测脚本（含真实群名 / 真实昵称，不进仓库）
 docs/douyin-group-probe.md
+# 本机探针/解析脚本（含真实群名 / 昵称 / uid / 会话 ID，不进仓库）
+# ⚠️ 用通配而不是逐个列：主人会不断新建这类脚本，逐个列永远追不上。
+#    gitignore 对**已跟踪**的文件无效 ⇒ 已进仓库的 scripts/probe-per-agent*.mjs、check-rings.mjs 不受影响。
+#    check-* 故意不收通配：scripts/check-rings.mjs 是要进仓库的检查脚本，通配会挡住同类新文件。
+scripts/probe-*.mjs
+scripts/parse-*.mjs
+scripts/verify-*.mjs
+scripts/find-*.mjs
+scripts/diag-*.mjs
+scripts/dump-*.mjs
 scripts/check-mention-who.mjs
-scripts/diag-hook.mjs
-scripts/dump-buf.mjs
-scripts/find-sender.mjs
-scripts/parse-group-final.mjs
-scripts/parse-group-messages.mjs
-scripts/parse-group-pb.mjs
-scripts/parse-group-thread.mjs
-scripts/parse-uid-map.mjs
-scripts/parse-uid-precise.mjs
-scripts/probe-douyin-chatdom.mjs
-scripts/probe-douyin-feed-http.mjs
-scripts/probe-douyin-digg.mjs
-scripts/probe-douyin-group.mjs
-scripts/probe-douyin-list-dom.mjs
-scripts/probe-douyin-dm-emoji.mjs
-scripts/probe-douyin-emoji-names.mjs
-scripts/probe-douyin-dm-image-format.mjs
-scripts/probe-douyin-diag.mjs
-scripts/probe-douyin-webp-upload.mjs
-scripts/probe-douyin-send-capture.mjs
-scripts/probe-douyin-conv-id.mjs
-scripts/probe-douyin-conv-raw.mjs
-scripts/probe-douyin-send-image.mjs
-scripts/probe-douyin-webp-convert.mjs
-scripts/probe-douyin-open.mjs
-scripts/probe-group-api.mjs
-scripts/probe-group-at.mjs
-scripts/probe-group-avatar.mjs
-scripts/probe-group-avatar-uid.mjs
-scripts/probe-group-fiber-uid.mjs
-scripts/probe-group-history.mjs
-scripts/probe-group-id.mjs
-scripts/probe-group-members.mjs
-scripts/probe-group-mention.mjs
-scripts/probe-group-real.mjs
-scripts/probe-group-uid-api.mjs
-scripts/verify-mention-rule.mjs
-scripts/verify-sender-rule.mjs
-# 群管理真机自检脚本（读本机令牌、对真实群发消息，不进仓库）
-scripts/verify-group-admin-live.mjs
 # 抖音私信真机探针（含真实会话 ID / uid，不进仓库）
 # ⚠️ 用通配而不是逐个列：主人会不断新建探针脚本，逐个列永远追不上。
 #    gitignore 对**已跟踪**的文件无效 ⇒ 已进仓库的 scripts/probe-per-agent*.mjs 不受影响。

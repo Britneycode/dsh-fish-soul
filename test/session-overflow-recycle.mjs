@@ -51,10 +51,11 @@ function makeGateway({
 	const selected = [];
 	const sent = [];
 	const live = new Map();
+	let agentsAvailable = true;
 	const gw = new ChatGateway({
 		ctx: {
 			get: (name) => {
-				if (name === 'agents') return agents;
+				if (name === 'agents') return agentsAvailable ? agents : null;
 				if (name === 'llm') return {
 					listProviders: () => [{ id: 'p0' }, { id: 'p1' }, { id: 'p2' }],
 					...(resolveModelInfo ? { resolveModelInfo } : {})
@@ -123,7 +124,7 @@ function makeGateway({
 		get: (id) => live.get(id)
 	};
 
-	return { gw, created, resumed, notes, diags, followups, selected, sent };
+	return { gw, created, resumed, notes, diags, followups, selected, sent, agents, setAgentsAvailable: (v) => { agentsAvailable = v; } };
 }
 
 const chat = { channelId: 'private:30001', chatType: 'private', targetId: '30001', title: '某人' };
@@ -535,6 +536,170 @@ test('主人发 /鱼 新会话 命令立即换新会话并回复确认', async (
 	assert.equal(sent.length, 1);
 	assert.match(sent[0][1][0].data.text, /换了一条新会话/);
 	ok('/鱼 新会话 命令生效');
+});
+
+test('resetSession 失败时保留原会话与工作区，/鱼 新会话 失败不抛未捕获异常并回复提示', async () => {
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30021'");
+	const customWs = join(home, 'ws-preserve-on-reset-fail');
+	const chat21 = { ...chat, channelId: 'private:30021', targetId: '30021' };
+	const { gw, agents, sent, setAgentsAvailable } = makeGateway({ getConfig: () => ({ qq: { enabled: true }, masterQqUin: '30021' }) });
+	const first = await gw.createSession(chat21, customWs);
+
+	// 1. agents 不可用时，resetSession 拒绝且原会话与 workspace_path 完好无损
+	setAgentsAvailable(false);
+	await assert.rejects(() => gw.resetSession('private:30021'), /agents/);
+	const afterNoAgents = db.prepare('SELECT session_id, status, workspace_path FROM chat_session WHERE session_id = ?').get(first.id);
+	assert.equal(afterNoAgents?.status, 'active', 'agents 不可用时不能把原会话标成 retired');
+	assert.equal(afterNoAgents?.workspace_path, customWs, '原工作区必须完整保留');
+	assert.equal(gw.bound.has(first.id), true, '原会话必须仍在 bound 中');
+
+	// /鱼 新会话 在 agents 不可用时不抛异常，回复失败提示并保持原会话活跃
+	const handled = await gw.handleCommand({ channelId: 'private:30021', userId: '30021', nickname: '主人', text: '/鱼 新会话' });
+	assert.equal(handled, true);
+	assert.equal(sent.length, 1);
+	assert.match(sent[0][1][0].data.text, /失败/);
+
+	// 2. agents.create 抛错时同样不能破坏原会话
+	setAgentsAvailable(true);
+	agents.create = async () => { throw new Error('create failed'); };
+	await assert.rejects(() => gw.resetSession('private:30021'), /create failed/);
+	const afterCreateErr = db.prepare('SELECT status, workspace_path FROM chat_session WHERE session_id = ?').get(first.id);
+	assert.equal(afterCreateErr?.status, 'active');
+	assert.equal(afterCreateErr?.workspace_path, customWs);
+	assert.equal(gw.bound.has(first.id), true);
+	ok('resetSession 失败不破坏原会话与工作区');
+});
+
+test('多条消息合并到同一失败轮次时，全部重试并正确结算所有抖音收件箱与主动等待方', async () => {
+	// 1. 两批抖音私信合并到同一个 turn/end
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'douyin:合并测试A'");
+	const settled1 = [];
+	let count1 = 0;
+	const g1 = makeGateway({
+		douyinSettle: (ids, isOk) => settled1.push({ ids, ok: isOk }),
+		onFollowup: async (sid, msg, inst) => {
+			count1++;
+			inst.onSessionEvent({ id: sid }, { type: 'user/message', data: { message: { id: msg.id, source: msg.source } } });
+			if (count1 === 2) {
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'CONTEXT_WINDOW_EXCEEDED', message: 'context length exceeded' } } } });
+			} else if (count1 >= 3) {
+				inst.onSessionEvent({ id: sid }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: `回复${count1}` }] } } });
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+			}
+		}
+	});
+	const conv = '0:1:555:666';
+	await g1.gw.dispatch('douyin:合并测试A', [{ m: { userId: 'uid:666', nickname: '合并测试A', messageId: 'm-c1', chatType: 'private', targetId: '合并测试A', inboxId: 101, convId: conv, text: '第一句', images: [], timeMs: Date.now() }, person: null }]);
+	await g1.gw.dispatch('douyin:合并测试A', [{ m: { userId: 'uid:666', nickname: '合并测试A', messageId: 'm-c2', chatType: 'private', targetId: '合并测试A', inboxId: 102, convId: conv, text: '第二句', images: [], timeMs: Date.now() }, person: null }]);
+	await new Promise((r) => setTimeout(r, 50));
+	const okIds1 = settled1.filter((s) => s.ok === true).flatMap((s) => s.ids).sort((a, b) => a - b);
+	assert.deepEqual(okIds1, [101, 102], `两条合并消息都要重试并结算成功，实际：${JSON.stringify(settled1)}`);
+	assert.equal(settled1.some((s) => s.ok === false), false, '合并重试成功时不能提前判失败');
+
+	// 2. 共享会话上 dispatch + triggerProactive 合并到同一失败 turn/end
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30023'");
+	const settled2 = [];
+	let count2 = 0;
+	const g2 = makeGateway({
+		getConfig: () => ({ qq: { enabled: true }, masterQqUin: '30023', douyin: { enabled: true, masterName: '合并测试B', masterUid: 'douyin:777' } }),
+		douyinSettle: (ids, isOk) => settled2.push({ ids, ok: isOk }),
+		onFollowup: async (sid, msg, inst) => {
+			count2++;
+			inst.onSessionEvent({ id: sid }, { type: 'user/message', data: { message: { id: msg.id, source: msg.source } } });
+			if (count2 === 2) {
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'CONTEXT_WINDOW_EXCEEDED', message: 'context length exceeded' } } } });
+			} else if (count2 >= 3) {
+				inst.onSessionEvent({ id: sid }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: `回复${count2}` }] } } });
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+			}
+		}
+	});
+	await g2.gw.dispatch('douyin:合并测试B', [{ m: { userId: 'uid:777', nickname: '合并测试B', messageId: 'm-c3', chatType: 'private', targetId: '合并测试B', inboxId: 103, convId: conv, text: '先发一句', images: [], timeMs: Date.now() }, person: null }]);
+	const proactiveOk = await g2.gw.triggerProactive('private:30023', '顺便主动说一句');
+	await new Promise((r) => setTimeout(r, 40));
+	assert.equal(proactiveOk, true, '合并在后面的主动开口也要完成重试并返回 true');
+	assert.deepEqual(settled2.filter((s) => s.ok === true).flatMap((s) => s.ids), [103], '抖音消息也要随重试结算 ok:true');
+	ok('多消息合并失败轮次全部重试并正确结算');
+});
+
+test('agent.followup 既发 turn/end 又 reject，或直接 reject 不发 turn/end 时都能安全换新会话重试', async () => {
+	const overflowErr = Object.assign(new Error('context length exceeded'), { code: 'CONTEXT_WINDOW_EXCEEDED' });
+
+	// 1. 既发 turn/end(error) 又 reject：不重复报错、不丢重试成功结果
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'douyin:双报测试'");
+	const settlesBoth = [];
+	let step1 = 0;
+	const gBoth = makeGateway({
+		douyinSettle: (ids, isOk) => settlesBoth.push({ ids, ok: isOk }),
+		onFollowup: async (sid, msg, inst) => {
+			step1++;
+			inst.onSessionEvent({ id: sid }, { type: 'user/message', data: { message: { id: msg.id, source: msg.source } } });
+			if (step1 === 1) {
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'CONTEXT_WINDOW_EXCEEDED', message: 'context length exceeded' } } } });
+				throw overflowErr;
+			}
+			inst.onSessionEvent({ id: sid }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '好了' }] } } });
+			inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+		}
+	});
+	const conv = '0:1:888:999';
+	await gBoth.gw.dispatch('douyin:双报测试', [{ m: { userId: 'uid:999', nickname: '双报测试', messageId: 'm-b1', chatType: 'private', targetId: '双报测试', inboxId: 201, convId: conv, text: '你好', images: [], timeMs: Date.now() }, person: null }]);
+	await new Promise((r) => setTimeout(r, 40));
+	assert.equal(gBoth.created.length, 2);
+	assert.deepEqual(settlesBoth, [{ ids: [201], ok: true }], '不能在 followup reject 时提前结算 ok:false');
+
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30024'");
+	let step1p = 0;
+	const gBothP = makeGateway({
+		onFollowup: async (sid, msg, inst) => {
+			step1p++;
+			inst.onSessionEvent({ id: sid }, { type: 'user/message', data: { message: { id: msg.id, source: msg.source } } });
+			if (step1p === 1) {
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'CONTEXT_WINDOW_EXCEEDED', message: 'context length exceeded' } } } });
+				throw overflowErr;
+			}
+			inst.onSessionEvent({ id: sid }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '主动好了' }] } } });
+			inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+		}
+	});
+	assert.equal(await gBothP.gw.triggerProactive('private:30024', '试一下'), true, 'triggerProactive 在双报时也要通过重试返回 true');
+
+	// 2. followup 直接 reject 不发 turn/end：dispatch 与 triggerProactive 都要当场换新会话重试 1 次
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'douyin:直拒测试'");
+	const settlesDirect = [];
+	let step2 = 0;
+	const gDirect = makeGateway({
+		douyinSettle: (ids, isOk) => settlesDirect.push({ ids, ok: isOk }),
+		onFollowup: async (sid, msg, inst) => {
+			step2++;
+			if (step2 === 1) throw overflowErr;
+			inst.onSessionEvent({ id: sid }, { type: 'user/message', data: { message: { id: msg.id, source: msg.source } } });
+			inst.onSessionEvent({ id: sid }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '重试成功' }] } } });
+			inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+		}
+	});
+	await gDirect.gw.dispatch('douyin:直拒测试', [{ m: { userId: 'uid:111', nickname: '直拒测试', messageId: 'm-d1', chatType: 'private', targetId: '直拒测试', inboxId: 202, convId: conv, text: '你好', images: [], timeMs: Date.now() }, person: null }]);
+	await new Promise((r) => setTimeout(r, 40));
+	assert.equal(gDirect.created.length, 2);
+	assert.deepEqual(settlesDirect, [{ ids: [202], ok: true }]);
+
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30025'");
+	let step2p = 0;
+	let observedRetryKey = '';
+	const gDirectP = makeGateway({
+		onFollowup: async (sid, msg, inst) => {
+			step2p++;
+			if (step2p === 1) throw overflowErr;
+			const w = inst.waiters.get(msg.id);
+			observedRetryKey = w?.key ?? '';
+			inst.onSessionEvent({ id: sid }, { type: 'user/message', data: { message: { id: msg.id, source: msg.source } } });
+			inst.onSessionEvent({ id: sid }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '主动重试成功' }] } } });
+			inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+		}
+	});
+	assert.equal(await gDirectP.gw.triggerProactive('private:30025', '直接 reject 重试'), true);
+	assert.equal(observedRetryKey, gDirectP.followups[1].msg.id, '复用 waiter 时 key 要同步更新为新轮次 msgId');
+	ok('followup reject 双路径重试与 waiter key 更新正确');
 });
 
 console.log('session-overflow-recycle: all assertions passed');

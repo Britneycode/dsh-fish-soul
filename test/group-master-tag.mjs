@@ -30,7 +30,6 @@ const gateway = (masterQqUin = '10001') => {
 const dispatchable = (g) => Object.assign(g, {
 	admitImages: async (text) => [{ type: 'text', text }],
 	videoNotes: async () => [],
-	quoteLine: async () => '',
 	applyChatModelFor: () => {},
 	typing: () => {},
 	judgeTurn: async () => {},

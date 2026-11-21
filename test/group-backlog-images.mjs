@@ -92,7 +92,6 @@ test('接线：dispatchInner 真的把 backlog 交给 admitImages', async () => 
 	g.admitImages = async (text, items, sid, opts) => { seen.push(opts); return [{ type: 'text', text }]; };
 	g.takeBacklog = () => ({ lines: [], images: [{ img: { url: 'https://x.example/1.jpg' }, m: { messageId: 'b1', nickname: 'n' }, label: 'n的图1' }] });
 	g.videoNotes = async () => [];
-	g.quoteLine = async () => '';
 	g.applyChatModelFor = () => {};
 	g.typing = () => {};
 	g.judgeTurn = async () => {};
@@ -116,4 +115,51 @@ test('接线：dispatchInner 真的把 backlog 交给 admitImages', async () => 
 	await g.dispatchInner('group:9', [{ m, person: null, interject: false }], agent);
 	assert.equal(seen.length, 1, 'admitImages 要被调用一次');
 	assert.equal(seen[0]?.backlog?.images?.length, 1, 'backlog 的图必须真的传下去（只测 admitImages 收得到参数证明不了接线）');
+});
+
+
+test('引用消息里的图会进入模型（dispatchInner → 取引用 → admitImages → attachments）', async () => {
+	const admitted = [];
+	const g = gateway({ admitContent: async (parts) => { admitted.push(...parts); return parts; } });
+	g.ownMessages = new Map();
+	g.ownMessagesByChannel = new Map();
+	g.channel = {
+		selfId: '1000',
+		getMessage: async (id) => ({
+			message_id: id,
+			message_type: 'group',
+			group_id: 9,
+			sender: { user_id: '20002', nickname: '阿四' },
+			message: [{ type: 'image', data: { url: 'https://x.example/quoted.png' } }]
+		})
+	};
+	g.videoNotes = async () => [];
+	g.applyChatModelFor = () => {};
+	g.typing = () => {};
+	g.judgeTurn = async () => {};
+	g.moodOf = () => ({ mood: '平静', tone: '平静', delay: 1, interject: 1, voice: 1 });
+	g.replyChannelFor = () => 'group:9';
+	g.workspacePath = () => home;
+	g.bound = new Map();
+	g.turns = new Map();
+	g.turnMood = new Map();
+	g.interjectTurns = new Set();
+	g.soul = { beginTurn: () => {}, journalOut: () => {} };
+	g.voiceGuardReady = false;
+	g.getConfig = () => ({ qq: { enabled: true }, voice: {} });
+	g.qqConfig = () => ({ enabled: true });
+	let followup;
+	const agent = { id: 'sess-quoted-image', followup: async (msg) => { followup = msg; } };
+	const m = {
+		channel: 'qq', chatType: 'group', channelId: 'group:9', targetId: '9', groupId: '9',
+		userId: '20002', nickname: '阿四', messageId: 'm-quoted-image', mentioned: true,
+		replyId: 'quoted-image-1', text: '这啥', images: [], links: [], timeMs: Date.now()
+	};
+	await g.dispatchInner('group:9', [{ m, person: null, interject: false }], agent);
+	assert.ok(followup, '这一轮要真的进入会话');
+	assert.equal(followup.content[0].text, '阿四：【引用 阿四：【图片】】这啥', '引用原文和当前问题都要保留');
+	assert.equal(admitted.filter((p) => p.type === 'image').length, 1, '被引用消息里的图要真的交给模型');
+	assert.equal(admitted.find((p) => p.type === 'image').data, PNG.toString('base64'), '下载得到的原始图片字节不能变');
+	assert.ok(admitted.find((p) => p.type === 'image').name.startsWith('qq-quoted-image-1-'), '图片名要能对上被引用的消息');
+	assert.ok(admitted.some((p) => p.type === 'text' && p.text.includes('被引用')), '要告诉模型哪张图来自引用');
 });

@@ -96,3 +96,41 @@
 改成打真实的 `relayDmVoice` 才抓住。
 
 ⇒ **接线层的测试必须从入口进**（本项目第五次「接线零覆盖」，同一个病）。
+
+## 接线测试：用 `test/_wire.mjs` 证明「A 真的经过 B」
+
+「接线零覆盖」在本项目出现过至少 6 次（PR3 routeOf / PR4 blocker+deliverShare / #160 语音转发 /
+#170 [表情:] 兜底 / #171 同源 …）。共同形态：**被测函数收到了参数，但上游根本没传/没调** ——
+单测全绿，测的是死代码。
+
+### 用法
+
+```js
+import { assertWire, spyOn } from './_wire.mjs';
+
+const { wired, cut } = await assertWire({
+  run: () => gateway.sendReply(sessionId, turnState),   // 从**入口**跑
+  target: () => gateway,                                 // 那个必须被经过的依赖
+  method: 'listStickers',                                // 它上面的方法名
+  pick: (sent) => sent.map((x) => x.segs[0]?.type),      // 从副作用里取「用来比的值」
+  why: '#170 的 [表情:] 兜底必须经过 listStickers'
+});
+```
+
+它跑两次：一次正常、一次把 `method` 剪成「返回 undefined」，断言两次的 `pick()` 结果**确实不同**。
+没不同 ⇒ 这条接线没被任何断言覆盖，报错。
+
+剪断后下游直接崩（`.includes` 打 undefined）也算**有差异** —— 返回值会变成 Error 且 `crashed: true`。
+
+### 边界（别拿它当万能药）
+
+- **只能剪断运行时可替换的依赖**（`obj.foo` / 注入的 props / 参数）。直接 `import { foo }` 的调用
+  剪不断 —— 那种只能靠**源码级变异**（改源码 → 跑 → 应红 → 还原）。
+- **剪断后没变化可能是对的**：有纵深防御时（如 #166 的群排除，两层各自挡），
+  单剪一层行为不变。这时用 `expect` 传入自己的判据，把「为什么不变」写清楚。
+- **`run` 必须从入口进**。直接调内部函数 = 又回到「测不到接线」。
+
+### spyOn
+
+只要「知道它被调过几次、收到什么参数」、不需要剪断时用 `spyOn(obj, ['a','b'])`，
+返回 `{ calls, restore() }`。

@@ -106,3 +106,22 @@ test('spyOn 记录调用参数且不影响返回值', () => {
 	}
 	assert.equal(deps.send('x', 'y'), 'x+y', '还原后仍然能用');
 });
+
+// ── 5. 边界：剪断后下游兜底成**完全相同的值** → 必须报错 ──
+// 这是「接线没覆盖」的真正形态：下游自己把拿到的值兜底掉了，剪断不影响结果。
+// （对照：剪断后变成 undefined、原来返回 '' 时**不报错** —— 那两个值语义不同，
+//   说明下游真的用了返回值。Node 的 deepEqual 把它们当相等，但那是误报方向的宽松，不影响正确性。）
+test('剪断后下游兜底成完全相同的值 → 报错', async () => {
+	const deps = {
+		f() { return 'x'; },
+		// 下游无视返回值、自己兜底成常量
+		wrapper() { this.f(); return 'x'; }
+	};
+	await assert.rejects(
+		() => assertWire({ run: () => deps.wrapper(), target: () => deps, method: 'f', pick: (x) => x }),
+		(err) => {
+			assert.match(err.message, /结果没变化/);
+			return true;
+		}
+	);
+});

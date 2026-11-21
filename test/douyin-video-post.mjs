@@ -69,8 +69,9 @@ const driver = {
 		if (videoMode === 'notLoggedIn') return { ok: false, code: 'NOT_LOGGED_IN', error: '创作者中心没登录：在抖音浏览器里打开 creator.douyin.com 登录一次' };
 		return { ok: true };
 	},
-	publishVideo: async ({ beforeSubmit }) => {
+	publishVideo: async ({ music, beforeSubmit }) => {
 		calls.publishVideo++;
+		calls.lastVideoMusic = music ?? '';
 		// 要验证是在点发布**之前**被拦下来的：没点过就不该落「结果未知」。
 		if (videoMode === 'needsVerify') return { ok: false, code: 'NEEDS_VERIFY', error: '抖音要验证（短信 / 滑块）才能发' };
 		await beforeSubmit();
@@ -322,6 +323,22 @@ try {
 		genMode = 'ok';
 		r = await s.post({ force: true, kind: 'video' });
 		assert.equal(r.ok, true, `改好配置后当天应可重试：${r.error}`);
+	}
+
+	// B28：OpenMotion 视频（常为无声动画）在创作者中心顺手挑推荐音乐配 BGM ─────────
+	{
+		resetVideoQuota();
+		videoMode = 'ok';
+		config.video.provider = 'openmotion';
+		calls.listRecommendedMusic = 0;
+		calls.lastVideoMusic = '';
+		notes.length = 0;
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, true, `OpenMotion 视频发布要成功：${r.error}`);
+		assert.equal(calls.listRecommendedMusic, 1, 'OpenMotion 视频要在创作者中心拉一次推荐歌曲');
+		assert.equal(calls.lastVideoMusic, '歌', '挑出的推荐歌要传给 publishVideo 配乐');
+		assert.ok(notes.some((x) => /已配乐《歌》/.test(String(x?.reason ?? ''))), '动态要记录已配乐歌名');
+		config.video.provider = 'volc';
 	}
 
 	// B20：点了发布但没等到确认 → 落 unknown，后续发布被拦住 ────────────────

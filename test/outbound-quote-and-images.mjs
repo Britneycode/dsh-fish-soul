@@ -24,6 +24,8 @@ const gateway = ({ sent = [] } = {}) => Object.assign(Object.create(ChatGateway.
 	stickers: null,
 	random: () => 0.5,
 	ownMessages: new Map(),
+	// 带通道的那张（引用查询用；ownMessages 是裸 id，给 normalizeMessageEvent 的 .has() 用）
+	ownMessagesByChannel: new Map(),
 	// sendReply 里的这几个 Map 都是网关自己初始化的，手搓的 this 得补上
 	interjectTurns: new Set(),
 	turnMood: new Map(),
@@ -70,7 +72,8 @@ test('#160 内存里有就不查库（同一次运行里最快的路径没变）
 	let queried = 0;
 	const realPrepare = db.prepare.bind(db);
 	g.db = { prepare: (sql) => { if (String(sql).includes('own_message')) queried++; return realPrepare(sql); } };
-	g.rememberOwnCacheOnly('9002', '在的');
+	// 引用查询走的是「带通道」那张表（ownMessages 是裸 id，给 normalizeMessageEvent 的 .has() 用）
+	g.rememberOwnCacheOnly('9002', '在的', 'private:1234567890');
 	const line = await g.quoteLine('9002', 'private:1234567890');
 	assert.match(line, /引用 我自己：在的/);
 	assert.equal(queried, 0, '命中内存时不该去查库');
@@ -83,6 +86,38 @@ test('#160 消息号只在聊天内唯一：别的聊天里同号不算她说的
 	// 同一个消息号，但引用发生在另一个聊天里 —— 不能当成她的原文
 	assert.equal(g.ownMessageText('9003', 'group:1125962189'), '', '换个聊天就不能认');
 	assert.equal(g.ownMessageText('9003', 'private:1234567890'), '这是私聊里说的');
+});
+
+test('#160 内存命中也不能跨聊天串号（message_id 只在聊天内唯一）', async () => {
+	// 审查发现的洞：A 聊天缓存过 42，B 聊天引用同号 42 —— 拿裸 id 查会返回 A 的原文。
+	// 这条不许先 clear 内存（那样就绕过了这个洞）。
+	const g = gateway();
+	g.rememberOwn('42', 'A 私聊里说的', 'private:1111111111');
+	// B 聊天里引用同号消息：不能拿到 A 的原文
+	assert.equal(g.ownMessageText('42', 'private:2222222222'), '', '别的聊天的同号消息不是她说的');
+	// A 聊天自己引用：仍然拿得到
+	assert.equal(g.ownMessageText('42', 'private:1111111111'), 'A 私聊里说的');
+});
+
+test('#160 私信里的语音转发到 QQ 时也带 channelId（不然只进内存、重启后又取不到）', async () => {
+	// 走真实路径：relayDmVoice（lib/gateway-media.js）—— 直接调 rememberOwn 测不到接线。
+	const g = gateway();
+	const sent = [];
+	g.channel.send = async (channelId, segs) => { sent.push({ channelId, segs }); return 'voice-77'; };
+	g.voice = { synthesize: async () => Buffer.from('fake-audio') };
+	g.voiceRelayTarget = () => 'private:3333333333';
+	g.voiceFailReason = () => 'x';
+	g.note = () => {};
+	g.log = () => {};
+	g.soul = { journalOut: () => {} };
+
+	const row = { channel_id: 'bili:999', title: 'B站·某人' };
+	await g.relayDmVoice(row, '[语音] 在的');
+
+	assert.equal(sent.length, 1, '语音发到主人 QQ');
+	assert.equal(sent[0].channelId, 'private:3333333333');
+	const hit = db.prepare('SELECT text FROM own_message WHERE channel_id = ? AND message_id = ?').get('private:3333333333', 'voice-77');
+	assert.equal(hit?.text, '[语音] 在的', '转发到 QQ 的语音也要落库（带 target，不带就只剩内存）');
 });
 
 test('#160 没有 channelId 时只进内存，不往库里写（宁可不写，别写进错的聊天）', () => {

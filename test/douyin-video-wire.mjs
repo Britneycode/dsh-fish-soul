@@ -197,11 +197,14 @@ try {
 		// 面板在「用户没填新 key」时发的是**不带 apiKey 键**的 video 块（见 W9）
 		const before = (await state()).douyin.video;
 		assert.equal(before.hasApiKey, true, '前置：apiKey 本来是有的');
-		await call('/channels/douyin-config', {
+		const r2 = await call('/channels/douyin-config', 'POST', {
 			post: { enabled: true },
 			video: { enabled: true, provider: 'minimax', baseURL: '', model: 'm', durationSec: 5, aspectRatio: '9:16', resolution: '768P', perDay: 2 }
 		});
-		assert.equal((await state()).douyin.video.hasApiKey, true, '面板保存其它字段（不带 apiKey 键）不能把已存的 key 冲掉');
+		assert.equal(r2.ok, true, `保存配置必须成功（防 405 空跑）：${r2.error}`);
+		const after = (await state()).douyin.video;
+		assert.equal(after.provider, 'minimax', '保存的字段必须真落盘生效');
+		assert.equal(after.hasApiKey, true, '面板保存其它字段（不带 apiKey 键）不能把已存的 key 冲掉');
 		// 连空串都不许冲掉（要清空走 clearApiKey）
 		await saveVideo({ apiKey: '' });
 		assert.equal((await state()).douyin.video.hasApiKey, true, 'apiKey 传空串也不能冲掉');
@@ -238,7 +241,13 @@ try {
 		genCalls.length = 0;
 
 		const r = await call('/douyin/video-now');
-		assert.equal(r.ok, true, `要真的发出去：${r.error}`);
+		assert.equal(r.ok, true, `要真的受理触发：${r.error}`);
+		assert.equal(r.started, true, '手动发视频走后台异步触发（防 HTTP 长连接超时）');
+		for (let i = 0; i < 400; i++) {
+			const cur = db.prepare("SELECT status FROM douyin_post_job WHERE kind = 'video'").get();
+			if (cur?.status === 'confirmed') break;
+			await sleep(5);
+		}
 
 		// ⚠️ 断言选的是「拆掉接线后会变」的值：publish() 的视频分支没接上时
 		//    prepareVideo 是 0（会掉进图文那条路，prepareNote 变 1）。
@@ -299,7 +308,7 @@ try {
 
 		const sent = [];
 		const api = async (method, path, body) => { sent.push({ method, path, body }); return { ok: true }; };
-		const ui = {
+		const makeUi = (confirmAns = true) => ({
 			h: react.createElement,
 			Switch: (props) => ({ type: 'switch', props, children: [] }),
 			Button: (props, ...kids) => ({ type: 'button', props, children: kids }),
@@ -318,37 +327,76 @@ try {
 			Secret: (props) => ({ type: 'secret', props, children: [] }),
 			Empty: () => null,
 			Dot: () => null,
+			useConfirm: () => [async () => confirmAns, null],
 			// 真的 useForm 是「数据到了才 init 一次」；这里同步 init，并让 patch 就地改同一个对象
 			// —— save() 在调用时读 form.xxx，所以这样和真面板的时序等价。
-			useForm: (data, init) => {
+			useForm: (_data, init) => {
 				const form = init();
 				return [form, () => {}, (p) => { Object.assign(form, p); }];
 			}
+		});
+		const walkTree = (root) => {
+			const out = [];
+			const walk = (node) => {
+				if (node === null || node === undefined) return;
+				if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+				if (typeof node !== 'object') return;
+				out.push(node);
+				for (const c of node.children ?? []) walk(c);
+			};
+			walk(root);
+			return out;
 		};
-		const data = {
-			douyin: {
-				enabled: true,
-				host: { state: 'running', loggedIn: true, browsers: [] },
-				channel: {},
-				browse: {},
-				post: { enabled: true, perDay: 1 },
-				video: { enabled: true, provider: 'minimax', perDay: 2, hasApiKey: true, apiKeyMasked: 'sk-••••••••••••••••7f2a' },
-				comments: {},
-				social: {}
-			}
+		const baseDouyin = {
+			enabled: true,
+			host: { state: 'running', loggedIn: true, browsers: [] },
+			channel: {},
+			browse: {},
+			post: { enabled: true, perDay: 1 },
+			video: { enabled: true, provider: 'minimax', model: 'm', perDay: 2, hasApiKey: true, apiKeyMasked: 'sk-••••••••••••••••7f2a' },
+			comments: {},
+			social: {}
 		};
+
+		// B1 回归：初始 video.enabled=false 时「现在发一条视频」不渲染；拨开之后再改别的字段，save body 里绝不带 enabled:false
+		{
+			const uiOff = makeUi(true);
+			const dataOff = { douyin: { ...baseDouyin, video: { ...baseDouyin.video, enabled: false } } };
+			const flatOff = walkTree(plugin.DouyinPane({ data: dataOff, refresh: () => {}, notify: () => {}, api, relTime: () => '', ui: uiOff }));
+			const fireBtnOff = flatOff.find((n) => n.type === 'button' && n.children.includes('现在发一条视频'));
+			assert.equal(fireBtnOff, undefined, '开关关着时不该渲染「现在发一条视频」按钮');
+			const videoSwitchOff = flatOff.find((n) => n.type === uiOff.Switch && n.props.label === '自己发视频');
+			sent.length = 0;
+			await videoSwitchOff.props.onChange(true);
+			assert.equal(sent.find((x) => x.path === '/channels/douyin-config')?.body?.video?.enabled, true, '拨开关要发 enabled:true');
+
+			// 模拟用户继续填模型并失焦：form 不能保留旧的 enabled:false
+			const flatShown = walkTree(plugin.DouyinPane({ data: { douyin: { ...baseDouyin, video: { ...baseDouyin.video, enabled: true } } }, refresh: () => {}, notify: () => {}, api, relTime: () => '', ui: uiOff }));
+			const modelInput = flatShown.find((n) => n.type === 'input' && n.props['aria-label'] === '视频模型');
+			assert.ok(modelInput, '视频开启时要有模型输入框');
+			sent.length = 0;
+			await modelInput.props.onBlur();
+			const blurCall = sent.find((x) => x.path === '/channels/douyin-config');
+			assert.ok(blurCall, '失焦要触发保存');
+			assert.equal(Object.hasOwn(blurCall.body.video, 'enabled'), false, '改其它字段时 body.video 里不能偷偷带上旧的 enabled');
+		}
+
+		// 确认弹窗拦断：取消确认时不能调 /douyin/video-now
+		{
+			const uiCancel = makeUi(false);
+			const flatCancel = walkTree(plugin.DouyinPane({ data: { douyin: baseDouyin }, refresh: () => {}, notify: () => {}, api, relTime: () => '', ui: uiCancel }));
+			const fireBtn = flatCancel.find((n) => n.type === 'button' && n.children.includes('现在发一条视频'));
+			assert.ok(fireBtn, 'video.enabled=true 时要渲染「现在发一条视频」按钮');
+			sent.length = 0;
+			await fireBtn.props.onClick();
+			assert.equal(sent.some((x) => x.path === '/douyin/video-now'), false, '确认取消时绝不能发请求花钱');
+		}
+
+		const ui = makeUi(true);
+		const data = { douyin: baseDouyin };
 		const tree = plugin.DouyinPane({ data, refresh: () => {}, notify: () => {}, api, relTime: () => '', ui });
 		assert.ok(tree !== null, '有数据时面板要渲染出树');
-
-		const flat = [];
-		const walk = (node) => {
-			if (node === null || node === undefined) return;
-			if (Array.isArray(node)) { for (const n of node) walk(n); return; }
-			if (typeof node !== 'object') return;
-			flat.push(node);
-			for (const c of node.children ?? []) walk(c);
-		};
-		walk(tree);
+		const flat = walkTree(tree);
 
 		const videoSwitch = flat.find((n) => n.type === ui.Switch && n.props.label === '自己发视频');
 		assert.ok(videoSwitch, '面板上要有「自己发视频」开关');
@@ -371,14 +419,17 @@ try {
 		await secret.props.onBlur();
 		assert.equal(sent.length, 0, '密码框空着失焦不该发保存请求');
 
-		// (c) 真填了新 key 再失焦：这次必须带上
+		// (c) 真填了新 key 再失焦：这次必须带上，保存成功后输入框要自动清空（防后续修改重复明文重传）
 		secret.props.onChange({ target: { value: 'sk-brand-new' } });
 		sent.length = 0;
 		await secret.props.onBlur();
 		const withKey = sent.find((x) => x.path === '/channels/douyin-config');
 		assert.ok(withKey, '填了新 key 失焦要保存');
 		assert.equal(withKey.body.video.apiKey, 'sk-brand-new', '填了新 key 就要带上');
-		ok('W9 面板：apiKey「非空才带」，空着失焦连请求都不发');
+		sent.length = 0;
+		await secret.props.onBlur();
+		assert.equal(sent.length, 0, '保存 key 成功后 form.videoApiKey 要被清空，再失焦不再发请求');
+		ok('W9 面板：apiKey「非空才带」且存后清空、开关不被旧值回弹、点发视频先弹窗确认');
 	}
 
 	console.log('\n抖音视频接线：面板 → 路由 → DouyinSocial → driver → 账本，整条通了');

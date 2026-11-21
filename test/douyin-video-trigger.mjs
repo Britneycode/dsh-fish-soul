@@ -221,7 +221,8 @@ try {
 			eval: async (expr) => {
 				const s = String(expr);
 				if (s.includes('verifycenter')) return '';                       // 没有验证码
-				if (s.includes('button') && s.includes('innerText')) { order.push('click'); return true; }
+				if (s.includes('button') && s.includes('.some(')) return true;    // 按钮存在预检（不点）
+				if (s.includes('.click()')) { order.push('click'); return true; }
 				if (s.includes('location.href')) return { url: 'https://creator.douyin.com/creator-micro/content/manage', text: '已发布' };
 				return true;
 			},
@@ -292,15 +293,22 @@ try {
 		assert.match(r.error, /自己发视频/);
 		cfg.douyin.video.enabled = true;
 
-		// 开关都开着 → 真的走到视频发布
+		// 开关都开着 → 后台启动视频发布；随后立即再点会被当日配额同步拦住
 		day = '2026-11-13';
 		resetCalls();
+		const genBeforeNow = genCalls.length;
 		r = await call('/douyin/video-now');
 		assert.equal(r.ok, true, r.error);
+		assert.equal(r.started, true, '手动发视频应后台启动并返回 started:true');
+		await waitIdle(social);
 		assert.equal(calls.prepareVideo, 1, '手动触发要走到视频发布');
-		assert.equal(typeof r.text, 'string', '成功要回文案');
+		assert.equal(genCalls.length, genBeforeNow + 1);
+		r = await call('/douyin/video-now');
+		assert.equal(r.ok, false, '当天视频额度用完后再次手动触发要同步拦截');
+		assert.match(String(r.error ?? ''), /最多 1 条/);
+		assert.equal(genCalls.length, genBeforeNow + 1, '被配额拦下后不再花钱生成');
 
-		// 配置块：存得进去、读得回来、不带字段不冲掉
+		// 配置块：存得进去、读得回来、不带字段/掩码/空串不冲掉
 		cfg.douyin.video = { enabled: false, provider: 'volc', baseURL: '', apiKey: '', model: '', durationSec: 5, aspectRatio: '9:16', resolution: '768P', perDay: 1 };
 		r = await call('/channels/douyin-config', 'POST', { video: { enabled: true, perDay: 2, apiKey: 'sk-1', provider: 'minimax' } });
 		assert.equal(r.ok, true, '视频配置要能存');
@@ -313,6 +321,8 @@ try {
 		assert.equal(cfg.douyin.video.apiKey, 'sk-1', '不带字段不能把 apiKey 冲掉');
 		await call('/channels/douyin-config', 'POST', { video: { apiKey: '' } });
 		assert.equal(cfg.douyin.video.apiKey, 'sk-1', 'apiKey 传空串不能冲掉（要清空走 clearApiKey）');
+		await call('/channels/douyin-config', 'POST', { video: { apiKey: `sk-${'•'.repeat(16)}sk-1` } });
+		assert.equal(cfg.douyin.video.apiKey, 'sk-1', '回传掩码串也不能把真 key 冲掉');
 		await call('/channels/douyin-config', 'POST', { video: { clearApiKey: true } });
 		assert.equal(cfg.douyin.video.apiKey, '', 'clearApiKey 才清空');
 		const st = await call('/channels/state', 'GET');

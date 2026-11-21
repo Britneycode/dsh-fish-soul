@@ -161,17 +161,21 @@ try {
 	assert.equal(r.ok, false);
 	assert.equal(r.code, 'NOT_CONFIRMED', r.error);
 
-	// ── V10：页面要验证码 → 报 NEEDS_VERIFY（上层据此停手） ─────────────────
+	// ── V10：页面要验证码 → 报 NEEDS_VERIFY（且不调用 beforeSubmit） ─────────────
 	await show(publishHtml({ verify: true }), manageUrl);
-	r = await driver.publishVideo({ beforeSubmit: async () => {} });
+	let v10Sub = false;
+	r = await driver.publishVideo({ beforeSubmit: async () => { v10Sub = true; } });
 	assert.equal(r.ok, false);
 	assert.equal(r.code, 'NEEDS_VERIFY', r.error);
+	assert.equal(v10Sub, false, '点发布前被验证码拦住，不该触发 beforeSubmit');
 
-	// ── V11：没有「发布」按钮 → 明确报出来 ──────────────────────────────────
+	// ── V11：没有「发布」按钮 → 明确报出来（且不调用 beforeSubmit） ────────────
 	await show(publishHtml({ buttons: [] }), manageUrl);
-	r = await driver.publishVideo({ beforeSubmit: async () => {} });
+	let v11Sub = false;
+	r = await driver.publishVideo({ beforeSubmit: async () => { v11Sub = true; } });
 	assert.equal(r.ok, false);
 	assert.equal(r.code, 'NO_PUBLISH', r.error);
+	assert.equal(v11Sub, false, '没找到可用发布按钮前，不该触发 beforeSubmit');
 
 	console.log('✓ 抖音视频 driver：等转码只看 video 元素（「上传中」不消也放行）、描述框用真鼠标事件、发布成功要地址和「已发布」同时成立');
 } finally {

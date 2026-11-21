@@ -588,17 +588,17 @@ test('A39 fetch 直接抛异常：不能把英文原文甩给用户', async () =
 	assert.ok(/[一-龥]/.test(r.error), r.error);
 });
 
-test('A40 openai 兼容：视频对象里没有地址时，字节从 /videos/{id}/content 取', async () => {
+test('A40 openai 兼容：视频对象里没有地址时，字节从 /videos/{id}/content 走下载器取', async () => {
 	const fetchImpl = stubFetch((url, opts, n) => {
 		if (n === 1) return jsonRes({ id: 'vid-1' });
-		if (n === 2) return jsonRes({ id: 'vid-1', status: 'completed', progress: 100 });
-		return bytesRes(MP4);
+		return jsonRes({ id: 'vid-1', status: 'completed', progress: 100 });
 	});
-	const r = await generateVideo(cfgOf({ provider: 'openai-compat' }), { prompt: '一只鱼', outDir: dirOf('oai'), fetchImpl, sleep: async () => {}, now: () => 0 });
+	const dl = fakeDownload(MP4);
+	const r = await generateVideo(cfgOf({ provider: 'openai-compat' }), { prompt: '一只鱼', outDir: dirOf('oai'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: dl });
 	assert.equal(r.ok, true, r.error);
-	const last = fetchImpl.calls[fetchImpl.calls.length - 1];
-	assert.ok(last.url.endsWith('/videos/vid-1/content'), last.url);
-	assert.equal(last.opts.headers.Authorization, 'Bearer key-123');
+	assert.equal(dl.seen.length, 1);
+	assert.ok(dl.seen[0].url.endsWith('/videos/vid-1/content'), dl.seen[0].url);
+	assert.equal(dl.seen[0].opts.headers.Authorization, 'Bearer key-123');
 	assert.ok(existsSync(r.file));
 });
 
@@ -870,5 +870,117 @@ test('A58 readPoll（MiniMax）：失败原因里的 key 也要洗掉', () => {
 	assert.equal(r.state, 'failed');
 	assert.ok(!r.error.includes(key), `minimax 分支带 key：${r.error}`);
 	assert.ok(!r.error.includes(key.slice(0, 12)), `minimax 分支带 key 前半段：${r.error}`);
+});
+
+test('A59 openai-compat /videos/{id}/content 默认走 safeDownloadStream（挡私网）', async () => {
+	let contentHits = 0;
+	const srv = createServer((req, res) => {
+		if (req.url?.includes('/content')) contentHits++;
+		res.writeHead(200);
+		res.end(MP4);
+	});
+	await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
+	try {
+		const baseURL = `http://127.0.0.1:${srv.address().port}/v1`;
+		const fetchImpl = queueFetch([
+			jsonRes({ id: 'vid-local' }),
+			jsonRes({ id: 'vid-local', status: 'completed' })
+		]);
+		const r = await generateVideo(cfgOf({ provider: 'openai-compat', baseURL }), {
+			prompt: '一只鱼', outDir: dirOf('oai-ssrf'), fetchImpl, sleep: async () => {}, now: () => 0
+		});
+		assert.equal(r.ok, false);
+		assert.equal(r.code, 'DOWNLOAD_FAILED');
+		assert.equal(contentHits, 0, '/videos/{id}/content 不能绕过 safeDownloadStream 直连私网');
+	} finally {
+		srv.closeAllConnections();
+		await new Promise((resolve) => srv.close(resolve));
+	}
+});
+
+test('A60 长 JWT 必须先打码再截断，且 volc 认 cancelled 终态', async () => {
+	const longJwt = ['eyJhbGciOiJIUzI1NiJ9', 'a'.repeat(240), 'sigtail'].join('.');
+	const msg = `${'x'.repeat(80)} Incorrect API key: ${longJwt} end`;
+	const p = readPoll('minimax', { task: { status: 'Fail', error: { message: msg } } }, { apiKey: longJwt });
+	assert.equal(p.state, 'failed');
+	assert.ok(!p.error.includes(longJwt.slice(0, 20)), `先截断后打码导致长 JWT 前缀泄漏：${p.error}`);
+
+	const fetchImpl = queueFetch([
+		jsonRes({ task_id: 'task-jwt' }),
+		jsonRes({ task: { status: 'Fail', error: { message: msg } }, base_resp: { status_code: 0 } })
+	]);
+	const r = await generateVideo(cfgOf({ provider: 'minimax', apiKey: longJwt }), {
+		prompt: '一只鱼', outDir: dirOf('jwt-trim'), fetchImpl, sleep: async () => {}, now: () => 0
+	});
+	assert.equal(r.ok, false);
+	assert.ok(!r.error.includes(longJwt.slice(0, 20)), `端到端返回里不能露长 JWT 前缀：${r.error}`);
+	assert.equal(readPoll('volc', { status: 'cancelled' }).state, 'expired');
+});
+
+test('A61 轮询与 MiniMax /v1/files/retrieve 遇到 429 / 502 要重试，不扔已付费任务', async () => {
+	const fetchImpl = stubFetch((_url, _opts, n) => {
+		if (n === 1) return jsonRes({ task_id: 'mm-1' });
+		if (n === 2) return jsonRes({}, 429);
+		if (n === 3) return jsonRes({ status: 'Success', file_id: 'f-1', base_resp: { status_code: 0 } });
+		if (n === 4) return jsonRes({}, 502);
+		if (n === 5) return jsonRes({}, 429);
+		return jsonRes({ file: { download_url: 'https://cdn.example/v.mp4' }, base_resp: { status_code: 0 } });
+	});
+	const r = await generateVideo(cfgOf({ provider: 'minimax' }), {
+		prompt: '一只鱼', outDir: dirOf('mm-retry'), fetchImpl, sleep: async () => {}, now: () => 0, downloadImpl: fakeDownload(MP4)
+	});
+	assert.equal(r.ok, true, r.error);
+	assert.equal(fetchImpl.calls.length, 6);
+});
+
+test('A62 MiniMax 提交：认 base_resp 非零失败，也认嵌套 task.task_id', async () => {
+	const bad = await generateVideo(cfgOf({ provider: 'minimax' }), {
+		prompt: '一只鱼', outDir: dirOf('mm-br'),
+		fetchImpl: queueFetch([jsonRes({ base_resp: { status_code: 1008, status_msg: 'insufficient balance' } })]),
+		sleep: async () => {}, now: () => 0
+	});
+	assert.equal(bad.ok, false);
+	assert.equal(bad.code, 'SUBMIT_FAILED');
+	assert.ok(bad.error.includes('insufficient balance'), bad.error);
+
+	const nested = await generateVideo(cfgOf({ provider: 'minimax' }), {
+		prompt: '一只鱼', outDir: dirOf('mm-nested'),
+		fetchImpl: queueFetch([
+			jsonRes({ task: { task_id: 'nested-42' }, base_resp: { status_code: 0 } }),
+			jsonRes({ task: { status: 'Success', content: { url: 'https://cdn.example/n.mp4' } }, base_resp: { status_code: 0 } })
+		]),
+		sleep: async () => {}, now: () => 0, downloadImpl: fakeDownload(MP4)
+	});
+	assert.equal(nested.ok, true, nested.error);
+});
+
+test('A63 submitted / taskId 区分零费用拦截与已提交失败，且 BAD_VIDEO 清理过期 .part', async () => {
+	const pre = await generateVideo(cfgOf({ apiKey: '' }), { prompt: '一只鱼', outDir: dirOf('unsub'), fetchImpl: queueFetch([]) });
+	assert.equal(pre.ok, false);
+	assert.equal(pre.submitted, false, '未发请求前失败应标 submitted=false');
+
+	const dir = dirOf('badvid');
+	const post = await generateVideo(cfgOf(), {
+		prompt: '一只鱼', outDir: dir,
+		fetchImpl: queueFetch([jsonRes({ id: 'task-bad' }), jsonRes({ status: 'succeeded', content: { video_url: 'https://cdn.example/bad.mp4' } })]),
+		sleep: async () => {}, now: () => 0, downloadImpl: fakeDownload(Buffer.from('not-mp4-data'))
+	});
+	assert.equal(post.ok, false);
+	assert.equal(post.code, 'BAD_VIDEO');
+	assert.equal(post.submitted, true);
+	assert.equal(post.taskId, 'task-bad');
+	assert.deepEqual(readdirSync(dir), [], '假视频必须在改名前拦截清理，不能留下 .mp4 或 .part');
+
+	const pDir = dirOf('prune-part');
+	const oldPart = join(pDir, 'stale.part');
+	const newPart = join(pDir, 'fresh.part');
+	writeFileSync(oldPart, 'x');
+	writeFileSync(newPart, 'y');
+	const oldTime = new Date(Date.now() - 2 * 3600_000);
+	utimesSync(oldPart, oldTime, oldTime);
+	const removed = pruneVideos(pDir, { keepDays: 3, maxFiles: 20, maxBytes: 500 * 1024 * 1024 });
+	assert.equal(removed, 1);
+	assert.ok(!existsSync(oldPart), '过期 .part 要清理');
+	assert.ok(existsSync(newPart), '正在写的 .part 不能误删');
 });
 

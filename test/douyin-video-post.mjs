@@ -90,13 +90,14 @@ const callLlm = async (prompt) => {
 	return prompt.includes('短视频') ? '厨房的蒸汽糊住了窗' : '今天风挺大的';
 };
 let genCalls = 0;
-let genOk = true;
+let genMode = 'ok';
 let exclusiveAtGen = -1;
 const videoGen = {
 	generate: async (cfg) => {
 		genCalls++;
 		exclusiveAtGen = exclusiveCalls;
-		if (!genOk) return { ok: false, code: 'NETWORK', error: '视频服务连不上' };
+		if (genMode === 'network') return { ok: false, code: 'NETWORK', error: '视频服务连不上', submitted: true };
+		if (genMode === 'unsubmitted') return { ok: false, code: 'NOT_CONFIGURED', error: '视频生成还没配好', submitted: false };
 		return { ok: true, file: join(home, 'douyin-videos', 'v1.mp4'), bytes: 1024, provider: cfg.provider, elapsedMs: 1000 };
 	},
 };
@@ -190,17 +191,20 @@ try {
 	assert.match(r.error, /最多 1 条/);
 	assert.equal(genCalls, genBefore, '额度用完时不能调生成（不花钱）');
 
-	// B7：生成失败 —— 不发布，任务记成 failed（还能重发）
-	setKv(db, 'douyin.video.day', { date: '2026-11-09', count: 0, tries: 0, lastVirtual: 0 });
-	genOk = false;
+	// B7：生成失败 —— 真的调到 videoGen，不发布，任务记成 failed
+	resetVideoQuota();
+	genMode = 'network';
 	const pvBefore = calls.publishVideo;
+	const genBeforeFail = genCalls;
 	r = await s.post({ force: true, kind: 'video' });
 	assert.equal(r.ok, false);
+	assert.equal(genCalls, genBeforeFail + 1, 'B7 必须真的调到 videoGen.generate（不能被额度提前拦死空跑）');
+	assert.match(String(r.error ?? ''), /视频服务连不上/, '生成失败原因要透出来');
 	assert.equal(calls.publishVideo, pvBefore, '生成失败不能去发布');
 	const failed = db.prepare("SELECT * FROM douyin_post_job WHERE status='failed' ORDER BY id DESC LIMIT 1").get();
 	assert.ok(failed, '任务要记成 failed');
 	assert.equal(failed.kind, 'video');
-	genOk = true;
+	genMode = 'ok';
 
 	// B12：重启后 submitting 的视频任务变 unknown，kind 还在
 	const vid = s.postJobs.begin('视频草稿', '2026-11-09', 'video');
@@ -254,13 +258,15 @@ try {
 		s = make();
 	}
 
-	// B22：创作者中心没登录 → 提醒主人去登录 ────────────────────────────────
+	// B22：创作者中心没登录 → 提醒主人去登录，且失败路径也要清理旧 mp4 ─────────
 	{
 		resetVideoQuota();
 		videoMode = 'notLoggedIn';
 		notifies.length = 0;
+		pruned.length = 0;
 		r = await s.post({ force: true, kind: 'video' });
 		assert.equal(r.ok, false, '没登录发不出去');
+		assert.equal(pruned.length, 1, '发布失败路径也要清旧视频（防百 MB mp4 长期堆积）');
 		const n = notifies.find((x) => x.key === 'douyin.creator');
 		assert.ok(n, '要提醒主人创作者中心没登录');
 		assert.match(String(n.msg ?? ''), /创作者中心没登录/, '提醒里要说清是没登录');
@@ -292,11 +298,30 @@ try {
 		r = await s.post({ force: true, kind: 'video' });
 		assert.equal(r.ok, false, '没登录发不出去');
 		assert.equal(genCalls, genBefore + 1, '生成过一次（钱花出去了）');
-		// 再点一次「现在发一条」：不许再生成
+		// 再点一次「现在发一条」：不许再生成，且重建 DouyinSocial（模拟重启）依然受保护
 		r = await s.post({ force: true, kind: 'video' });
 		assert.equal(r.ok, false, '今天花过钱了就不该再生成');
 		assert.match(String(r.error ?? ''), /最多 1 条/, '要提示今天已经用完当天的量');
 		assert.equal(genCalls, genBefore + 1, '不能再生成（不花钱）');
+		s = make();
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, false, '重启后花过的次数仍落库拦截');
+		assert.equal(genCalls, genBefore + 1, '重启后依然不能再生成');
+	}
+
+	// B27：零费用本地校验拦截（submitted=false）不扣当天生成额度 ────────────────
+	{
+		resetVideoQuota();
+		videoMode = 'ok';
+		genMode = 'unsubmitted';
+		const genBefore = genCalls;
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, false);
+		assert.equal(genCalls, genBefore + 1);
+		assert.equal(getKv(db, 'douyin.video.gen.day', null)?.count, 0, 'submitted=false 的零费用拦截要回退花钱次数');
+		genMode = 'ok';
+		r = await s.post({ force: true, kind: 'video' });
+		assert.equal(r.ok, true, `改好配置后当天应可重试：${r.error}`);
 	}
 
 	// B20：点了发布但没等到确认 → 落 unknown，后续发布被拦住 ────────────────

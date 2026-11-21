@@ -619,13 +619,21 @@ const turn = (id, text, msg) => {
 	handlers['session/event']({ id }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
 };
 turn(sid1, '好嘞\n\n给你点一杯 ![ok](_stickers/ok.png) ![偷](../../secret.png)', f1.msg);
-await waitFor(() => ob.sends.length >= 2);
-assert.equal(ob.sends.length, 2);
+// #161：图现在**一张一条**单独发（以前是并进最后那条文字的段数组 ⇒ QQ 上「文字带着图」一个气泡）。
+// 所以这里是三条：两条文字 + 一张图。
+await waitFor(() => ob.sends.length >= 3);
+assert.equal(ob.sends.length, 3, '两条文字 + 一张图，各发一条');
 assert.equal(ob.sends[0].params.user_id, 10001);
 assert.equal(ob.sends[0].params.message[0].data.text, '好嘞');
-const imgs = ob.sends[1].params.message.filter((x) => x.type === 'image');
-assert.equal(imgs.length, 1, '工作区外的图不能发出去');
+assert.equal(ob.sends[1].params.message[0].data.text, '给你点一杯');
+// 图那条消息里只有图，没有文字（图文混在一条里正是 #161 要治的）
+const imgMsg = ob.sends[2].params.message;
+assert.equal(imgMsg.length, 1, '图单独一条消息，不和文字混');
+const imgs = imgMsg.filter((x) => x.type === 'image');
+assert.equal(imgs.length, 1, '工作区外的图不能发出去（../../secret.png 要被拒掉）');
 assert.match(imgs[0].data.file, /^base64:\/\//);
+// 老契约回归：文字那条不许再夹着图
+assert.equal(ob.sends[0].params.message.filter((x) => x.type === 'image').length, 0, '文字消息里不该夹图');
 ok('好友私聊：自动建会话（专用工作区、工具收窄）→ 回复按段发回，贴纸变真图，工作区外的图被拒');
 
 // 13 用户在界面里自己打字的轮次不往 QQ 发；[不回] 不发

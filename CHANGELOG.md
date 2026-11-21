@@ -1,5 +1,12 @@
 # dsh-fish-soul 变更记录
 
+- v0.18.18：修抖音发图文配乐报「找到的『使用』按钮不在选中的那首歌上」；OpenMotion 本地渲染的无声视频在抖音创作者中心发布时自动从推荐歌单配 BGM。
+  - **抖音发图文配乐报「找到的『使用』按钮不在选中的那首歌上」**：
+    - **根因**：之前在无障碍树查到 `role=button` + `name=使用` 之后，只把按钮坐标 `(x, y)` 留下来，再调 `DOM.getNodeForLocation(x, y)` 按坐标反查节点。真机上音乐面板是 `fixed` 浮层，或按钮在 hover 过渡/子层遮挡时，`getNodeForLocation(x, y)` 命中的是遮罩或抽屉容器而非按钮本身，往父链找自然找不到歌名。
+    - **修复**：`findApplyButton` 直接保留无障碍树节点的 `backendDOMNodeId`，`pointBelongsToCard` 优先直接从 `backendNodeId` 沿 DOM 祖先链核对歌卡里的 `song-name`（不再绕屏幕坐标 hit-test），并增加目标歌卡 DOM 子树内查找「使用」按钮的兜底。
+  - **OpenMotion 生成的无声视频自动在抖音创作者中心配 BGM**：
+    - `provider === 'openmotion'` 生成的动效视频默认不含音轨，上传到抖音创作者中心编辑页后会自动打开「选择音乐」推荐面板、让模型按文案挑一首推荐 BGM 并确认挂上后再点发布（若编辑页未出现音乐入口则保留原视频直接发布，不浪费已生成的视频）。
+  - 测试：`test/douyin-ax-button.mjs` 新增用例 D（坐标被浮层遮挡时仍能通过 `backendNodeId` 确认歌卡归属并完成配乐）、`test/douyin-video-post.mjs` 新增 `B28`（OpenMotion 视频自动挑歌配乐）。全部 192 个套件通过。
 - v0.18.17：支持通过本机 OpenMotion 免视频 API Key 制作抖音短视频；主人在私聊里也能直接让她用 OpenMotion 做视频并发抖音。
   - **抖音「自己发视频」服务商新增 `OpenMotion（本地渲染）`**：
     - 不用配置外部付费视频 API Key 和模型名，直接连本机 OpenMotion 服务（默认 `http://127.0.0.1:4173`，严格校验只允许本机回环地址），把文案拆幕生成带暂停 GSAP 时间线的原生 Hyperframes `index.html`，自动走创建工程、写入合成、后台渲染、轮询导出、流式落盘并校验 `ftyp` 头后上传到抖音创作者中心发布。

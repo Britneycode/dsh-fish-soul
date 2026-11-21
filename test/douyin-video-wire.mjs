@@ -121,11 +121,18 @@ const services = {
 	sessionTitle: { rename: noop },
 	attachments: { admitPromptContent: async (parts) => parts }
 };
+const registeredTools = new Map();
+let guardFn = null;
 const ctx = {
 	logger: { info: noop, warn: noop, error: noop, debug: noop },
 	effect: (fn) => { const d = fn(); return typeof d === 'function' ? d : noop; },
 	get: (name) => services[name],
-	tools: { register: () => noop, get: () => undefined, guard: () => noop },
+	tools: {
+		register: (t) => { if (t?.name) registeredTools.set(t.name, t); return noop; },
+		get: (n) => registeredTools.get(n) ?? (n === 'mcp__openmotion__openmotion_create_project' ? { name: n } : undefined),
+		definitions: () => [...registeredTools.values(), { name: 'mcp__openmotion__openmotion_create_project' }, { name: 'openmotion_edit_project' }, { name: 'shell_exec' }],
+		guard: (fn) => { guardFn = fn; return noop; }
+	},
 	systemPrompt: { section: () => noop, context: () => noop },
 	on: () => noop,
 	webServer: { register: (r) => { route ??= r; return noop; } }
@@ -136,7 +143,7 @@ const API_KEY = ['fake', 'lxd', 'dyu', 'tcub', 'dkwh', '6234dimk'].join('-');
 const EXPECT_MASK = `sk-${'•'.repeat(16)}${API_KEY.slice(-4)}`;
 
 await mod.apply(ctx, {
-	masterQqUin: '',
+	masterQqUin: '10001',
 	qq: { enabled: false },
 	bili: { enabled: false },
 	douyin: {
@@ -430,6 +437,48 @@ try {
 		await secret.props.onBlur();
 		assert.equal(sent.length, 0, '保存 key 成功后 form.videoApiKey 要被清空，再失焦不再发请求');
 		ok('W9 面板：apiKey「非空才带」且存后清空、开关不被旧值回弹、点发视频先弹窗确认');
+	}
+
+	// ── W10：OpenMotion 接入（面板服务商选项 + 主人聊天放行 OpenMotion MCP + make_douyin_video 工具）──
+	{
+		await call('/channels/douyin-config', 'POST', {
+			enabled: true,
+			video: { enabled: true, provider: 'openmotion', perDay: 3 }
+		});
+		const st = await state();
+		assert.equal(st.douyin.video.provider, 'openmotion', '服务商应能存为 openmotion 并回显');
+
+		const gw = mod.testHooks.gateway;
+		assert.ok(gw, 'gateway 必须挂载');
+		gw.bound.set('sess-master', { channel_id: 'private:10001', title: '主人', workspace_path: '' });
+		gw.bound.set('sess-guest', { channel_id: 'private:99999', title: '路人', workspace_path: '' });
+
+		const masterAllowed = gw.allowedTools(null, 'private:10001');
+		const guestAllowed = gw.allowedTools(null, 'private:99999');
+		assert.ok(masterAllowed.includes('mcp__openmotion__openmotion_create_project'), '主人私聊放行 OpenMotion MCP 工具');
+		assert.ok(masterAllowed.includes('openmotion_edit_project'), '主人私聊放行 openmotion_* 工具');
+		assert.ok(masterAllowed.includes('make_douyin_video'), '聊天工具表包含 make_douyin_video');
+		assert.ok(!guestAllowed.includes('mcp__openmotion__openmotion_create_project'), '非主人会话不暴露 OpenMotion MCP 工具');
+
+		assert.ok(typeof guardFn === 'function', 'tools.guard 必须已注册');
+		assert.equal(guardFn({ agent: { id: 'sess-master' }, name: 'mcp__openmotion__openmotion_create_project' }), undefined, '护栏放行主人私聊调用 OpenMotion');
+		assert.match(String(guardFn({ agent: { id: 'sess-guest' }, name: 'mcp__openmotion__openmotion_create_project' })), /主人/, '护栏拦截非主人调用 OpenMotion');
+		assert.match(String(guardFn({ agent: { id: 'sess-master' }, name: 'shell_exec' })), /不能用/, '默认 memory 档位下主人私聊仍拦截普通宿主工具');
+
+		const tool = registeredTools.get('make_douyin_video');
+		assert.ok(tool, 'make_douyin_video 工具必须已注册');
+		const denyGuest = await tool.execute({ text: '路人想发视频' }, { sessionId: 'sess-guest' });
+		assert.match(String(denyGuest), /主人/, '非主人不能调 make_douyin_video');
+
+		const beforeGen = genCalls.length;
+		const beforePrep = driverCalls.prepareVideo;
+		const okMaster = await tool.execute({ text: '三个人，一个文件，零会议' }, { sessionId: 'sess-master' });
+		assert.match(String(okMaster), /已经生成并发布到抖音/, `主人调 make_douyin_video 应成功：${okMaster}`);
+		assert.equal(genCalls.length, beforeGen + 1, 'make_douyin_video 应触发一次视频生成');
+		assert.equal(genCalls.at(-1).cfg.provider, 'openmotion', 'provider 应为 openmotion');
+		assert.equal(genCalls.at(-1).opts.prompt, '三个人，一个文件，零会议', '应直接按传入文案生成');
+		assert.equal(driverCalls.prepareVideo, beforePrep + 1, '应走到抖音视频上传发布');
+		ok('W10 OpenMotion：服务商保存回显 + 主人私聊放行 OpenMotion MCP + make_douyin_video 发抖音视频');
 	}
 
 	console.log('\n抖音视频接线：面板 → 路由 → DouyinSocial → driver → 账本，整条通了');

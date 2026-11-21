@@ -15,7 +15,7 @@ import { Readable } from 'node:stream';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildSubmit, durationFor, generateVideo, isMp4Bytes, minimaxResolutionOk, pruneVideos, readPoll, videoErrorText, videoGenConfig } from '../lib/video-gen.js';
+import { buildOpenMotionHtml, buildSubmit, durationFor, generateVideo, isMp4Bytes, minimaxResolutionOk, openmotionOrigin, pruneVideos, readPoll, videoErrorText, videoGenConfig } from '../lib/video-gen.js';
 import { createSafeDownloadStream } from '../lib/safe-download.js';
 
 // 每个用例一个临时目录，跑完就删（不留一堆视频在 TMPDIR 里）
@@ -983,4 +983,51 @@ test('A63 submitted / taskId 区分零费用拦截与已提交失败，且 BAD_V
 	assert.ok(!existsSync(oldPart), '过期 .part 要清理');
 	assert.ok(existsSync(newPart), '正在写的 .part 不能误删');
 });
+
+test('A64 OpenMotion provider：免 apiKey/model、只认本机回环、完整走 create -> edit -> export -> poll -> 下载落盘', async () => {
+	assert.equal(videoGenConfig({ provider: 'openmotion' }).provider, 'openmotion');
+	assert.equal(openmotionOrigin(''), 'http://127.0.0.1:4173');
+	assert.equal(openmotionOrigin('http://localhost:4173/'), 'http://localhost:4173');
+	assert.equal(openmotionOrigin('http://192.168.1.2:4173'), '', '非回环私网一律拒绝');
+	assert.equal(openmotionOrigin('https://api.example.com'), '', '公网地址一律拒绝');
+
+	const html = buildOpenMotionHtml('第一幕：厨房的蒸汽。\n第二幕：窗外的灯光！', { aspectRatio: '9:16', durationSec: 8 });
+	assert.match(html, /data-composition-id="main"/);
+	assert.match(html, /data-width="1080" data-height="1920"/);
+	assert.match(html, /data-duration="8"/);
+	assert.match(html, /window\.__timelines = \{ main: tl \};/);
+
+	// 非本机地址在请求前即零费用拦截（submitted=false）
+	const badHost = await generateVideo({ enabled: true, provider: 'openmotion', baseURL: 'http://10.0.0.1:4173' }, {
+		prompt: '一只鱼', outDir: dirOf('om-badhost'), fetchImpl: queueFetch([])
+	});
+	assert.equal(badHost.ok, false);
+	assert.equal(badHost.code, 'NOT_CONFIGURED');
+	assert.equal(badHost.submitted, false);
+
+	// 正常流程：不填 apiKey / model / baseURL 也能跑通
+	const rev0 = 'a'.repeat(64);
+	const rev1 = 'b'.repeat(64);
+	const fetchImpl = queueFetch([
+		jsonRes({ projectId: 'proj-1', revision: rev0, currentVersionId: 'v1' }),
+		jsonRes({ projectId: 'proj-1', revision: rev1, version: { versionId: 'v2' } }),
+		jsonRes({ projectId: 'proj-1', job: { id: 'job-om-1', state: 'pending' } }),
+		jsonRes({ projectId: 'proj-1', exportJob: { id: 'job-om-1', state: 'running' } }),
+		jsonRes({ projectId: 'proj-1', exportJob: { id: 'job-om-1', state: 'completed', downloadUrl: 'http://127.0.0.1:4173/api/exports/job-om-1/file' } }),
+		bytesRes(MP4, MP4.length)
+	]);
+	const outDir = dirOf('om-ok');
+	const r = await generateVideo({ enabled: true, provider: 'openmotion', baseURL: '', apiKey: '', model: '', durationSec: 6, aspectRatio: '16:9' }, {
+		prompt: '三个人，一个文件，零会议', outDir, fetchImpl, sleep: async () => {}, now: () => 1000
+	});
+	assert.equal(r.ok, true, r.error);
+	assert.equal(r.provider, 'openmotion');
+	assert.equal(r.bytes, MP4.length);
+	assert.ok(existsSync(r.file));
+	assert.equal(fetchImpl.calls.length, 6);
+	const editBody = JSON.parse(fetchImpl.calls[1].opts.body);
+	assert.equal(editBody.name, 'openmotion_edit_project');
+	assert.match(editBody.arguments.files[0].content, /data-width="1920" data-height="1080"/);
+});
+
 

@@ -50,6 +50,7 @@ jobs:
           for f in lib/*.js lib/channels/*.js; do node --check "$f" || exit 1; done
           node test/client-lint.mjs
           node test/client-syntax.mjs
+          node test/check-release-version.mjs
           node test/check-test-chain.mjs
           node test/check-route-guard.mjs
           node test/check-client-imports.mjs

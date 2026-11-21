@@ -17,13 +17,13 @@ const { LifeEngine } = await import('../lib/life.js');
 
 // ── ① ChatArchive.sample：只读、有上限、失败返空 ──
 {
-	const archive = new ChatArchive({ getConfig: () => ({ chatArchive: { enabled: true, channels: ['qq:1000'], days: 30 } }), log: () => {} });
+	const archive = new ChatArchive({ getConfig: () => ({ chatArchive: { enabled: true, channels: ['private:1000'], days: 30 } }), log: () => {} });
 	const now = Date.now();
-	archive.add('qq:1000', { who: '主人', text: '我搬家了，现在住杭州' });
-	archive.add('qq:1000', { who: '鱼', self: true, text: '哦？那我记一下' });
+	archive.add('private:1000', { who: '主人', text: '我搬家了，现在住杭州' });
+	archive.add('private:1000', { who: '鱼', self: true, text: '哦？那我记一下' });
 	archive.add('qq:2000', { who: '别人', text: '不相干的人说话' });
 
-	const rows = archive.sample({ channel: 'qq:1000', since: now - 60_000, until: now + 60_000, limit: 10 });
+	const rows = archive.sample({ channel: 'private:1000', since: now - 60_000, until: now + 60_000, limit: 10 });
 	assert.equal(rows.length, 2, '只取这个会话的两条');
 	assert.equal(rows.some((r) => r.content.includes('不相干')), false, '别的会话不能混进来');
 	assert.equal(rows.some((r) => r.self === true), true, '她自己说的也要在（self 标记）');
@@ -43,7 +43,7 @@ const { LifeEngine } = await import('../lib/life.js');
 	const fakeTranscripts = {
 		sample: ({ channel = '', limit = 40 }) => {
 			calls.push({ channel, limit });
-			return channel === 'qq:1000'
+			return channel === 'private:1000'
 				? [{ who: '1000', self: false, content: '我搬家了，现在住杭州', at: Date.now() - 5000 },
 					{ who: '', self: true, content: '那我记一下', at: Date.now() - 4000 }]
 				: [];

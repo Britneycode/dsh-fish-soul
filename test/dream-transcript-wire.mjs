@@ -36,12 +36,12 @@ const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
 	});
 	// 构造完之后才把 archive 挂上（这就是 index.js 的真实顺序）
 	const archive = new ChatArchive({ getConfig: () => ({ chatArchive: { enabled: true, channels: [], days: 30 } }), log: () => {} });
-	archive.add('qq:10001', { who: '10001', text: '我搬去杭州了' });
+	archive.add('private:10001', { who: '10001', text: '我搬去杭州了' });
 	box.archive = archive;
 
 	const now = Date.now();
 	db.prepare(`INSERT INTO memory (character_id, owner_id, channel, channel_id, kind, content, importance, created_at, updated_at, status, evidence)
-		VALUES ('feiyu', 'user:master', 'qq-private', '10001', 'fact', '主人住在成都', 2, ?, ?, 'active', '主人说的')`).run(now, now);
+		VALUES ('feiyu', 'user:master', 'qq-private', 'private:10001', 'fact', '主人住在成都', 2, ?, ?, 'active', '主人说的')`).run(now, now);
 
 	let prompt = '';
 	life.callLlm = async (p) => { prompt = p; return '{}'; };
@@ -60,7 +60,7 @@ const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
 	});
 	const archive = new ChatArchive({ getConfig: () => ({ chatArchive: { enabled: true, channels: [], days: 30 } }), log: () => {} });
 	// 原文比记忆早（真实情况就是这样：先聊天，聊完才整理出记忆）
-	archive.add('qq:10001', { who: '10001', text: '我上个月搬去杭州了' });
+	archive.add('private:10001', { who: '10001', text: '我上个月搬去杭州了' });
 	box2.archive = archive;
 
 	// 记忆的时间「现在」；原文也在「现在」——差不到 1 毫秒的那种极限情况
@@ -68,6 +68,26 @@ const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
 	const out = life.transcriptSample('user:master', [{ id: 1, created_at: now }], { qq_uin: '10001', display_name: '主人' });
 	assert.match(out, /我上个月搬去杭州了/, '原文比记忆早一点也必须取得到（时间窗要往前留缓冲）');
 	archive.stop();
+}
+
+// ── ③' 候选通道名来自「这个人自己的记忆行」（#166）──
+// 抖音那路：person 里是 douyin:<uid>，存档键是 douyin:<昵称> —— 对不上。
+// 记忆行里的 channel_id 存的就是存档键，那才是可靠的来源。
+{
+	const life = new LifeEngine({
+		db, clock: { now: () => Date.now() }, getConfig: () => ({ memory: { transcriptReview: true } }),
+		callLlm: async () => '{}', deliver: async () => true, log: () => {}, persona: () => ({}),
+		transcripts: null,
+	});
+	const chans = life.transcriptChannelsOf(
+		{ qq_uin: null, bili_uid: null },
+		[
+			{ channel: 'douyin-private', channel_id: 'douyin:Re.' },
+			{ channel: 'qq-group', channel_id: 'group:1125962189' },
+			{ channel: 'douyin-group', channel_id: 'douyin-group:某群' }
+		]
+	);
+	assert.deepEqual(chans, ['douyin:Re.'], '只取本人私聊通道；群通道要排除（群里的对话不是"他和我的对话"）');
 }
 
 // ── ④ 手动入口存在：/inspector/dream 走的就是同一个 runDream ──

@@ -158,7 +158,64 @@ try {
   assert.equal(await br.eval('window.publishCount'), 1, 'D: 归属确认后要发布');
   await driver.closeMusicPanel();
 
-  console.log('✓ 「使用」按钮语义定位：无哈希类名 / 页面有诱饵按钮 / 按钮延迟出现 / backendNodeId 直接归属');
+  // 用例 E：发布视频页的音乐入口文案是「添加音乐」（图文页是「选择音乐」），同样要能打开抽屉并配乐。
+  await page({ plainClass: true });
+  await br.eval(`document.querySelector('#open').innerText = '添加音乐'; true`);
+  const le = await driver.listRecommendedMusic();
+  assert.equal(le.ok, true, 'E: 「添加音乐」入口也要能打开音乐面板：' + JSON.stringify(le));
+  r = await driver.publishNote({ music: SONG });
+  assert.equal(r.ok, true, 'E: 视频页入口配乐成功：' + JSON.stringify(r));
+  await driver.closeMusicPanel();
+
+  // 用例 F：模拟真机视频编辑页结构 —— 无 .container-right，入口包在 .preview-button-* 内需先 hover 再点击，
+  // 选中后歌名出现在 .music-binder-* / .music-text-* 节点里。
+  const videoHtml = `<!doctype html><meta charset="utf-8"><style>
+    .semi-sidesheet { display:none; position:fixed; top:80px; left:20px; width:500px; height:300px; background:#ddd; }
+    .semi-sidesheet-content { width:100%; height:100%; }
+    .card-container-outer { display:flex; width:480px; padding:5px; }
+    .card-container-left { width:300px; height:60px; }
+    .card-container-right { width:180px; height:60px; }
+    .card-container-right > button { visibility:hidden; }
+    .card-container-outer:hover .card-container-right > button { visibility:visible; }
+    .preview-button-r8SQPD { width:120px; height:60px; display:flex; align-items:flex-end; justify-content:center; background:#eee; }
+  </style>
+  <div class="preview-button-r8SQPD"><div class="text-JK4gL5">添加音乐</div></div>
+  <div class="music-binder-oYXYK2"><div class="music-text-TfmgD_"><div class="inner-text-d1sAtB"></div></div></div>
+  <div class="semi-sidesheet"><div class="semi-sidesheet-content"><input placeholder="搜索音乐"><span>推荐</span>
+  <div class="music-collection-container"></div></div></div>
+  <button id="publish">发布</button><div id="result"></div>
+  <script>
+    window.publishCount = 0;
+    window.previewHovered = false;
+    var btnWrap = document.querySelector('.preview-button-r8SQPD');
+    btnWrap.addEventListener('mousemove', function () { window.previewHovered = true; });
+    btnWrap.onclick = function () {
+      if (!window.previewHovered) return;
+      setTimeout(function () {
+        document.querySelector('.semi-sidesheet').style.display = 'block';
+        var box = document.querySelector('.music-collection-container');
+        box.innerHTML = ${JSON.stringify(card(SONG, { plainClass: true }))};
+        var btns = box.querySelectorAll('button');
+        for (var j = 0; j < btns.length; j++) {
+          btns[j].onclick = function () {
+            document.querySelector('.inner-text-d1sAtB').innerText = ${JSON.stringify(SONG + ' - @作者 ' + SONG + ' - @作者')};
+            document.querySelector('.semi-sidesheet').style.display = 'none';
+          };
+        }
+      }, 100);
+    };
+    document.querySelector('#publish').onclick = function () { window.publishCount++; document.querySelector('#result').innerText = '发布成功'; };
+  </script>`;
+  await br.eval(`document.open(); document.write(${JSON.stringify(videoHtml)}); document.close(); true`);
+  await new Promise(r => setTimeout(r, 120));
+  const lf = await driver.listRecommendedMusic();
+  assert.equal(lf.ok, true, 'F: .preview-button 内的「添加音乐」经 hover+点击后能打开抽屉：' + JSON.stringify(lf));
+  r = await driver.publishNote({ music: SONG });
+  assert.equal(r.ok, true, 'F: 编辑区 .music-binder-* 能确认歌名并发布：' + JSON.stringify(r));
+  assert.equal(await br.eval('window.publishCount'), 1, 'F: 确认后点击发布');
+  await driver.closeMusicPanel();
+
+  console.log('✓ 「使用」按钮语义定位：无哈希类名 / 页面有诱饵按钮 / 按钮延迟出现 / backendNodeId 直接归属 / 添加音乐入口 / 视频页 music-binder 确认');
 } finally {
   await br.quit();
 }

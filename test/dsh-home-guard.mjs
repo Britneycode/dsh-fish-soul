@@ -11,42 +11,45 @@
 //   ② 正常路径原样返回（回归）
 //   ③ 端到端：错配置下 openDatabase() 打开的就是正确位置的库（不是嵌套空库）
 //   ④ 非常规但合法的目录名（含 fish-soul 前缀但不是它）不受影响
+// 路径全部用 tmpdir 构造，不在测试里写死平台相关字面量（CI 是 Linux，本机是 Windows）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
-// db.js 在模块加载时就把 DSH_HOME 相关函数定义好，但 dshHome() 每次调用都读环境变量
-// —— 所以这里可以动态改环境变量逐用例验证（openDatabase 用例除外，见下）。
+// db.js 的 dshHome() 每次调用都读环境变量，可以动态改逐用例验证。
 const { dshHome, fishSoulDir } = await import('../lib/db.js');
 
 test('事故形态：DSH_HOME 指到 fish-soul 子目录 → 归一到上一级', () => {
-	process.env.DSH_HOME = 'C:/Users/13372/.dsh/fish-soul';
-	assert.equal(dshHome(), 'C:\\Users\\13372\\.dsh');
-	assert.equal(fishSoulDir(), 'C:\\Users\\13372\\.dsh\\fish-soul');
+	const base = mkdtempSync(join(tmpdir(), 'dsh-guard-a-'));
+	process.env.DSH_HOME = join(base, 'fish-soul'); // 事故形态：多了最后一层
+	assert.equal(dshHome(), base, '应归一到上一级');
+	assert.equal(fishSoulDir(), join(base, 'fish-soul'), 'fishSoulDir 应指向正确位置');
 });
 
-test('事故形态（相对路径 + 尾部斜杠）也一样归一', () => {
-	process.env.DSH_HOME = 'some/dir/fish-soul/';
-	assert.equal(dshHome(), join(process.cwd(), 'some', 'dir'));
+test('事故形态（尾部斜杠）也一样归一', () => {
+	const base = mkdtempSync(join(tmpdir(), 'dsh-guard-b-'));
+	process.env.DSH_HOME = join(base, 'fish-soul') + '/';
+	assert.equal(dshHome(), base, '带尾斜杠也应归一到上一级');
 });
 
 test('正常路径：不带 fish-soul → 原样返回', () => {
-	process.env.DSH_HOME = 'C:/Users/13372/.dsh';
-	assert.equal(dshHome(), 'C:\\Users\\13372\\.dsh');
+	const base = mkdtempSync(join(tmpdir(), 'dsh-guard-c-'));
+	process.env.DSH_HOME = base;
+	assert.equal(dshHome(), base);
 });
 
 test('basename 不是 fish-soul 就不动（fish-soul-data 这类合法目录名）', () => {
-	process.env.DSH_HOME = 'C:/Users/13372/fish-soul-data';
-	assert.equal(dshHome(), 'C:\\Users\\13372\\fish-soul-data');
+	const base = mkdtempSync(join(tmpdir(), 'fish-soul-data-')); // basename 是 fish-soul-data-xxx，不是 fish-soul
+	process.env.DSH_HOME = base;
+	assert.equal(dshHome(), base);
 });
 
-test('端到端：错配置下 openDatabase 打开的是正确位置的库，不产生嵌套目录', { skip: process.platform !== 'win32' }, async () => {
-	// openDatabase 会 mkdirSync + 建库，用临时目录模拟「真库已存在于正确位置」：
+test('端到端：错配置下 openDatabase 打开的是正确位置的库，不产生嵌套目录', async () => {
 	// DSH_HOME=tmp/x（正确），错配置写成 tmp/x/fish-soul。
 	// 归一化后应打开 tmp/x/fish-soul/soul.db —— 即「正确位置」，且不会出现 tmp/x/fish-soul/fish-soul。
-	const base = mkdtempSync(join(tmpdir(), 'dsh-home-guard-'));
+	const base = mkdtempSync(join(tmpdir(), 'dsh-guard-e-'));
 	process.env.DSH_HOME = join(base, 'fish-soul'); // 事故形态：多了最后一层
 	const { openDatabase } = await import('../lib/db.js');
 	const db = openDatabase();

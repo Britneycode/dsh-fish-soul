@@ -1,5 +1,10 @@
 # dsh-fish-soul 变更记录
 
+- v0.18.19：真机创作者中心实测修通图文配乐点击与视频页配乐整条链路。
+  - **图文与视频页「选择音乐 / 添加音乐」及「使用」按钮真机适配**：
+    - `MUSIC_ENTRY_JS` 同时识别「选择音乐」（图文）与「添加音乐」（视频），优先取 `.preview-button` / `button` 外层按钮并仅在视口外时滚动；`clickMusicEntry` 点击前先派发 `mouseMoved` 悬停。
+    - `pickNoteMusic` 在 `realClick` 后先确认抽屉仍开着（`MUSIC_OPEN_JS`）再对 `backendNodeId` 补发 DOM `click()`，解决无障碍树 `getBoxModel` 坐标偶尔超出 400px 歌卡右边界导致脱离 `:hover` 点空的问题；编辑区确认补充匹配视频页的 `[class*="music-binder"], [class*="music-text"]`。
+  - 验证：`test/douyin-ax-button.mjs` 新增用例 F 模拟视频页结构，本地 Chromium 与真机创作者中心（端口 `47890` 隔离标签页，到达 `beforeSubmit` 发布前检查）图文与视频配乐均已实测通过。
 - v0.18.18：修抖音发图文配乐报「找到的『使用』按钮不在选中的那首歌上」；OpenMotion 本地渲染的无声视频在抖音创作者中心发布时自动从推荐歌单配 BGM。
   - **抖音发图文配乐报「找到的『使用』按钮不在选中的那首歌上」**：
     - **根因**：之前在无障碍树查到 `role=button` + `name=使用` 之后，只把按钮坐标 `(x, y)` 留下来，再调 `DOM.getNodeForLocation(x, y)` 按坐标反查节点。真机上音乐面板是 `fixed` 浮层，或按钮在 hover 过渡/子层遮挡时，`getNodeForLocation(x, y)` 命中的是遮罩或抽屉容器而非按钮本身，往父链找自然找不到歌名。

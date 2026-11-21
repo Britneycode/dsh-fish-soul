@@ -72,10 +72,8 @@ test('#160 内存里有就不查库（同一次运行里最快的路径没变）
 	let queried = 0;
 	const realPrepare = db.prepare.bind(db);
 	g.db = { prepare: (sql) => { if (String(sql).includes('own_message')) queried++; return realPrepare(sql); } };
-	// 引用查询走的是「带通道」那张表（ownMessages 是裸 id，给 normalizeMessageEvent 的 .has() 用）
 	g.rememberOwnCacheOnly('9002', '在的', 'private:1234567890');
-	const line = await g.quoteLine('9002', 'private:1234567890');
-	assert.match(line, /引用 我自己：在的/);
+	assert.equal(g.ownMessageText('9002', 'private:1234567890'), '在的');
 	assert.equal(queried, 0, '命中内存时不该去查库');
 });
 
@@ -133,6 +131,29 @@ test('#160 写库抛错不能把发送打挂（引用是兜底，不是主路）
 	g.db = { prepare: () => { throw new Error('SQLITE_BUSY'); } };
 	assert.doesNotThrow(() => g.rememberOwn('9005', '照发', 'private:1'));
 	assert.equal(g.ownMessages.get('9005'), '照发', '内存那条仍然记住了');
+});
+
+test('引用自己的图必须核对发送时间，同号复用不能拼成另一条消息', async () => {
+	const g = gateway();
+	const at = Date.now();
+	g.rememberOwn('reused-image', '昨天说的', 'private:5555555555');
+	db.prepare('UPDATE own_message SET at = ? WHERE channel_id = ? AND message_id = ?').run(at, 'private:5555555555', 'reused-image');
+	g.ownMessageText = () => '昨天说的';
+	g.channel.selfId = '1000';
+	g.channel.getMessage = async (id) => ({
+		message_id: id, message_type: 'private', sender: { user_id: '1000', nickname: '鱼' },
+		time: at / 1000 + 10,
+		message: [{ type: 'image', data: { url: 'https://x.example/wrong.png' } }]
+	});
+	const reused = await g.quoteOf('reused-image', 'private:5555555555');
+	assert.match(reused.line, /昨天说的/, '本地原文仍然保留');
+	assert.equal(reused.images.length, 0, '同一个 QQ 号但不同时间，不代表同一条消息');
+	g.channel.getMessage = async (id) => ({
+		message_id: id, message_type: 'private', sender: { user_id: '1000', nickname: '鱼' },
+		time: Math.floor(at / 1000),
+		message: [{ type: 'image', data: { url: 'https://x.example/right.png' } }]
+	});
+	assert.equal((await g.quoteOf('reused-image', 'private:5555555555')).images.length, 1, '时间对上的那条可以取图');
 });
 
 // ───────────────────────── #161 ─────────────────────────

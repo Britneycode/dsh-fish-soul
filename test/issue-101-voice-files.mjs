@@ -72,7 +72,7 @@ assert.deepEqual(results,[true,false,true,false]);
   interjectTurns:new Set(),soul:{beginTurn(){}},replyChannelFor:()=>'',bound:new Map([[sid,{workspace_path:home}]]),
   workspacePath:()=>home,turns:new Map(),pendingVoicePaths:new Map(),voiceGuardReady:true,
   getConfig:()=>({voice:{enabled:true,saveIncoming:true}}),db:{prepare:()=>({run(){}})},
-  quoteLine:async()=>'',videoNotes:async()=>[],admitImages:async(text)=>[{type:'text',text}],takeBacklog:()=>[],
+  videoNotes:async()=>[],admitImages:async(text)=>[{type:'text',text}],takeBacklog:()=>[],
  });
  const person={canonical_id:'one'};const m={chatType:'group',targetId:'55',userId:'1',nickname:'one',text:'hi',messageId:'a',voicePaths:paths};
  const agent={id:sid,followup:async(msg)=>{sent=msg}};

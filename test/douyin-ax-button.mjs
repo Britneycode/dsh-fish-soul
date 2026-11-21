@@ -132,7 +132,33 @@ try {
   assert.equal(await br.eval('window.publishCount'), 1, 'C: 等到按钮后要发布');
   await driver.closeMusicPanel();
 
-  console.log('✓ 「使用」按钮语义定位：无哈希类名 / 页面有诱饵按钮 / 按钮延迟出现');
+  // 用例 D：按钮在 AX 查询命中后、归属检查前被浮层盖住（模拟 hover 离开或抽屉浮层抢中坐标），
+  //   DOM.getNodeForLocation 会命中浮层报「找到的『使用』按钮不在选中的那首歌上」，
+  //   而直接用 AX 节点的 backendNodeId 走祖先链仍能认出属于这张歌卡。
+  await page({ plainClass: true });
+  assert.equal((await driver.listRecommendedMusic()).ok, true, 'D: 推荐列表读得到');
+  await br.eval(`(() => {
+    const style = document.createElement('style');
+    style.textContent = '.card-container-right > button { visibility: visible !important; }';
+    document.head.appendChild(style);
+    const shield = document.createElement('div');
+    shield.id = 'hover-shield';
+    shield.style.cssText = 'position:fixed;inset:0;z-index:9999;';
+    shield.addEventListener('mousedown', () => {
+      window.clickedText = '使用';
+      document.querySelector('.current').innerText = ${JSON.stringify(SONG)};
+      document.querySelector('.semi-sidesheet').style.display = 'none';
+      shield.remove();
+    });
+    document.body.appendChild(shield);
+    return true;
+  })()`);
+  r = await driver.publishNote({ music: SONG });
+  assert.equal(r.ok, true, 'D: 坐标被浮层遮挡时，backendNodeId 祖先链仍能确认歌卡归属：' + JSON.stringify(r));
+  assert.equal(await br.eval('window.publishCount'), 1, 'D: 归属确认后要发布');
+  await driver.closeMusicPanel();
+
+  console.log('✓ 「使用」按钮语义定位：无哈希类名 / 页面有诱饵按钮 / 按钮延迟出现 / backendNodeId 直接归属');
 } finally {
   await br.quit();
 }

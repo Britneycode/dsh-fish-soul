@@ -30,55 +30,100 @@ const { ChatGateway } = await import('../lib/gateway.js');
 const db = openDatabase();
 const ok = (m) => console.log('  ✓ ' + m);
 
-/** 最小网关：只要能跑 ensureSession / onSessionEvent 这两条路。 */
-function makeGateway({ followupError = null, chatModels = undefined } = {}) {
+/** 最小网关：只要能跑 ensureSession / onSessionEvent 这两条路，可选注入模型信息 / 测量 / 回调。 */
+function makeGateway({
+	followupError = null,
+	chatModels = undefined,
+	getConfig = null,
+	resolveModelInfo = null,
+	measure = null,
+	defaultSelection = { provider: 'p0', model: 'm0' },
+	onFollowup = null,
+	douyinSettle = null,
+	douyinSend = null,
+	autoUpdateModel = false
+} = {}) {
 	const created = [];
 	const resumed = [];
 	const notes = [];
+	const diags = [];
+	const followups = [];
+	const selected = [];
+	const sent = [];
 	const live = new Map();
 	const gw = new ChatGateway({
 		ctx: {
-			get: (name) => (name === 'agents' ? agents : undefined),
+			get: (name) => {
+				if (name === 'agents') return agents;
+				if (name === 'llm') return {
+					listProviders: () => [{ id: 'p0' }, { id: 'p1' }, { id: 'p2' }],
+					...(resolveModelInfo ? { resolveModelInfo } : {})
+				};
+				if (name === 'tokenMeter') return measure ? { measure } : undefined;
+				if (name === 'agentDefaultModel') return { currentSelection: () => defaultSelection };
+				return undefined;
+			},
 			tools: { restrict: () => () => {} }
 		},
 		db,
 		clock: { now: () => Date.now() },
-		getConfig: () => ({ qq: { enabled: true }, masterQqUin: '10001', ...(chatModels !== undefined ? { chatModels } : {}) }),
+		getConfig: getConfig ?? (() => ({ qq: { enabled: true }, masterQqUin: '10001', ...(chatModels !== undefined ? { chatModels } : {}) })),
 		log: () => {},
-		channel: { connected: true, selfId: '1000', send: async () => '1', isFriend: () => true },
+		diag: { add: (key, detail, level) => diags.push({ key, detail, level }) },
+		channel: { connected: true, selfId: '1000', send: async (...args) => { sent.push(args); return '1'; }, isFriend: () => true },
 		bili: null,
-		douyin: null,
+		douyin: {
+			connected: true,
+			send: douyinSend ?? (async () => ({ ok: true, delivered: true })),
+			inbox: { settle: (...args) => { if (douyinSettle) douyinSettle(...args); } }
+		},
 		soul: {
 			beginTurn: () => {}, nowLabel: () => '现在', resolvePerson: () => null, memorizeUnanswered: () => {},
-			availability: () => 'idle', personaName: () => '小鱼', recallInfo: () => [], journalOut: () => {}
+			availability: () => 'idle', personaName: () => '小鱼', recallInfo: () => [], journalOut: () => {},
+			archiveDesktop: () => {}
 		},
 		note: (kind, info) => { notes.push({ kind, info }); }
 	});
 
-	const makeAgent = (id) => ({
-		id, session: { id }, options: { model: 'm' },
-		async followup() { if (followupError !== null) throw followupError; }
-	});
+	const makeAgent = (id, initOpts) => {
+		let curModel = initOpts?.agentOptions ? { ...initOpts.agentOptions } : { ...defaultSelection };
+		return {
+			id,
+			session: { id, requestHeader: () => ({ config: { ...curModel, maxTokens: 100 } }) },
+			options: { model: curModel.model ?? 'm' },
+			model: {
+				current: () => curModel,
+				select: (sel) => {
+					selected.push({ id, sel });
+					if (autoUpdateModel) curModel = { ...sel };
+				},
+				setCurrent: (sel) => { curModel = { ...sel }; }
+			},
+			async followup(msg) {
+				followups.push({ id, msg });
+				if (onFollowup) await onFollowup(id, msg, gw);
+				if (followupError !== null) throw followupError;
+			}
+		};
+	};
 
 	const agents = {
 		async create(opts) {
 			created.push(opts);
-			const agent = makeAgent(opts.sessionId);
+			const agent = makeAgent(opts.sessionId, opts);
 			live.set(opts.sessionId, agent);
 			return { agent, dispose: async () => {} };
 		},
 		async resume(opts) {
 			resumed.push(opts.resumeSessionId);
-			const agent = makeAgent(opts.resumeSessionId);
+			const agent = makeAgent(opts.resumeSessionId, opts);
 			live.set(opts.resumeSessionId, agent);
 			return { agent, dispose: async () => {} };
 		},
 		get: (id) => live.get(id)
 	};
-	// 让 ChatGateway 里的 service(ctx,'agents') 拿得到
-	gw.ctx.get = (name) => (name === 'agents' ? agents : undefined);
 
-	return { gw, created, resumed, notes };
+	return { gw, created, resumed, notes, diags, followups, selected, sent };
 }
 
 const chat = { channelId: 'private:30001', chatType: 'private', targetId: '30001', title: '某人' };
@@ -248,4 +293,248 @@ test('两种坏法都踩过的会话，换完要把两个名单都清干净（�
 	assert.ok(!blocked.includes(first.id), '换模型被挡那个名单也要清干净（只清一个会留下残条目）');
 	ok('两个名单都清干净');
 });
+
+test('TargetPressureConfigError 类永久切换失败也触发换新会话，502 临时错仍不换', async () => {
+	const chat11 = { ...chat, channelId: 'private:30011', targetId: '30011' };
+	const permanentMsgs = [
+		'Cannot switch to p1/m1: context compaction failed: compaction-basic: no context capacity for p1/m1; configure contextWindow on that adapter model. The previous request model is preserved; retry or select a model with a larger context window.',
+		'Cannot switch to p1/m1: context compaction failed: compaction-basic: p1/m1 reserves 65536 completion tokens and 65536 headroom tokens of its 8192-token context window, leaving no pressure budget. The previous request model is preserved; retry or select a model with a larger context window.',
+		'Cannot switch to p1/m1: context compaction failed: BasicCompactionConfig: p1/m1 retainTokens (4000) must be less than threshold tokens 3000. The previous request model is preserved; retry or select a model with a larger context window.'
+	];
+	for (const message of permanentMsgs) {
+		db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30011'");
+		const { gw, created } = makeGateway();
+		const first = await gw.ensureSession(chat11);
+		gw.onSessionEvent({ id: first.id }, { type: 'user/message', data: { message: { id: 'm1', source: { kind: 'fish-soul/qq', channelId: chat11.channelId } } } });
+		gw.onSessionEvent({ id: first.id }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'MODEL_SWITCH_COMPACTION_FAILED', message } } } });
+		const second = await gw.ensureSession(chat11);
+		assert.notEqual(second.id, first.id, `永久配置失败应该换会话：${message}`);
+		assert.equal(created.length, 2);
+	}
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30011'");
+	const { gw, created } = makeGateway();
+	const first = await gw.ensureSession(chat11);
+	gw.onSessionEvent({ id: first.id }, { type: 'user/message', data: { message: { id: 'm1', source: { kind: 'fish-soul/qq', channelId: chat11.channelId } } } });
+	gw.onSessionEvent({ id: first.id }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'MODEL_SWITCH_COMPACTION_FAILED', message: 'Cannot switch to p1/m1: context compaction failed: summarization failed: 502 Bad Gateway.' } } } });
+	const again = await gw.ensureSession(chat11);
+	assert.equal(again.id, first.id, '502 临时失败不能误换会话');
+	assert.equal(created.length, 1);
+	ok('TargetPressureConfigError 换会话，502 不误换');
+});
+
+test('换模型前预检：超窗或缺失 contextWindow 直接换新会话，未超窗原地保留', async () => {
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30012'");
+	const chat12 = { ...chat, channelId: 'private:30012', targetId: '30012' };
+	let cfg = { qq: { enabled: true }, masterQqUin: '10001' };
+	let modelInfo = { context: { contextWindow: 4000 }, defaultMaxTokens: 500 };
+	let totalTokens = 3200;
+	const { gw, created, selected, diags } = makeGateway({
+		getConfig: () => cfg,
+		resolveModelInfo: async () => modelInfo,
+		measure: () => ({ totalTokens })
+	});
+
+	const s1 = await gw.ensureSession(chat12);
+	// 切到目标模型 p1/m1，刚好触 threshold=3200 -> 预检直接换新会话且不调 m.select
+	cfg = { ...cfg, chatModels: { private: { provider: 'p1', model: 'm1' } } };
+	const s2 = await gw.ensureSession(chat12);
+	assert.notEqual(s2.id, s1.id, '超阈值应在 ensureSession 直接换新会话');
+	assert.equal(created.length, 2);
+	assert.deepEqual(created[1].agentOptions, { provider: 'p1', model: 'm1' });
+	assert.equal(selected.length, 0, '直接建在目标模型上，不该先切旧会话');
+	assert.ok(diags.some((d) => d.key === 'session-switch-preflight' && d.detail.reason === 'over-threshold'));
+
+	// 缺失 contextWindow 时也直接预检换新会话
+	cfg = { ...cfg, chatModels: { private: { provider: 'p2', model: 'm2' } } };
+	modelInfo = { context: undefined };
+	const s3 = await gw.ensureSession(chat12);
+	assert.notEqual(s3.id, s2.id, '没有 contextWindow 应直接换新会话');
+	assert.equal(created.length, 3);
+	assert.ok(diags.some((d) => d.key === 'session-switch-preflight' && d.detail.reason === 'no-context-window'));
+
+	// 未超阈值时原地保留同一会话
+	cfg = { ...cfg, chatModels: { private: { provider: 'p1', model: 'm1' } } };
+	modelInfo = { context: { contextWindow: 32000 }, defaultMaxTokens: 1000 };
+	totalTokens = 1000;
+	const s4 = await gw.ensureSession(chat12);
+	assert.equal(s4.id, s3.id, '未超阈值应保留原会话原地切换');
+	assert.equal(created.length, 3);
+	ok('换模型前预检超窗 / 缺窗口直接换新，未超窗保留');
+});
+
+test('dispatch 撞粘性失败时当轮自动换新会话重试 1 次，且不提前把抖音私信判失败', async () => {
+	// Case A: 首次失败 -> 自动换新会话重试成功，只结算 1 次 ok:true
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'douyin:测试人'");
+	const settlesA = [];
+	const { gw, created, followups } = makeGateway({
+		douyinSettle: (ids, isOk, why) => settlesA.push({ ids, ok: isOk, why }),
+		onFollowup: async (sid, msg, inst) => {
+			inst.onSessionEvent({ id: sid }, { type: 'user/message', data: { message: { id: msg.id, source: msg.source } } });
+			if (followups.length === 1) {
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'MODEL_SWITCH_COMPACTION_FAILED', message: 'Cannot switch to p1/m1: context compaction failed: summary is not smaller than the shadowed content (1027 estimated framed tokens >= 1018).' } } } });
+			} else {
+				inst.onSessionEvent({ id: sid }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '收到啦' }] } } });
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+			}
+		}
+	});
+	const conv = '0:1:111:222';
+	await gw.dispatch('douyin:测试人', [{ m: { userId: 'uid:222', nickname: '测试人', messageId: 'dy-1', chatType: 'private', targetId: '测试人', inboxId: 42, convId: conv, text: '你好', images: [], timeMs: Date.now() }, person: null }]);
+	await new Promise((r) => setTimeout(r, 40));
+	assert.equal(created.length, 2, '当轮重试应建出第 2 条新会话');
+	assert.equal(followups.length, 2, '同一条消息应在两条会话上各发 1 次');
+	assert.notEqual(followups[0].id, followups[1].id);
+	assert.equal(settlesA.length, 1, '首次失败等待重试期间不能结算');
+	assert.deepEqual(settlesA[0], { ids: [42], ok: true, why: '' });
+
+	// Case B: 重试后第 2 次仍失败 -> 最多试 1 次，不死循环，结算 ok:false
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'douyin:测试人2'");
+	const settlesB = [];
+	const g2 = makeGateway({
+		douyinSettle: (ids, isOk, why) => settlesB.push({ ids, ok: isOk, why }),
+		onFollowup: async (sid, msg, inst) => {
+			inst.onSessionEvent({ id: sid }, { type: 'user/message', data: { message: { id: msg.id, source: msg.source } } });
+			inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'CONTEXT_WINDOW_EXCEEDED', message: 'context length exceeded' } } } });
+		}
+	});
+	await g2.gw.dispatch('douyin:测试人2', [{ m: { userId: 'uid:333', nickname: '测试人2', messageId: 'dy-2', chatType: 'private', targetId: '测试人2', inboxId: 99, convId: conv, text: '你好', images: [], timeMs: Date.now() }, person: null }]);
+	await new Promise((r) => setTimeout(r, 40));
+	assert.equal(g2.created.length, 2, '第 2 条失败后停止当轮重试');
+	assert.equal(g2.followups.length, 2);
+	assert.equal(settlesB.length, 1);
+	assert.equal(settlesB[0].ok, false, '第 2 次也失败后必须落 ok:false');
+	ok('dispatch 当轮仅重试 1 次且收件箱结算不早产');
+});
+
+test('triggerProactive 撞上下文超限时当轮换新会话重试并把原 Promise 解析为 true', async () => {
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30014'");
+	const { gw, created, followups, sent } = makeGateway({
+		onFollowup: async (sid, msg, inst) => {
+			inst.onSessionEvent({ id: sid }, { type: 'user/message', data: { message: { id: msg.id, source: msg.source } } });
+			if (followups.length === 1) {
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'CONTEXT_WINDOW_EXCEEDED', message: 'context length exceeded' } } } });
+			} else {
+				inst.onSessionEvent({ id: sid }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '在干嘛呀' }] } } });
+				inst.onSessionEvent({ id: sid }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+			}
+		}
+	});
+	const delivered = await gw.triggerProactive('private:30014', '想找你说话');
+	assert.equal(delivered, true, '换新会话重试成功后原 Promise 应返回 true');
+	assert.equal(created.length, 2);
+	assert.equal(followups.length, 2);
+	assert.equal(sent.length, 1);
+	ok('triggerProactive 当轮换新会话重试成功');
+});
+
+test('连续换新会话仍超限在 2 次后熔断，换模型 / 成功轮次 / 手动重置都能解锁', async () => {
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30015'");
+	const chat15 = { ...chat, channelId: 'private:30015', targetId: '30015' };
+	let cfg = { qq: { enabled: true }, masterQqUin: '10001' };
+	const { gw, created, diags } = makeGateway({ getConfig: () => cfg });
+
+	const s1 = await gw.ensureSession(chat15);
+	overflowTurnEnd(gw, s1.id);
+	const s2 = await gw.ensureSession(chat15); // 第 1 次回收
+	overflowTurnEnd(gw, s2.id);
+	const s3 = await gw.ensureSession(chat15); // 第 2 次回收
+	overflowTurnEnd(gw, s3.id);
+
+	await assert.rejects(() => gw.ensureSession(chat15), /连续换新会话/, '第 3 次起必须熔断拒绝');
+	assert.equal(created.length, 3, '熔断后绝不能继续建第 4 条空会话');
+	assert.ok(diags.some((d) => d.key === 'session-recycle-breaker'));
+	assert.ok(gw.decisions.some((n) => n.kind === 'failed' && /连续换新会话/.test(n.reason)));
+
+	// 解锁 1：换到另一个目标模型
+	cfg = { ...cfg, chatModels: { private: { provider: 'p1', model: 'm1' } } };
+	const s4 = await gw.ensureSession(chat15);
+	assert.notEqual(s4.id, s3.id, '换模型后熔断应解锁');
+
+	// 再把 p1/m1 熔断一次（s4 本身是切换后的第 1 次回收，s5 是第 2 次），测解锁 2：手动 resetSession
+	overflowTurnEnd(gw, s4.id);
+	const s5 = await gw.ensureSession(chat15);
+	overflowTurnEnd(gw, s5.id);
+	await assert.rejects(() => gw.ensureSession(chat15), /连续换新会话/);
+	const resetRes = await gw.resetSession(chat15.channelId, '测试重置');
+	assert.notEqual(resetRes.sessionId, s5.id, '手动 resetSession 应清熔断并新建会话');
+
+	// 解锁 3：正常完成一轮会清空计数，允许再次连续回收 2 次
+	const s7 = await gw.ensureSession(chat15);
+	overflowTurnEnd(gw, s7.id);
+	const s8 = await gw.ensureSession(chat15); // 计数=1
+	gw.onSessionEvent({ id: s8.id }, { type: 'user/message', data: { message: { id: 'm-ok', source: { kind: 'fish-soul/qq', channelId: chat15.channelId } } } });
+	gw.onSessionEvent({ id: s8.id }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+	await new Promise((r) => setTimeout(r, 15));
+	overflowTurnEnd(gw, s8.id);
+	const s9 = await gw.ensureSession(chat15); // 重置后计数=1
+	overflowTurnEnd(gw, s9.id);
+	const s10 = await gw.ensureSession(chat15); // 重置后计数=2，未在 1 次就误熔断
+	assert.notEqual(s10.id, s9.id);
+	ok('连续回收熔断 + 换模型 / 手动重置 / 成功轮次解锁');
+});
+
+test('清掉 chatModels 覆盖后若切换临时失败，下一轮仍会重试切回默认，确认切回后再摘标记', async () => {
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30018'");
+	const chat18 = { ...chat, channelId: 'private:30018', targetId: '30018' };
+	let cfg = { qq: { enabled: true }, masterQqUin: '10001', chatModels: { private: { provider: 'p1', model: 'm1' } } };
+	const { gw, selected } = makeGateway({ getConfig: () => cfg, autoUpdateModel: false });
+	const agent = await gw.ensureSession(chat18);
+	// Turn 1: 登记过 _modelApplied
+	gw.applyChatModelFor(agent, chat18.channelId);
+	assert.equal(gw._modelApplied.has(agent.id), true);
+
+	// 清掉覆盖，且第一次 m.select 后 m.current() 仍停在 p1/m1（模拟宿主压缩临时挂了保留原模型）
+	cfg = { qq: { enabled: true }, masterQqUin: '10001' };
+	gw.applyChatModelFor(agent, chat18.channelId);
+	assert.equal(selected.length, 1);
+	assert.deepEqual(selected[0].sel, { provider: 'p0', model: 'm0' });
+	assert.equal(gw._modelApplied.has(agent.id), true, 'current 未变化前不能提前摘掉 _modelApplied');
+
+	// Turn 3: 下一轮仍要重试切回 p0/m0
+	gw.applyChatModelFor(agent, chat18.channelId);
+	assert.equal(selected.length, 2);
+
+	// 模拟切回真正生效，再调一次不重发 select 且清掉 _modelApplied
+	agent.model.setCurrent({ provider: 'p0', model: 'm0' });
+	gw.applyChatModelFor(agent, chat18.channelId);
+	assert.equal(selected.length, 2, 'current 已是默认模型时不再调 select');
+	assert.equal(gw._modelApplied.has(agent.id), false, '确认切回后再清理标记');
+	ok('_modelApplied 切回默认重试与清理逻辑正确');
+});
+
+test('DSH 桌面端打字轮次失败记 failed 动态不记 dsh，成功轮次照常记 dsh', async () => {
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30019'");
+	const chat19 = { ...chat, channelId: 'private:30019', targetId: '30019' };
+	const { gw } = makeGateway();
+	const agent = await gw.ensureSession(chat19);
+
+	gw.onSessionEvent({ id: agent.id }, { type: 'user/message', data: { message: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: '桌面问一句' }] } } });
+	gw.onSessionEvent({ id: agent.id }, { type: 'turn/end', data: { reason: { kind: 'error', error: { code: 'MODEL_SWITCH_COMPACTION_FAILED', message: 'Cannot switch to p1/m1: context compaction failed: summary is not smaller than the shadowed content (1027 estimated framed tokens >= 1018).' } } } });
+	assert.equal(gw.decisions.filter((d) => d.kind === 'dsh').length, 0, '失败的桌面端轮次不该记成 dsh 正常对话');
+	const failedNote = gw.decisions.find((d) => d.kind === 'failed');
+	assert.ok(failedNote && /DSH 桌面端/.test(failedNote.reason), '失败的桌面端轮次要记进 failed');
+
+	gw.decisions.length = 0;
+	gw.onSessionEvent({ id: agent.id }, { type: 'user/message', data: { message: { id: 'u2', source: { kind: 'user' }, content: [{ type: 'text', text: '再问一句' }] } } });
+	gw.onSessionEvent({ id: agent.id }, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '回你啦' }] } } });
+	gw.onSessionEvent({ id: agent.id }, { type: 'turn/end', data: { reason: { kind: 'completed' } } });
+	assert.equal(gw.decisions.filter((d) => d.kind === 'dsh').length, 1, '正常完成的桌面端轮次照常记 dsh');
+	ok('DSH 桌面端失败/成功动态区分正确');
+});
+
+test('主人发 /鱼 新会话 命令立即换新会话并回复确认', async () => {
+	db.exec("DELETE FROM chat_session WHERE channel_id = 'private:30020'");
+	const chat20 = { ...chat, channelId: 'private:30020', targetId: '30020' };
+	const { gw, created, sent } = makeGateway({ getConfig: () => ({ qq: { enabled: true }, masterQqUin: '30020' }) });
+	const first = await gw.ensureSession(chat20);
+	const handled = await gw.handleCommand({ channelId: 'private:30020', userId: '30020', nickname: '主人', text: '/鱼 新会话' });
+	assert.equal(handled, true);
+	assert.equal(created.length, 2);
+	const oldRow = db.prepare('SELECT status FROM chat_session WHERE session_id = ?').get(first.id);
+	assert.equal(oldRow?.status, 'retired');
+	assert.equal(sent.length, 1);
+	assert.match(sent[0][1][0].data.text, /换了一条新会话/);
+	ok('/鱼 新会话 命令生效');
+});
+
 console.log('session-overflow-recycle: all assertions passed');

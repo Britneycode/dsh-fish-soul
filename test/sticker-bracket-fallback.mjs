@@ -124,3 +124,34 @@ test('走 sendReply：[表情:不存在] 剥掉，不发文字', async () => {
 	assert.equal(sent[0].segs[0].type, 'text', '第一条是文字');
 	assert.equal(sent[0].segs[0].data.text, '好耶', '文字部分干净，没有 [表情: 残留');
 });
+
+// ── 8. 接线（assertWire 形式）：剪断 listStickers，[表情:兔子OK] 就发不出图 ──
+// 前两条只证明「走真 sendReply 时结果对」；这条证明「结果对**是因为**经过了 listStickers」。
+// 若谁把兜底那行的 `this.listStickers(...)` 换成别的来源，剪断它结果不变，这条就红。
+test('接线：剪断 listStickers 后 [表情:兔子OK] 发不出图（证明兜底真的用了它）', async () => {
+	const { assertWire } = await import('./_wire.mjs');
+	const ws = join(process.env.DSH_HOME, 'ws-wire');
+	mkdirSync(join(ws, '_stickers'), { recursive: true });
+	writeFileSync(join(ws, '_stickers', '兔子OK.gif'), 'GIF89a');
+
+	const sent = [];
+	const g = gateway({ sent });
+	g.listStickers = () => ['兔子OK.gif'];
+	const row = { channel_id: 'private:1234567890', title: '主人', workspace_path: ws, status: 'active' };
+	const st = { text: '好耶 [表情:兔子OK]', images: [], channelId: 'private:1234567890' };
+
+	const { wired, cut } = await assertWire({
+		run: async () => {
+			sent.length = 0;
+			await g.sendReply.call(Object.assign(g, { bound: new Map([['s9', row]]) }), 's9', st);
+			return sent.map((x) => x.segs[0]?.type);
+		},
+		target: () => g,
+		method: 'listStickers',
+		pick: (types) => types,
+		why: '#170 的 [表情:] 兜底必须经过 listStickers 才能把名字换成真图'
+	});
+
+	assert.deepEqual(wired, ['text', 'image'], '正常：文字 + 图');
+	assert.deepEqual(cut, ['text'], '剪断 listStickers：只剩文字（兜底拿不到文件名）');
+});

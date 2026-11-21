@@ -156,3 +156,38 @@ test('#161 一条文字 + 两张图 → 文字一条、图各一条（不并进�
 	const kinds = sent.map((x) => x.segs.map((s) => s.type).join('+'));
 	assert.deepEqual(kinds, ['text', 'image', 'image'], `每条只该有一种段，实际 ${JSON.stringify(kinds)}`);
 });
+
+// ── #160 接线（assertWire 形式）：剪断 rememberOwn，语音转发就不再落库 ──
+// 上面那条「转发到 QQ 的语音也要落库」只证明结果对；这条证明**结果是经过 rememberOwn 来的**。
+// 若谁把 `this.rememberOwn?.(id, ..., target)` 删掉（或忘了传 target），剪断它结果不变，这条就红。
+test('#160 接线：剪断 rememberOwn 后语音转发不落库（证明真的调了它，且带了 target）', async () => {
+	const { assertWire } = await import('./_wire.mjs');
+	const g = gateway();
+	const sent = [];
+	g.channel.send = async (channelId, segs) => { sent.push({ channelId, segs }); return 'voice-wire-1'; };
+	g.voice = { synthesize: async () => Buffer.from('fake-audio') };
+	g.voiceRelayTarget = () => 'private:4444444444';
+	g.voiceFailReason = () => 'x';
+	g.note = () => {};
+	g.log = () => {};
+	g.soul = { journalOut: () => {} };
+
+	const row = { channel_id: 'bili:888', title: 'B站·某人' };
+	const read = () => db.prepare('SELECT text FROM own_message WHERE channel_id = ? AND message_id = ?')
+		.get('private:4444444444', 'voice-wire-1')?.text ?? '';
+
+	const { wired, cut } = await assertWire({
+		run: async () => {
+			db.prepare("DELETE FROM own_message WHERE message_id = 'voice-wire-1'").run();
+			await g.relayDmVoice(row, '[语音] 接线验证');
+			return read();
+		},
+		target: () => g,
+		method: 'rememberOwn',
+		pick: (text) => text,
+		why: '#160：语音转发必须调 rememberOwn 且带 target，否则重启后取不到原文'
+	});
+
+	assert.equal(wired, '[语音] 接线验证', '正常：落库了（带 target）');
+	assert.equal(cut, '', '剪断 rememberOwn：库里什么都没有');
+});

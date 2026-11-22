@@ -88,6 +88,11 @@ test('启动进程早退时，继续等端口到就绪，而不是当场放弃',
     assert.ok(!/端口 .*没响应/.test(msg), `没等到端口就绪就放弃了（只探到第 ${getCalls()} 次），实际：${msg}`)
     // 真等到第 6 次才走到接管 / 连接那一步（后面的失败只可能来自假 ws，与本竞争无关）
     assert.ok(getCalls() >= 6, `等待循环应该在就绪前持续探测，实际只探了 ${getCalls()} 次`)
+    // 🔴 关键：**真的走到了 attach 那一步**（假端口的 ws 连不上 ⇒ 报错必须是 WebSocket 错误）。
+    //    只断言「没报错」是不够的 —— 万一某版实现压根没去 attach，光靠计数也分不出来。
+    assert.match(msg, /WebSocket|连 CDP/, `应该已经过了端口等待、进入连接阶段，实际：${msg}`)
+    // 而且要按「接管已有实例」处理：attached=true ⇒ close() 不会去 kill 别人的进程
+    assert.equal(br.attached, true, '早退后接管 watchdog 拉起的实例，应当标记 attached')
   } finally {
     delete process.env.FISH_SOUL_CDP_WAIT_MS
   }

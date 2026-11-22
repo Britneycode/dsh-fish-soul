@@ -13,7 +13,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Browser } from '../lib/channels/vendor/douyin-bridge/browser.mjs'
-import { douyinSocialDriver } from '../lib/douyin-social.js'
+import { douyinSocialDriver, PAGE_TIMING } from '../lib/douyin-social.js'
 
 // 挂一个非 unref 的定时器把事件循环钉住（2026-11-15 commit 897dd42 同款）：
 // 没有永远 pending 的 promise 时不需要，但页面卡死的用例里有。
@@ -217,4 +217,21 @@ test('openWork 整操作不超过总预算（慢导航：成功但慢，sleep �
   assert.equal(r.ok, false)
   // 修之前：导航成功后照睡 4500ms 的 settle ⇒ 7233ms。
   assert.ok(spent <= 3000 + 1000, `实际 ${spent}ms，openWork 不该超过 3000ms 的总预算`)
+})
+
+test('真机事故回归：导航 >8s 但页面成功时，settle 不该被预算挤掉（2026-11-22 看评论报错）', async () => {
+  // 🔴 这里必须传 PAGE_TIMING.gotoTimeoutMs 而不是写死的数 —— 测的就是这个常量
+  //    够不够装下它自己结构的最小值（导航 15000 + 后等 2500 + settle 尾段 4500 = 23000）。
+  //    给 15000 时，9 秒导航（慢网，但页面其实成功了）会在 settle 段被误判超时。
+  const br = liveBrowser({ navDelayMs: 9000 })
+  const t = Date.now()
+  const r = await br.goto('https://www.douyin.com/user/self?showTab=post', {
+    settleMs: 7000,
+    timeoutMs: PAGE_TIMING.gotoTimeoutMs,
+  })
+  assert.equal(r.url, 'https://www.douyin.com/video/7123', '导航成功了就该认，settle 不该挤不进预算')
+  assert.equal(r.attempt, 0)
+  const spent = Date.now() - t
+  // 9 秒导航 + 2500 后等 + 4500 settle = 16000，24 秒预算内必须返回成功。
+  assert.ok(spent < PAGE_TIMING.gotoTimeoutMs, `实际 ${spent}ms，不该超过预算 ${PAGE_TIMING.gotoTimeoutMs}ms`)
 })

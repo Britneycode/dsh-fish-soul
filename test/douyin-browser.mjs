@@ -109,6 +109,23 @@ async function userCdp(method, params = {}) {
 }
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
+/**
+ * 浏览器进程的真实 OS pid。
+ *
+ * 🔴 不能用 `browser.proc?.pid`：只有「我们 spawn 的那个启动进程」才有 proc，
+ *    走 connect() 复用已有实例时（attached=true）proc 是 null —— 而重启走哪条
+ *    路径是竞态，取决于旧进程死得够不够快。用 proc 断言 = 赌调度。
+ *
+ * SystemInfo.getProcessInfo 是**浏览器级 target**的命令（不能带 sessionId），
+ * 复用/自启两条路径都能问出真实 pid（实测与 proc.pid 逐位相同）。
+ */
+async function browserPid(browser) {
+	if (browser?.proc?.pid > 0) return browser.proc.pid;
+	const info = await browser.send('SystemInfo.getProcessInfo', {}, undefined, 10000).catch(() => null);
+	const br = (info?.processInfo ?? []).find((p) => p.type === 'browser');
+	return Number(br?.id) || 0;
+}
+
 try {
 	// 1 启动：自己的 profile、打开抖音首页；截图 + 点击转发；canvas 把 webp 转 png
 	assert.equal(await host.start(), true, host.lastError);
@@ -225,8 +242,18 @@ try {
 	ok('关整个浏览器 = 暂停；点启动重新打开');
 
 	// 5 浏览器崩了（进程被杀）：不是暂停，30 秒后自动重连
-	const pid = host.browser.proc?.pid;
-	assert.ok(pid > 0);
+	//
+	// 🔴 pid 必须从 CDP 拿，不能用 host.browser.proc?.pid。
+	//
+	//    上面第 4 步的重启走哪条路径是**竞态**：旧浏览器进程要是还没死透、端口
+	//    还在应答，getBrowser() 会走 connect() 复用已有实例（attached=true），
+	//    这时 this.proc 是 null —— 那个进程不是我们 spawn 的。
+	//    机器快就 spawn（proc.pid 有值、套件绿），机器慢/忙就复用（proc.pid 是
+	//    undefined、断言挂）。所以 proc.pid > 0 等于在赌调度，而不是在测行为。
+	//    SystemInfo.getProcessInfo 是浏览器级 target 的命令，两条路径都能问出真实
+	//    OS pid（实测与 proc.pid 逐位相同）。
+	const pid = await browserPid(host.browser);
+	assert.ok(pid > 0, `拿不到浏览器真实 pid（attached=${host.browser.attached}）`);
 	process.kill(pid, 'SIGKILL');
 	await sleep(3500);
 	assert.equal(host.paused, false);
@@ -235,7 +262,7 @@ try {
 
 	// 6 插件卸载只断开（浏览器留着），新实例直接连上；设置页「关闭浏览器」真的关
 	assert.equal(await host.start({ resume: true }), true);
-	const pid2 = host.browser.proc?.pid;
+	const pid2 = await browserPid(host.browser);
 	host.dispose();
 	await sleep(500);
 	assert.equal(alive(pid2), true, 'dispose 不关浏览器');

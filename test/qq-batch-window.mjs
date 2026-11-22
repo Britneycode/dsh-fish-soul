@@ -56,5 +56,36 @@ const person = { canonical_id: 'user:1' };
   ok(dispatched.length === 2, '两个会话各回一次', JSON.stringify(dispatched));
 }
 
+// #169：光有静默窗口会被「每条间隔都小于 batchMs」的持续说话无限推迟（只能靠 20 条硬顶）。
+// batchMaxWaitMs = 从第一条进队算起的最长等待：到点必发。
+//
+// ⚠️ 参数必须让「最长等待」先于「静默窗口」到点，否则撤掉实现测试照样全绿（空转）。
+//    下面：batchMs=800、maxWait=700，第二条在 t=500 续窗 ⇒ 窗口延到 t=1300。
+//    检查点 t=1000 落在 (700, 1300) 之间：
+//      · 有 batchMaxWaitMs → t=700 已发（绿）
+//      · 撤掉实现          → t=1000 还在等（红）
+{
+  const { self, dispatched } = harness();
+  self.enqueue(msg('private:6', 'a'), person, { batchMs: 800, batchMaxWaitMs: 700 });
+  await sleep(400);
+  ok(dispatched.length === 0, '最长等待内先不回'); // t≈400 < 700，两种实现都还没发
+  await sleep(100); // t≈500
+  self.enqueue(msg('private:6', 'b'), person, { batchMs: 800, batchMaxWaitMs: 700 }); // 窗口延到 ~1300
+  await sleep(500); // t≈1000，落在 (700, 1300)
+  ok(dispatched.length === 1 && dispatched[0].n === 2, '到最长等待必发（不能被续窗无限推迟）', JSON.stringify(dispatched));
+}
+
+// batchMaxWaitMs = 0 → 不限（旧行为）：静默窗口语义不变，到点照发
+{
+  const { self, dispatched } = harness();
+  self.enqueue(msg('private:7', 'a'), person, { batchMs: 200, batchMaxWaitMs: 0 });
+  await sleep(50);
+  self.enqueue(msg('private:7', 'b'), person, { batchMs: 200, batchMaxWaitMs: 0 });
+  await sleep(100);
+  ok(dispatched.length === 0, 'maxWait=0：窗口内仍在等（旧行为）');
+  await sleep(250); // 第二条重置的 200ms 窗口到点
+  ok(dispatched.length === 1 && dispatched[0].n === 2, 'maxWait=0：窗口到点就发（旧行为）', JSON.stringify(dispatched));
+}
+
 console.log(failed === 0 ? '\n全部通过' : `\n${failed} 项失败`);
 process.exit(failed === 0 ? 0 : 1);

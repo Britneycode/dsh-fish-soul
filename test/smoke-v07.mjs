@@ -169,7 +169,10 @@ export async function run(t) {
 		d = sl.data('group:8801');
 		assert.equal(d.style, '主人写的风格', '主人改过的风格不覆盖');
 		assert.equal(d.terms.find((x) => x.term === '老地方').meaning, '后门烧烤', '主人加的词不被模型改 / 删');
-		assert.equal(d.terms.some((x) => x.term === 'v我50'), false, '模型说不用了就删');
+		// 🔴 #182：模型返回的 drop 不再采信 —— 原文是这个断言「模型说不用了就删」，
+		//    但模型看不到完整使用情况，单方面 drop 会把还在用的词删掉（真机：『拼』
+		//    还在群里用就被删了）。词表只增不减，靠 MAX_TERMS 截断控制膨胀。
+		assert.equal(d.terms.some((x) => x.term === 'v我50'), true, '模型说不用了也不能删（#182：drop 不再采信）');
 		cfg.enabled = false;
 		assert.deepEqual(sl.contextLines('group:8801'), []);
 		assert.equal((await new slMod.SlangLearner({ db, callLlm: async () => null, getConfig: () => cfg, personaName: () => '', titleOf: () => '' }).learn('group:8801')).ok, false);

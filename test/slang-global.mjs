@@ -133,3 +133,27 @@ console.log('slang-global: all assertions passed');
 	assert.deepEqual(rm.group?.terms?.map((t) => t.term), [], '要能删');
 	console.log('✓ 面板端到端：全局卡可见、能加能删、刷新读得回来');
 }
+
+
+test('#182 模型给的 drop 不再删词（只增不减）', async () => {
+	const L = makeLearner();
+	// 预置一个还在用的梗（模拟真实库），然后模型学习时把还在用的词写进 drop
+	L.edit('group:A', { add: { term: '拼', meaning: '一起拼车' } });
+	L.edit('group:A', { add: { term: '发车', meaning: '出发' } });
+	// 手动改 kv 模拟「模型上次学到的」（byUser=false）
+	const row = L.db.prepare("SELECT value FROM kv WHERE key = 'slang.group:A'").get();
+	const d = JSON.parse(row.value);
+	d.terms = d.terms.map((t) => ({ ...t, byUser: false }));
+	L.db.prepare("UPDATE kv SET value = ? WHERE key = 'slang.group:A'").run(JSON.stringify(d));
+	// 学一次：模型把还在用的「拼」「发车」写进 drop，同时学一个新词
+	const LL = new SlangLearner({ db: L.db, callLlm: async () => JSON.stringify({ terms: [{ term: '冲', meaning: '快点' }], drop: ['拼', '发车'] }), getConfig: () => ({ enabled: true, expressions: true, privateChats: true, minLines: 10, intervalHours: 0 }), personaName: () => '小鱼', titleOf: (c) => c, log: () => {} });
+	// learn() 要求群里至少 5 句别人的话
+	for (let i = 0; i < 6; i++) LL.observe('group:A', '甲', `今天第${i}句闲聊`);
+	const r = await LL.learn('group:A');
+	assert.equal(r.ok, true, '学习要成功');
+	const after = JSON.parse(L.db.prepare("SELECT value FROM kv WHERE key = 'slang.group:A'").get().value);
+	const names = after.terms.map((t) => t.term);
+	assert.ok(names.includes('拼'), '还在用的「拼」不该被 drop 删掉');
+	assert.ok(names.includes('发车'), '还在用的「发车」不该被 drop 删掉');
+	assert.ok(names.includes('冲'), '新词要加上');
+});

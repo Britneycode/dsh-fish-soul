@@ -200,9 +200,11 @@ function makeHarness(personaOverride) {
 	assert.equal(r1.payload.interaction.memoryId, null, '空 chat 不应写记忆');
 	const r2 = await h.call('POST', '/life/interaction', { type: 'voice', petId: 'main', text: '' });
 	assert.equal(r2.payload.interaction.memoryId, null, '空 voice 不应写记忆');
+	const r3 = await h.call('POST', '/life/interaction', { type: 'chat', petId: 'main', text: '   \n\t  ' });
+	assert.equal(r3.payload.interaction.memoryId, null, '纯空白 chat 不应写记忆');
 	assert.equal(h.memoryCount(), before, '空文本不得落库');
 	const master = h.db.prepare("SELECT interaction_count FROM person WHERE canonical_id = 'master'").get();
-	assert.equal(master.interaction_count, 90, '空文本仍然计互动次数');
+	assert.equal(master.interaction_count, 91, '空文本仍然计互动次数');
 }
 
 // POST /life/interaction：文本超 500 截断

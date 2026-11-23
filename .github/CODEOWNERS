@@ -1,0 +1,8 @@
+# 敏感核心路径需维护者审阅
+/.github/ @Britneycode
+/package.json @Britneycode
+/lib/routes*.js @Britneycode
+/lib/safe-download.js @Britneycode
+/lib/workspace-guard.js @Britneycode
+/lib/douyin-short-link.js @Britneycode
+/scripts/ @Britneycode

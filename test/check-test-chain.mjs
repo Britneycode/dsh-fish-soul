@@ -14,19 +14,19 @@ const pkg = JSON.parse(readFileSync(join(dir, '..', 'package.json'), 'utf8'));
 const script = pkg.scripts.test;
 const inChain = new Set([...script.matchAll(/node\s+(test\/[\w.-]+\.mjs)/g)].map((m) => m[1]));
 
-// 排除：
-//   _ 开头 = 辅助文件（_tmp.mjs）
+// 排除（显式非测试辅助白名单，不再通配豁免 _*.mjs）：
+//   _tmp.mjs / _wire.mjs = 测试辅助脚本（非独立套件）
 //   check-test-chain.mjs = 本检查自身
 //   parallel.mjs = CI runner（不是测试）
 //   bench-retrieval.mjs = 基准测试（不在 CI 里跑）
 //   smoke-v05~v09 / smoke-persona / smoke-social = smoke.mjs 内部 import 的子套件（不单独进链）
 const SKIP = new Set([
-	'test/_tmp.mjs', 'test/check-test-chain.mjs', 'test/parallel.mjs', 'test/bench-retrieval.mjs',
+	'test/_tmp.mjs', 'test/_wire.mjs', 'test/check-test-chain.mjs', 'test/parallel.mjs', 'test/bench-retrieval.mjs',
 	'test/smoke-v05.mjs', 'test/smoke-v06.mjs', 'test/smoke-v07.mjs', 'test/smoke-v08.mjs', 'test/smoke-v09.mjs',
 	'test/smoke-persona.mjs', 'test/smoke-social.mjs'
 ]);
 const onDisk = readdirSync(dir)
-	.filter((f) => f.endsWith('.mjs') && !f.startsWith('_'))
+	.filter((f) => f.endsWith('.mjs'))
 	.map((f) => `test/${f}`)
 	.filter((f) => !SKIP.has(f));
 

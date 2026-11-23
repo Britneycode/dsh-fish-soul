@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { Readable } from 'node:stream';
 import { registerRoutes } from '../lib/routes.js';
+import { LifeEngine } from '../lib/life.js';
 
 const NOW = 1700000000000;
 
@@ -29,13 +30,17 @@ function makeHarness(personaOverride) {
 		);
 	`);
 
-	const life = {
-		lastAnyInteractionVirtualMs: 111,
-		lastAnyInteractionRealMs: 222,
-		noteCalls: 0,
-		noteInteraction() { life.noteCalls += 1; },
-		stateSnapshot() { return { today: { dailyMoodTone: '慵懒' }, clock: {}, proactiveConfig: {} }; },
-	};
+	const life = Object.create(LifeEngine.prototype);
+	life.clock = { now: () => NOW };
+	life.lastInteractionVirtualMs = new Map();
+	life.lastAnyInteractionVirtualMs = 111;
+	life.lastAnyInteractionRealMs = 222;
+	life.dreamControllers = new Map();
+	life.log = () => {};
+	life.noteCalls = [];
+	const _note = life.noteInteraction.bind(life);
+	life.noteInteraction = (ownerId) => { life.noteCalls.push(ownerId); _note(ownerId); };
+	life.stateSnapshot = () => ({ today: { dailyMoodTone: '慵懒' }, clock: {}, proactiveConfig: {} });
 
 	const persona = personaOverride ?? { name: 'feiyu', anchor: '锚', routine: '日常', staticText: '鱼鱼是软软的一小只。'.repeat(40) };
 
@@ -145,9 +150,15 @@ function makeHarness(personaOverride) {
 	assert.equal(payload.interaction.type, 'click');
 	assert.equal(payload.interaction.at, NOW);
 	assert.equal(payload.interaction.memoryId, null);
-	assert.equal(h.life.noteCalls, 1);
+	assert.equal(h.life.noteCalls.length, 1);
+	assert.equal(h.life.noteCalls[0], 'user:master', 'noteInteraction 必须收到字符串 ownerId（审查 #08）');
+	assert.equal(typeof h.life.noteCalls[0], 'string', '传对象会让 Dream abort 失效 + Map 垃圾键');
+	// Dream abort：主人的 Dream 整理应被新互动打断
+	h.life.dreamControllers.set('user:master', { abort() { this.aborted = true; } });
+	await h.call('POST', '/life/interaction', { type: 'click', petId: 'main' });
+	assert.equal(h.life.dreamControllers.has('user:master'), false, '新互动必须 abort 主人的 Dream');
 	const master = h.db.prepare("SELECT * FROM person WHERE canonical_id = 'master'").get();
-	assert.equal(master.interaction_count, 89);
+	assert.equal(master.interaction_count, 90, '两次 click 各 +1');
 	assert.equal(master.last_seen_at, NOW);
 	const kv = JSON.parse(h.db.prepare("SELECT value FROM kv WHERE key = 'desktop.lastInteraction'").get().value);
 	assert.equal(kv.type, 'click');
@@ -177,6 +188,20 @@ function makeHarness(personaOverride) {
 	const { payload } = await h.call('POST', '/life/interaction', { type: 'voice', petId: 'main', text: '你好呀' });
 	const row = h.db.prepare('SELECT * FROM memory WHERE id = ?').get(payload.interaction.memoryId);
 	assert.equal(row.evidence, '桌面语音输入');
+}
+
+// POST /life/interaction：chat/voice 空文本不写记忆（与 remember / memorizeUnanswered 守卫一致）
+{
+	const h = makeHarness();
+	h.seedMaster(88);
+	const before = h.memoryCount();
+	const r1 = await h.call('POST', '/life/interaction', { type: 'chat', petId: 'main' });
+	assert.equal(r1.payload.interaction.memoryId, null, '空 chat 不应写记忆');
+	const r2 = await h.call('POST', '/life/interaction', { type: 'voice', petId: 'main', text: '' });
+	assert.equal(r2.payload.interaction.memoryId, null, '空 voice 不应写记忆');
+	assert.equal(h.memoryCount(), before, '空文本不得落库');
+	const master = h.db.prepare("SELECT interaction_count FROM person WHERE canonical_id = 'master'").get();
+	assert.equal(master.interaction_count, 90, '空文本仍然计互动次数');
 }
 
 // POST /life/interaction：文本超 500 截断

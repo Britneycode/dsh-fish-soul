@@ -483,6 +483,76 @@ export async function run(t) {
 	}
 	ok('#37 工具放行档位：默认只记忆+上网；master 只放开主人的私聊；all 全放开；run_code 始终拦；放开后新会话不再 restrict');
 
+	// 54c #169 附带设计点：抖音会话的宿主工具按「这一轮验出的身份」放行，不是建会话时一次定终身。
+	//   · master / all 档 + guard 装着 → 可见（restrict 的 allow 里有宿主工具，run_code 除外）
+	//   · 真正放行由 guard 每次调用当场用 douyinUinOf 比 masterQqUin；身份变了下一轮立刻收回
+	//   · memory 档、guard 没装、陌生人 —— 一律不放
+	{
+		const { createHash } = await import('node:crypto');
+		const gw = (await import('../lib/index.js')).testHooks.gateway;
+		const UID = '777000111';
+		const CH = 'douyin:来访者';
+		const convKey = `douyin.conv.${createHash('sha1').update('来访者').digest('hex').slice(0, 16)}`;
+		const setIdentity = (v) => (v === '' ? db.prepare('DELETE FROM kv WHERE key = ?').run(convKey) : db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(convKey, JSON.stringify({ identity: v })));
+
+		await call('POST', '/channels/douyin-config', { enabled: true, masterUid: `douyin:${UID}` });
+		const DS = 'douyin-169-open';
+		gw.bound.set(DS, { channel_id: CH });
+
+		// ① 身份验明是主人 + master 档 → 宿主工具放行，run_code 照旧拦
+		p = await call('POST', '/models/config', { sessionAllow: 'master' });
+		assert.equal(p.json.web.sessionAllow, 'master');
+		setIdentity(`douyin:${UID}`);
+		assert.equal(guard({ agent: { id: DS }, name: 'some_host_tool' }), undefined, '抖音主人会话（本轮验明）可用宿主工具');
+		assert.match(guard({ agent: { id: DS }, name: 'run_code' }), /不能运行代码/, 'run_code 仍然不放');
+		assert.equal(guard({ agent: { id: DS }, name: 'remember' }), undefined, '记忆工具照旧');
+
+		// ② 同一会话、下一轮身份证据变了（游标没了 / 变成别人）→ 立刻收回
+		setIdentity('');
+		assert.match(guard({ agent: { id: DS }, name: 'some_host_tool' }), /身份|不能用/, '身份证据没了就当轮收回');
+		setIdentity('douyin:888000222');
+		assert.match(guard({ agent: { id: DS }, name: 'some_host_tool' }), /身份|不能用/, '换成别人更不放');
+
+		// ③ all 档：陌生人仍不放（放宽的是「身份」，不是「档位」）
+		p = await call('POST', '/models/config', { sessionAllow: 'all' });
+		assert.equal(p.json.web.sessionAllow, 'all');
+		assert.match(guard({ agent: { id: DS }, name: 'some_host_tool' }), /身份|不能用/, 'all 档抖音陌生人不放');
+		setIdentity(`douyin:${UID}`);
+		assert.equal(guard({ agent: { id: DS }, name: 'some_host_tool' }), undefined, 'all 档验明主人也放');
+
+		// ④ memory 档：验明主人也不放（档位语义不变）
+		p = await call('POST', '/models/config', { sessionAllow: 'memory' });
+		assert.match(guard({ agent: { id: DS }, name: 'some_host_tool' }), /不能用/, 'memory 档不放');
+
+		// ⑤ 建会话时看得见 = 真有工具进 allow（不然 guard 永远等不到调用）；run_code 不进 allow
+		await call('POST', '/models/config', { sessionAllow: 'master' });
+		const calls = [];
+		const fakeGw = Object.assign(Object.create(gwMod.ChatGateway.prototype), {
+			ctx: { tools: { get: () => undefined, definitions: () => [{ name: 'shell_exec' }, { name: 'read_file' }, { name: 'run_code' }] } },
+			log: () => {}, voiceGuardReady: true, agentSections: () => {},
+			getConfig: () => ({ masterQqUin: '10001', tools: { sessionAllow: 'master' } })
+		});
+		await fakeGw.setupAgent({ tools: { restrict: (f) => calls.push(f) } }, CH);
+		assert.equal(calls.length, 1, '抖音会话仍然 restrict（不是整个放开）');
+		assert.ok(calls[0].allow.includes('shell_exec'), 'restrict 的 allow 里要看得见宿主工具');
+		assert.ok(!calls[0].allow.includes('run_code'), 'run_code 永不进 allow');
+		// guard 没装：不能只靠 restrict 一层兜宿主工具
+		const calls2 = [];
+		const noGuard = Object.assign(Object.create(gwMod.ChatGateway.prototype), {
+			ctx: { tools: { get: () => undefined, definitions: () => [{ name: 'shell_exec' }] } },
+			log: () => {}, voiceGuardReady: false, agentSections: () => {},
+			getConfig: () => ({ masterQqUin: '10001', tools: { sessionAllow: 'master' } })
+		});
+		await noGuard.setupAgent({ tools: { restrict: (f) => calls2.push(f) } }, CH);
+		assert.ok(!calls2[0].allow.includes('shell_exec'), 'guard 没装就不放宽');
+
+		await call('POST', '/models/config', { sessionAllow: 'memory' });
+		await call('POST', '/channels/douyin-config', { enabled: false, masterUid: '' });
+		db.prepare('DELETE FROM kv WHERE key = ?').run(convKey);
+		gw.bound.delete(DS);
+	}
+	ok('#169 抖音会话宿主工具按轮验身份：master/all 档验明主人才放；run_code 始终拦；身份变/陌生/memory 档一律收回');
+
 	// 55 路由：模型 / 用量 / 单价、语音、表情包、学说法、首次引导
 	{
 		const streams = [];

@@ -575,6 +575,12 @@ mkdirSync(join(home, 'other-ws', '_stickers'), { recursive: true });
 writeFileSync(join(home, 'other-ws', '_stickers', 'ok.png'), png);
 writeFileSync(join(home, 'other-ws', '_stickers', 'wow.webp'), webp1);
 writeFileSync(join(home, 'secret.png'), png);
+// 时间观念接线：先给这条聊天种一句「5 小时前」的对方发言 —— beginTurn 必须在
+// journal.add 之前取 lastSpokeAt，否则读到的永远是「刚刚」。这句不推进 followups 计数。
+{
+  const { testHooks: th0 } = await import('../lib/index.js');
+  th0.soul.journal.add('private:10001', { who: '主人', text: '（探针）五小时前那句', at: Date.now() - 5 * 3600_000 });
+}
 const nowSec = () => Math.floor(Date.now() / 1000);
 conn.push({ post_type: 'message', message_type: 'private', sub_type: 'friend', user_id: 10001, message_id: 501, sender: { nickname: '主人' }, message: [{ type: 'text', data: { text: '我想喝冰美式' } }] });
 const f1 = await waitFor(() => host.followups[0]);
@@ -592,25 +598,42 @@ assert.equal(host.created[0].meta.cwd, wsDir);
 	assert.equal(section.text(at('main-session')), '', '同一个世界里的宿主会话仍然拿不到');
 	ok('#41 人格卡 / 瞬态块 per-agent 挂在自家会话上，宿主会话照旧干净');
 }
-assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'send_elsewhere', 'relay_to_friend', 'web_search', 'web_fetch', 'fish_search'] }); // #26 联网工具不筛；relay_to_friend = 熟人传话（默认关）
+assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'send_elsewhere', 'relay_to_friend', 'make_douyin_video', 'web_search', 'web_fetch', 'fish_search'] }); // #26 联网工具不筛；relay_to_friend = 熟人传话（默认关）
 assert.equal(f1.msg.source.kind, 'fish-soul/qq');
 assert.match(f1.msg.content[0].text, /我想喝冰美式/);
 assert.match(host.titles[0][1], /QQ·主人（主人）/);
 const qqBlock = context.text(at(sid1));
 assert.match(qqBlock, /QQ 回复规则/); assert.match(qqBlock, /ok\.png/); assert.match(qqBlock, /冰美式/);
+// 时间观念：这一行要能读出「周几」（以前只有日期和时刻，问「今天周几」只能靠猜）
+assert.match(qqBlock, /虚拟时间 (\d{4}-\d{2}-\d{2}) [\d:]+（周[一二三四五六日]）/, '此刻状态要带星期');
+{
+	const m = /虚拟时间 (\d{4}-\d{2}-\d{2}) [\d:]+（(周[一二三四五六日])）/.exec(qqBlock);
+	assert.ok(m !== null, '星期和日期要在同一行');
+	const expect = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(m[1] + 'T00:00:00Z').getUTCDay()];
+	assert.equal(m[2], expect, '星期必须和日期对得上（算错一天会被抓到）');
+}
+assert.match(qqBlock, /距上次说话 5 小时/, "要报出距上次说话多久（种进去的那句是 5 小时前）");
 const turn = (id, text, msg) => {
 	handlers['session/event']({ id }, { type: 'user/message', data: msg });
 	handlers['session/event']({ id }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text }] } } });
 	handlers['session/event']({ id }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
 };
 turn(sid1, '好嘞\n\n给你点一杯 ![ok](_stickers/ok.png) ![偷](../../secret.png)', f1.msg);
-await waitFor(() => ob.sends.length >= 2);
-assert.equal(ob.sends.length, 2);
+// #161：图现在**一张一条**单独发（以前是并进最后那条文字的段数组 ⇒ QQ 上「文字带着图」一个气泡）。
+// 所以这里是三条：两条文字 + 一张图。
+await waitFor(() => ob.sends.length >= 3);
+assert.equal(ob.sends.length, 3, '两条文字 + 一张图，各发一条');
 assert.equal(ob.sends[0].params.user_id, 10001);
 assert.equal(ob.sends[0].params.message[0].data.text, '好嘞');
-const imgs = ob.sends[1].params.message.filter((x) => x.type === 'image');
-assert.equal(imgs.length, 1, '工作区外的图不能发出去');
+assert.equal(ob.sends[1].params.message[0].data.text, '给你点一杯');
+// 图那条消息里只有图，没有文字（图文混在一条里正是 #161 要治的）
+const imgMsg = ob.sends[2].params.message;
+assert.equal(imgMsg.length, 1, '图单独一条消息，不和文字混');
+const imgs = imgMsg.filter((x) => x.type === 'image');
+assert.equal(imgs.length, 1, '工作区外的图不能发出去（../../secret.png 要被拒掉）');
 assert.match(imgs[0].data.file, /^base64:\/\//);
+// 老契约回归：文字那条不许再夹着图
+assert.equal(ob.sends[0].params.message.filter((x) => x.type === 'image').length, 0, '文字消息里不该夹图');
 ok('好友私聊：自动建会话（专用工作区、工具收窄）→ 回复按段发回，贴纸变真图，工作区外的图被拒');
 
 // 13 用户在界面里自己打字的轮次不往 QQ 发；[不回] 不发
@@ -620,6 +643,27 @@ turn(sid1, '[不回]', f1.msg);
 await sleep(400);
 assert.equal(ob.sends.length, before);
 ok('只有 QQ / 主动触发的轮次才外发；[不回] 不发');
+
+// 12b 熟人传话：从**工具入口**走一遍，认人要真的把会话换成平台 uid。
+//
+// 为什么单独立这一条：test/relay-to-friend.mjs 直接调 gateway.relayToFriend(fromId, ...)，
+// fromId 是测试自己传的 —— 工具到网关之间那层「从会话反查 uid」从来没被测过。
+// 0.18.7~0.18.11 那里写成 relaySenderId(db, session)（多传一个 db，session 位置被顶掉），
+// 函数恒返回空串，白名单里的人传话一律回「认不出你是谁」，而 16 组断言全绿。
+{
+	const saved = await call('POST', '/relay/config', { enabled: true, allowList: ['qq:10001', 'qq:20002'], perDay: 10 });
+	assert.equal(saved.json.ok, true, '传话配置要能存进去：' + saved.json.error);
+	const sentBefore = ob.sends.length;
+	const r = await tools.relay_to_friend.execute({ to: '20002', platform: 'qq', text: '明天的会推迟到下午' }, at(sid1));
+	assert.doesNotMatch(r, /认不出你是谁/, '白名单里的私聊发起人不能被当成认不出（参数错位 bug 的症状）');
+	assert.match(r, /带到了/, '要真的带过去，实际：' + r);
+	const relayed = ob.sends.slice(sentBefore).find((x) => x.action === 'send_private_msg' && x.params.user_id === 20002);
+	assert.ok(relayed, '要真发到收件人那个 QQ 号上');
+	assert.match(relayed.params.message[0].data.text, /托我带句话/, '收件人要看得出这是转达、不是她自己的话');
+	ok('12b 传话走工具入口：会话 → 平台 uid 认得出来，白名单放行并真的发出去');
+	// 还原：后面的用例依赖「传话默认关」
+	await call('POST', '/relay/config', { enabled: false, allowList: [], perDay: 5 });
+}
 
 // 14 陌生人临时会话：不回，但记下这个人
 conn.push({ post_type: 'message', message_type: 'private', sub_type: 'group', user_id: 55555, message_id: 601, sender: { nickname: '路人' }, message: [{ type: 'text', data: { text: '在吗加个好友' } }] });

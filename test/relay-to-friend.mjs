@@ -261,4 +261,25 @@ const ok = (msg) => { console.log('  ✓ ' + msg); };
 	}
 }
 
+// ── 接线：传话必须真的走到 channel.send（用 assertWire 剪断验证） ──
+// 这条守的是「relayToFriend 收到白名单检查通过后，真的调了发送」——
+// 如果谁把发送那行删掉/改成别的写法，剪断 channel.send 时结果不会变，这条就红。
+{
+	const { assertWire } = await import('./_wire.mjs');
+	cfg.relay.enabled = true;
+	cfg.relay.allowList = ['qq:10001', 'qq:10002'];
+	cfg.relay.perDay = 999;
+	const before = calls.length;
+	const r = await assertWire({
+		run: async () => { calls.length = 0; const x = await gw.relayToFriend('qq:10001', 'qq:10002', '接线验证'); return { x, calls: [...calls] }; },
+		target: () => gw.channel,
+		method: 'send',
+		pick: (o) => o.calls.length,
+		why: '传话必须真的调 channel.send 才发得出去'
+	});
+	assert.ok(r.wired > 0, '正常路径调了 send');
+	assert.equal(r.cut, 0, '剪断 channel.send 后一条都没发出去（说明那行真的在起作用）');
+	ok('接线：relayToFriend 真的调 channel.send');
+}
+
 console.log('relay-to-friend: all assertions passed');

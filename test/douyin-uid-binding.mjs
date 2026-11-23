@@ -65,26 +65,36 @@ const msg = (extra = {}) => ({
 	ok('没有会话 ID → 返回 null（不退回昵称，也不信单条 senderId）');
 }
 
-// ── ③ 群聊现状（有昵称就用昵称；与私信策略不同，如实记下来）──
+// ── ③ 群聊也按身份键认人（2026-11-19 契约变更：跟私信对齐）──
+//
+//    以前群用**昵称**（'群友'）当 userId —— 跟私信那套「会话身份」策略不同，
+//    当时是「如实记下现状」。现在改了，理由跟私信那次一样：
+//      ① 昵称可改名、可同名冒充，认出「是谁」不该靠它；
+//      ② 网关的群消息入口按 isIdentityKey（`douyin:<数字uid>`）判身份，
+//         昵称过不了 ⇒ 群里每条消息都被「群成员身份未确认」拒掉，一条都回不了
+//         （真机 2026-11-19：抖音私信功能有问题 + 还有消息没回）。
+//    昵称仍然留在 `nickname` 里只作展示。
 {
 	const n = normalizeDouyinMessage(msg({ senderId: '123456789', senderName: '群友' }), {
 		name: '某个群', timeMs: Date.now(), messageId: 'm3',
 		group: true, members: { '123456789': '群友' }
 	});
-	assert.equal(n.userId, '群友', '群聊有昵称时用昵称');
+	assert.equal(n.userId, 'douyin:123456789', '群聊也用身份键认人（昵称只作展示）');
+	assert.equal(n.nickname, '群友', '昵称留在 nickname 里');
 	assert.match(n.channelId, /^douyin-group:/, '群聊 channelId 是 douyin-group:');
 
 	const n2 = normalizeDouyinMessage(msg({ senderId: '123456789' }), {
 		name: '某个群', timeMs: Date.now(), messageId: 'm4',
 		group: true, members: {}
 	});
-	assert.equal(n2.userId, 'uid:123456789', '群聊没有昵称时退回 uid:<id>');
+	assert.equal(n2.userId, 'douyin:123456789', '群聊没有昵称也用身份键（senderId 认人，昵称只是显示）');
+	assert.equal(n2.nickname, '群友6789', '没有昵称时给个占位显示名');
 
-	// ⚠️ 已知不一致：群聊「有昵称→用昵称」，私信「用会话身份」。
-	//    后果：同一个人在群里和私信里会分成两条 person 行。
-	//    这是**故意保留的**：群聊那条路的语义是「按人分开攒话」，
-	//    贸然改会让现有群的发言记录全部对不上人。留给后续单独处理。
-	ok('群聊：有昵称用昵称、无昵称退回 uid:<id>（与私信策略不同，已知且有意）');
+	// ✅ 2026-11-19：群聊跟私信**统一**了（以前群用昵称、私信用会话身份，
+	//    同一个人在两边会分成两条 person 行 —— 这个不一致已经没有了）。
+	//    理由：昵称可改名、可同名冒充；而且昵称过不了网关的 isIdentityKey，
+	//    群里每条消息都会被「群成员身份未确认」拒掉，一条都回不了。
+	ok('群聊：按身份键认人（跟私信一致，同一个人不再分成两条 person 行）');
 }
 
 // ── ④ 改名后仍是同一个人（核心收益）──

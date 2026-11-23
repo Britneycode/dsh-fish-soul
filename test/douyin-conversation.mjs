@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {
 	parseSingleConversation, isSingleConversation, peerUidFromConversation,
-	soleConversationId, conversationIdentity, isPeerMessage, senderBelongsToConversation
+	soleConversationId, soleSingleConversationId, conversationIdentity, isPeerMessage, senderBelongsToConversation
 } from '../lib/douyin-conversation.js';
 
 const ME = '7000000000000000001';
@@ -64,3 +64,25 @@ assert.equal(senderBelongsToConversation({ convId: '', senderId: PEER }, [ME]), 
 assert.equal(senderBelongsToConversation({ convId: `0:1:${ME}:${PEER}`, senderId: '' }, [ME]), false, '没有发送者');
 
 console.log('✓ 抖音会话身份：会话 ID 解析 / 推对端 / 唯一性 / 稳定键 / 发送者自洽');
+
+
+// #169：兜底「唯一单聊」必须把群挡在外面 —— 否则读群会话被误判成主人私聊
+// （面板里只抓到主人的单聊时，读群/陌生人的会话会被 resolveConvId 兜底成主人那条 convId）
+{
+	const single = { convId: '0:1:111:222', convType: 1 };
+	const group = { convId: '700:123:456', convType: 2 };
+	assert.equal(soleSingleConversationId([single]).id, '0:1:111:222', '只有单聊：给唯一 id');
+	assert.equal(soleSingleConversationId([single, group]).id, '', '群混入时不能给兜底 id');
+	assert.equal(soleSingleConversationId([group]).id, '', '只有群时不能给兜底 id');
+	assert.ok(soleSingleConversationId([group]).groupLike, '群要被标出来');
+	assert.equal(soleSingleConversationId([{ convId: '0:1:111:222' }, { convId: '0:1:111:333' }]).id, '', '两个单聊不猜');
+	assert.equal(soleSingleConversationId([{ convId: '0:2:999:888:777' }]).id, '', '0:2: 群形状不给兜底');
+	// 🔴 真机形状：群消息的 convId 接口不一定回填（解出来是空），只有 convType=2。
+	//    先判群再判空，否则这种群会被 `id==='' continue` 漏掉，groupLike 置不上，
+	//    和单聊混在一起时兜底会错配到那个单聊（= 主人 convId）。
+	const groupNoId = { convId: '', convType: 2 };
+	assert.equal(soleSingleConversationId([groupNoId]).id, '', '只有「空 convId 的群」不给兜底');
+	assert.ok(soleSingleConversationId([groupNoId]).groupLike, '空 convId 的群也要被标成群');
+	assert.equal(soleSingleConversationId([single, groupNoId]).id, '', '单聊 + 空 convId 的群混在一起：不能把单聊当唯一证据');
+	console.log('✓ #169 兜底「唯一单聊」把群挡在外面');
+}

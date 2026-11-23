@@ -145,7 +145,8 @@ function makeChannel(driverFor) {
 	const adapter = readFileSync(new URL('../lib/douyin-adapter.js', import.meta.url), 'utf8');
 	assert.match(adapter, /delivered: false, parts: \[\]/, 'sendDouyin 要有结构化的失败返回');
 	const media = readFileSync(new URL('../lib/gateway-media.js', import.meta.url), 'utf8');
-	assert.match(media, /async sendDouyin\(row, text, images = \[\], convId = ''\) \{\s*return await adapterOf\(this\)\.send\(/,
+	// 签名允许带可选参数（deliveryScope：内联卡片的账本作用域），但「实现走适配器」这条不变。
+	assert.match(media, /async sendDouyin\(row, text, images = \[\], convId = ''[^)]*\) \{\s*return await adapterOf\(this\)\.send\(/,
 		'sendDouyin 仍要留在 mediaMethods 上（旧调用方不能改），但实现走适配器');
 	// 契约变更（2026-11-10）：不再是「一律不发」，而是「没有目标会话 ID 就不发」。
 	// 真实防线是 sendDouyin 里那条会话 ID 校验（DouyinChannel.send 还会再挡一道）。

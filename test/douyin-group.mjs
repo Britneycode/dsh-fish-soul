@@ -21,8 +21,15 @@ assert.deepEqual(groupSender({ senderName: ' 阿三 ', senderId: '123456' }), { 
 assert.deepEqual(groupSender({ senderId: '123456' }, { 123456: '阿三' }), { userId: '阿三', nickname: '阿三' });
 assert.deepEqual(groupSender({ senderId: '123456' }), { userId: 'uid:123456', nickname: '群友3456' });
 assert.deepEqual(groupSender({}), { userId: '', nickname: '' });
-const g = normalizeDouyinMessage({ text: '你好', senderName: '阿三' }, { name: '爬山群', timeMs: 1, messageId: 'm1', group: true });
-assert.deepEqual([g.chatType, g.channelId, g.targetId, g.groupId, g.userId, g.nickname, g.mentioned], ['group', 'douyin-group:爬山群', '爬山群', '爬山群', '阿三', '阿三', false]);
+const g = normalizeDouyinMessage({ text: '你好', senderName: '阿三', senderId: '123456' }, { name: '爬山群', timeMs: 1, messageId: 'm1', group: true });
+// 🔴 契约变更（2026-11-19）：群消息的 userId 也用身份键（跟私信对齐）。
+//
+//    以前群用**昵称**（'阿三'）当 userId —— 跟 2026-11-10「私信不用昵称」那次变更
+//    是同一个道理：昵称可改名、可同名冒充，认出「是谁」不该靠它；而且网关的群消息
+//    入口按 isIdentityKey（`douyin:<数字uid>`）判身份，昵称过不了 ⇒ 群里每条消息
+//    都被「群成员身份未确认」拒掉，一条都回不了（真机：抖音私信功能有问题）。
+//    昵称仍然留在 `nickname` 里只作展示。
+assert.deepEqual([g.chatType, g.channelId, g.targetId, g.groupId, g.userId, g.nickname, g.mentioned], ['group', 'douyin-group:爬山群', '爬山群', '爬山群', 'douyin:123456', '阿三', false]);
 assert.equal(normalizeDouyinMessage({ text: '你好' }, { name: '爬山群', timeMs: 1, messageId: 'm1', group: true }), null, '认不出是谁说的不当成群本身');
 // 🔴 契约变更（2026-11-10）：私信的 userId 不再用昵称。
 //

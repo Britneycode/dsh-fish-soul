@@ -38,10 +38,10 @@ const bytes = (id, b) => Buffer.concat([v(id * 8 + 2), v(b.length), b])
  * 一条消息节点：#1 会话 ID、#6 kind、#7 发送者 uid、#8 正文 JSON、#10 时间、
  * #17 序号；#9 里带 sender_nickname 时解出来才有昵称。
  */
-function node({ convId = CONV_ID, senderId = PEER, kind = 7, seq = '1', time = 1700000000000, payload = { text: '在吗' }, senderName = '' }) {
+function node({ convId = CONV_ID, senderId = PEER, kind = 7, seq = '1', time = 1700000000000, payload = { text: '在吗' }, senderName = '', convType = 1 }) {
   const parts = [
     bytes(1, Buffer.from(convId)),
-    field(2, 1),
+    field(2, convType),
     field(6, kind),
     field(7, senderId),
     bytes(8, Buffer.from(JSON.stringify(payload))),
@@ -127,14 +127,14 @@ test('协议控制帧不算消息（#128 串会话根因）', () => {
   assert.equal(filterUseful([real]).length, 1, '真文本消息必须留下')
 })
 
-test('接口消息不带昵称时，用唯一会话 ID 兜底', async () => {
+test('接口消息不带昵称时，昵称匹配不上就拒绝（#169 删盲兜底）', async () => {
   const b = fakeBrowser([capture([node({ payload: { text: '在吗' } })])])
-  assert.equal(await resolveConvId(b, UNAME), CONV_ID, 'senderName 为空也要能定出会话')
+  assert.equal(await resolveConvId(b, UNAME), '', 'senderName 为空、昵称对不上时必须返回空——唯一会话 ID 兜底已被 #169 删除（不看昵称的兜底会串会话）')
 })
 
-test('只发过媒体的会话，也能定出会话 ID', async () => {
+test('只发过媒体的会话，昵称对不上同样拒绝（媒体消息的 senderName 也常为空）', async () => {
   const b = fakeBrowser([capture([node({ kind: 11, payload: { uri: 'https://example.invalid/a.jpg' } })])])
-  assert.equal(await resolveConvId(b, UNAME), CONV_ID)
+  assert.equal(await resolveConvId(b, UNAME), '', '媒体会话靠昵称定不出身份时返回空，走「拿不到身份」路径')
 })
 
 test('昵称对得上时，用昵称匹配到的那个会话', async () => {
@@ -151,6 +151,38 @@ test('多个会话混在一起时不能猜', async () => {
     capture([node({ convId: OTHER_CONV_ID })]),
   ])
   assert.equal(await resolveConvId(b, UNAME), '', '会话 ID 不唯一时必须当作拿不到')
+})
+
+// ── ④ #169 P0：兜底只认「唯一**单聊**」，群不许被当成会话身份的证据 ──
+//
+// 真机症状：`resolveConvId` 的 `sole.size === 1` 兜底把「面板里唯一抓到的会话」当成目标。
+// 读群/陌生人会话时，面板里唯一抓到的往往是主人那条**单聊**（或那个群本身），
+// 于是群消息被错配到主人的单聊 convId ⇒ 同一条消息按主人私聊入库（记忆记错人、回复发错窗口）。
+const GROUP_CONV_ID = '0:2:7300'
+
+test('#169 面板里只有一个群（convType=2）时不许兜底成会话 ID', async () => {
+  const b = fakeBrowser([capture([node({ convId: GROUP_CONV_ID, convType: 2, payload: { text: '群里说话' } })])])
+  assert.equal(await resolveConvId(b, UNAME), '', '群不是单聊形状，兜底必须空')
+})
+
+test('#169 群和单聊混在同一份响应里时不许兜底', async () => {
+  // 单聊那条本来能兜底出 CONV_ID，但同批里有群 ⇒ 不唯一/不纯，必须空
+  const b = fakeBrowser([capture([
+    node({ convId: CONV_ID, payload: { text: '私聊' } }),
+    node({ convId: GROUP_CONV_ID, convType: 2, payload: { text: '群里' } }),
+  ])])
+  assert.equal(await resolveConvId(b, UNAME), '', '有群混入时不能把单聊当成唯一证据')
+})
+
+test('#169 昵称对得上群里的发送者时，仍不许把群兜底成单聊 convId', async () => {
+  // 即使 senderName 命中了 want，群会话也不是单聊 —— found 同样只收单聊，必须空
+  const b = fakeBrowser([capture([node({ convId: GROUP_CONV_ID, convType: 2, senderName: UNAME, payload: { text: '是我' } })])])
+  assert.equal(await resolveConvId(b, UNAME), '', '群里的同名发送者不能把群错配成单聊')
+})
+
+test('#169 纯单聊（无群）但昵称对不上：同样不许兜底', async () => {
+  const b = fakeBrowser([capture([node({ convId: CONV_ID, payload: { text: '在吗' } })])])
+  assert.equal(await resolveConvId(b, UNAME), '', '昵称对不上时单聊也不许兜底——「唯一单聊」不看昵称，正是串会话根源')
 })
 
 // ── ③ 推送路的帧过滤也必须用同一套判据 ──
@@ -220,6 +252,84 @@ test('shapeResult 的 fromMe 保留三态（null 不能压成 false）', async (
     !/fromMe: m\.fromMe === true,\n\s+system:/.test(src),
     '不能再退回把 null 压成 false 的旧写法',
   )
+})
+
+// ── ⑥ #169 P0：跨会话错配的完整根因链 ──
+//
+// 真机症状：主人、叔叔、群三个会话共用同一个主人 convId。两条路径各中一招：
+//
+//   ① 首读毒化：首次接触（无 expectConvId）时，hook 缓冲里躺着**上一轮读别的会话**
+//      （比如主人）留下的响应。readDMViaApi 第①步 apiDrain 把它倒出来，
+//      pickMessages(convId='') 只要求「响应内部唯一会话」——主人那条完全合格
+//      ⇒ 直接当成本轮结果返回 ⇒ 叔叔的收件箱从第一条起就被灌进主人的消息，
+//      游标还被钉死到主人 convId。
+//   ② 盲兜底错配：resolveConvId 的 sole.size===1 兜底不看 uname、不限时间窗，
+//      缓冲里只有主人单聊时，读「叔叔」也返回主人 convId。
+//
+// 修法：首次接触只信「本次读取动作之后」触发的响应；盲兜底整个删掉，
+// 昵称匹配不上就返回 ''（宁可拒绝，不猜）。
+const MASTER_CONV_ID = '0:1:100001:999999'
+
+/** 首读场景的假浏览器：hook 缓冲里躺着主人那条遗留响应，CDP 侧没有新响应 */
+function leftoverBrowser(captures) {
+  return {
+    // 面板/导航：模拟「已在抖音页面、面板开着、会话列表里没有目标」——
+    // step④ 走完 enterChat 拿不到新证据，本轮必须以失败收场（而不是拿遗留顶包）
+    goto: async () => {},
+    eval: async (script) => {
+      if (script.includes('__dyIM.drain()')) return captures
+      if (script.includes('__dyIM')) return true
+      if (script.includes('localStorage')) return { secUid: '', nickname: '' }
+      if (script.includes('location.href')) return 'https://www.douyin.com/jingxuan'
+      if (script.includes('conversation-item')) return []
+      return null
+    },
+    imResponses: () => [],
+    responseBody: async () => { throw new Error('none') },
+  }
+}
+
+test('#169 首次接触时，hook 缓冲里别的会话的遗留响应不能当成本轮结果', async () => {
+  const { readDMViaApi } = await import('../lib/channels/vendor/douyin-bridge/douyin-dm.mjs')
+  const { clearCache } = await import('../lib/channels/vendor/douyin-bridge/douyin-api.mjs')
+  clearCache()
+  // 上一轮读主人留下的响应还在 hook 缓冲里；现在首次读「叔叔」（无 expectConvId）
+  const b = leftoverBrowser([capture([node({ convId: MASTER_CONV_ID, payload: { text: '主人的话' } })])])
+  const r = await readDMViaApi({ browser: b, uname: '叔叔', limit: 30 })
+  assert.equal(r.ok, false, '首读叔叔绝不能把主人那条遗留响应当成本轮结果（串会话）')
+  assert.notEqual(r.convId, MASTER_CONV_ID, 'convId 绝不能是主人的会话')
+  clearCache()
+})
+
+test('#169 缓冲里只有别的单聊时，盲兜底不许把它的 convId 错配给目标昵称', async () => {
+  // 接口消息不带 senderName（常态），昵称匹配不上；缓冲里唯一单聊是主人那条。
+  // 旧实现的 sole.size===1 兜底会把主人 convId 返回给「叔叔」⇒ 串会话。
+  const b = fakeBrowser([capture([node({ convId: MASTER_CONV_ID, payload: { text: '在吗' } })])])
+  assert.equal(await resolveConvId(b, '叔叔'), '', '昵称对不上时必须返回空，不许拿别的单聊顶包')
+})
+
+test('#169 发送快路径：给了 since 就只能认这个时间点之后的响应', async () => {
+  // 发送路径 enterChat 之后调 resolveConvId(name, since)。缓冲里躺着主人那条
+  // 遗留响应（since 之前），带 since 时必须完全看不到它 —— 否则会把主人 convId
+  // 报成「当前打开的会话」，发错窗口。
+  const stale = capture([node({ convId: MASTER_CONV_ID, senderName: '叔叔', payload: { text: '旧' } })])
+  let captured = 0
+  const b = {
+    imResponses: () => [],
+    responseBody: async () => { throw new Error('none') },
+    eval: async (script) => {
+      if (script.includes('__dyIM.drain()')) return stale
+      if (script.includes('__dyIM')) return true
+      if (script.includes('localStorage')) return { secUid: '', nickname: '' }
+      return null
+    },
+    // CDP 侧：since > 0 时返回空（本次进会话没触发新响应）
+    imResponsesWithSince: (since) => { captured = since; return [] },
+  }
+  // captureImBodies 走的是 browser.imResponses(pattern, since)
+  b.imResponses = (pattern, since) => { captured = since ?? 0; return [] }
+  assert.equal(await resolveConvId(b, '叔叔', 42), '', '带 since 时不许采信缓冲里的遗留响应')
+  assert.equal(captured, 42, 'since 要原样传给 CDP 查询（不能悄悄退回 0）')
 })
 
 test('注入筛选只认明确的 fromMe === false（未知不注入）', async () => {

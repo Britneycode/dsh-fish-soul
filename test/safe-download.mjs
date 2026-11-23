@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
-import { createSafeDownload, publicIPv4 } from '../lib/safe-download.js';
+import { createSafeDownload, createSafeDownloadStream, publicIPv4 } from '../lib/safe-download.js';
 import { fetchImageBytes } from '../lib/gateway-util.js';
 import { VoiceService } from '../lib/voice.js';
 
@@ -31,6 +31,7 @@ test('公开 IPv4 才可连接：私网、环回、保留网段和 IPv6 全拒�
 test('DNS 重绑定防护：固定已验证 IP，保留 TLS 服务器名与 Host', async () => {
  let n=0;const f=fixture({answers:()=>{n++;return [{address:n===1?'8.8.8.8':'127.0.0.1',family:4}]}});
  assert.equal((await get(f)).toString(),'abcd');assert.equal(n,1);assert.equal(f.seen[0].opts.hostname,'8.8.8.8');assert.equal(f.seen[0].opts.servername,'cdn.example');assert.equal(f.seen[0].opts.headers.host,'cdn.example');
+ assert.equal(f.seen[0].opts.headers.servername,undefined,'servername 只用于 TLS SNI，不该进 HTTP 头');
  const dual=fixture({answers:[{address:'2606:4700:4700::1111',family:6},{address:'8.8.8.8',family:4}]});assert.equal((await get(dual)).toString(),'abcd');
  const only6=fixture({answers:[{address:'2606:4700:4700::1111',family:6}]});assert.equal(await get(only6),null);
 });
@@ -97,4 +98,59 @@ test('真实 TLS：验证原始域名和信任链，错误证书拒绝', async (
   assert.equal(await make(false)('https://cdn.test/file',{maxBytes:5}),null,'不信任的证书必须拒绝');
   assert.equal(seen.length,1,'握手失败不能到达应用');
  } finally {server.closeAllConnections();await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});}
+});
+
+test('safeDownloadStream：跨站 302 剥离鉴权、Host 防覆盖、IPv4 字面量不带 SNI、超限立即断流', async () => {
+ const seen = [];
+ const responses = [
+  { status: 302, headers: { location: 'https://other.example/step2' }, body: [] },
+  { status: 302, headers: { location: 'https://cdn.example/back' }, body: [] },
+  { status: 200, body: ['ok'] }
+ ];
+ let destroyedTooBig = false;
+ const stream = createSafeDownloadStream({
+  lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+  request: (url, opts, cb) => {
+   seen.push({ url: url.href, opts });
+   const req = new EventEmitter();
+   req.end = () => queueMicrotask(() => {
+    const next = responses.shift();
+    if (!next) return req.emit('error', Error('unexpected request'));
+    const res = Readable.from((next.body ?? []).map((x) => Buffer.from(x)));
+    res.statusCode = next.status;
+    res.headers = next.headers ?? {};
+    const origDestroy = res.destroy.bind(res);
+    res.destroy = () => { if (next.trackDestroy) destroyedTooBig = true; return origDestroy(); };
+    cb(res);
+   });
+   return req;
+  }
+ });
+
+ const dl = await stream('https://cdn.example/start', { maxBytes: 16, headers: { Authorization: 'Bearer k1', Host: 'evil.example' } });
+ assert.ok(dl);
+ assert.equal(seen[0].opts.headers.authorization, 'Bearer k1', '首跳同源保留 Authorization');
+ assert.equal(seen[0].opts.headers.host, 'cdn.example', '调用方 Host 头不能覆盖目标 url.host');
+ assert.equal(seen[1].opts.headers.authorization, undefined, '跨站 302 后必须剥离 Authorization');
+ assert.equal(seen[2].opts.headers.authorization, undefined, '跨站后再跳回原站也不能恢复凭据');
+ const chunks = [];
+ for await (const c of dl.body) chunks.push(c);
+ assert.equal(Buffer.concat(chunks).toString(), 'ok');
+
+ // 同源重定向保留鉴权 + IPv4 字面量不设 servername
+ seen.length = 0;
+ responses.push(
+  { status: 302, headers: { location: 'https://1.2.3.4/final' }, body: [] },
+  { status: 200, body: ['ok'] }
+ );
+ const dlSame = await stream('https://1.2.3.4/step1', { maxBytes: 16, headers: { Authorization: 'Bearer k2' } });
+ assert.ok(dlSame);
+ for await (const _ of dlSame.body) { /* drain */ }
+ assert.equal(seen[0].opts.servername, undefined, 'IP 字面量不应设置 TLS servername（DEP0123）');
+ assert.equal(seen[1].opts.headers.authorization, 'Bearer k2', '同源跳转应保留 Authorization');
+
+ // Content-Length 超限：立即 destroy 响应流并抛 ERR_TOO_LARGE
+ responses.push({ status: 200, headers: { 'content-length': '999' }, body: ['x'], trackDestroy: true });
+ await assert.rejects(() => stream('https://cdn.example/big', { maxBytes: 16 }), (e) => e?.code === 'ERR_TOO_LARGE');
+ assert.equal(destroyedTooBig, true, '声明超限时必须立刻销毁底层响应流');
 });

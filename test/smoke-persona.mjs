@@ -437,6 +437,11 @@ export async function run(t) {
 	// 113 推理模型把额度全花在思考上返回空：放大额度重试一次，并记住这个模型以后直接给大额度
 	{
 		const { LlmRouter } = await import('../lib/llm.js');
+		// 🔴 #181：roomy 名单现在落 kv（跨实例/重启保留，这正是要修的行为）。
+		//    smoke 是合集、共享同一个 db，前面的子套件可能已经把「宿主默认」写进
+		//    名单，于是这里第一枪就会直接 8000。先清成干净起点，才能测到
+		//    「1200 → 8000」的放大过程；后面的 r2 断言仍然验证「落库后新实例直接 8000」。
+		setKv(db, 'llm.roomy', []);
 		const asks = [];
 		const r = new LlmRouter({ ctx: { get: (n) => (n === 'llm' ? { listProviders: () => [], async *stream(o) { asks.push(o.maxTokens); if (o.maxTokens >= 8000) yield { type: 'text-delta', text: '{"ok":1}' }; } } : undefined) }, db, getConfig: () => ({}) });
 		assert.equal(await r.call('x', { maxTokens: 1200, feature: 'extract' }), '{"ok":1}');
@@ -446,7 +451,9 @@ export async function run(t) {
 		const asks2 = [];
 		const r2 = new LlmRouter({ ctx: { get: (n) => (n === 'llm' ? { listProviders: () => [], async *stream(o) { asks2.push(o.maxTokens); } } : undefined) }, db, getConfig: () => ({}) });
 		assert.equal(await r2.call('z', { maxTokens: 600 }), null);
-		assert.deepEqual(asks2, [600, 8000], '大额度还是空就算了，不无限重试');
+		assert.deepEqual(asks2, [8000], '#181：名单已落库，重启后的新实例第一枪就直接给大额度（不再白烧一次 600）');
+		assert.equal(await r2.call('w', { maxTokens: 600 }), null);
+		assert.deepEqual(asks2, [8000, 8000], '大额度还是空就算了，不无限重试');
 
 		// DSH 协议：content 是内容块数组；finish { reason: { kind, failure } }；block-end 带整块
 		const seenOpts = [];
@@ -457,8 +464,11 @@ export async function run(t) {
 		const r4 = mk(function* () { yield { type: 'finish', reason: { kind: 'error', failure: { message: 'model not found', code: 'NOT_FOUND', status: 404 } } }; });
 		assert.equal(await r4.call('x'), null);
 		assert.match(r4.lastError, /model not found \[NOT_FOUND\]（HTTP 404）/, '宿主带内错误要说出来，不能当空回复');
+		// 🔴 #181：roomy 名单已落 kv，「宿主默认」这个 key 在前面的子套件里早被加进去了，
+		//    第一枪就直接 8000，测不到 600→8000 的放大过程。换一个**从未出现过**的模型名，
+		//    才能真的走到「空回复 → 记住 → 放大」这条路径。
 		const asks5 = [];
-		const r5 = mk(function* (o) { asks5.push(o.maxTokens); yield { type: 'finish', reason: { kind: 'error', failure: { message: 'empty', code: 'EMPTY_RESPONSE' } } }; });
+		const r5 = mk(function* (o) { asks5.push(o.maxTokens); yield { type: 'finish', reason: { kind: 'error', failure: { message: 'empty', code: 'EMPTY_RESPONSE' } } }; }, { providers: [{ id: 'pp', name: 'PP' }], host: { provider: 'pp', model: 'fresh-empty-model' } });
 		assert.equal(await r5.call('x', { maxTokens: 600 }), null);
 		assert.deepEqual(asks5, [600, 8000], 'EMPTY_RESPONSE 当空回复：放大额度重试');
 		assert.match(r5.lastError, /宿主判定为空回复/);

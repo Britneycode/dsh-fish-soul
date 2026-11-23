@@ -25,10 +25,7 @@ scripts/find-*.mjs
 scripts/diag-*.mjs
 scripts/dump-*.mjs
 scripts/check-mention-who.mjs
-# 抖音私信真机探针（含真实会话 ID / uid，不进仓库）
-# ⚠️ 用通配而不是逐个列：主人会不断新建探针脚本，逐个列永远追不上。
-#    gitignore 对**已跟踪**的文件无效 ⇒ 已进仓库的 scripts/probe-per-agent*.mjs 不受影响。
-scripts/probe-*.mjs
+# 其他本机临时探针脚本
 scripts/_watch-live.mjs
 scripts/_livecheck*.mjs
 .alma-snapshots

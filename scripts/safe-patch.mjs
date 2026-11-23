@@ -14,7 +14,7 @@
  * 替换后自动跑 node --check（如果是 .js/.mjs 文件）。
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 const [,, ...args] = process.argv;
 
@@ -29,7 +29,7 @@ if (args[0] === '--check') {
 	const file = args[1];
 	if (!file) { console.error('缺文件名'); process.exit(1); }
 	try {
-		execSync(`node --check "${file}"`, { stdio: 'pipe' });
+		execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
 		console.log(`✓ ${file} 语法检查通过`);
 	} catch {
 		console.error(`✗ ${file} 语法检查失败`);
@@ -64,7 +64,7 @@ console.log(`✓ ${file} 替换完成（1 处）`);
 // 自动语法检查
 if (file.endsWith('.js') || file.endsWith('.mjs')) {
 	try {
-		execSync(`node --check "${file}"`, { stdio: 'pipe' });
+		execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
 		console.log(`✓ ${file} 语法检查通过`);
 	} catch {
 		console.error(`✗ ${file} 替换后语法检查失败——请立即检查`);

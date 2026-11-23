@@ -110,7 +110,8 @@ function makeHarness(personaOverride) {
 	assert.equal(payload.master.displayName, '主人');
 	assert.equal(payload.master.relationStage, 'close');
 	assert.equal(payload.master.interactionCount, 88);
-	assert.equal(payload.lastInteractionAt, 111);
+	assert.equal(payload.lastInteractionVirtualAt, 111);
+	assert.equal(payload.lastInteractionAt, 111, '旧字段保留兼容');
 	assert.equal(payload.lastInteractionRealAt, 222);
 	assert.equal(payload.memories.length, 1);
 	assert.equal(payload.memories[0].content, '这条是活跃记忆');
@@ -139,7 +140,7 @@ function makeHarness(personaOverride) {
 	assert.equal(payload.persona.routine, '');
 }
 
-// POST /life/interaction click：计数 +1、时间更新、写 kv、不写记忆
+// POST /life/interaction click：不计数（只 chat/voice 计）、时间更新、写 kv、不写记忆
 {
 	const h = makeHarness();
 	h.seedMaster(88);
@@ -158,7 +159,7 @@ function makeHarness(personaOverride) {
 	await h.call('POST', '/life/interaction', { type: 'click', petId: 'main' });
 	assert.equal(h.life.dreamControllers.has('user:master'), false, '新互动必须 abort 主人的 Dream');
 	const master = h.db.prepare("SELECT * FROM person WHERE canonical_id = 'master'").get();
-	assert.equal(master.interaction_count, 90, '两次 click 各 +1');
+	assert.equal(master.interaction_count, 88, 'click 不计 interaction_count（只有 chat/voice 计）');
 	assert.equal(master.last_seen_at, NOW);
 	const kv = JSON.parse(h.db.prepare("SELECT value FROM kv WHERE key = 'desktop.lastInteraction'").get().value);
 	assert.equal(kv.type, 'click');

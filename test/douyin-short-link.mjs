@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 
 import { resolveDouyinShortLink } from '../lib/douyin-short-link.js';
 import { DouyinAdapter } from '../lib/douyin-adapter.js';
+import { DouyinBrowser } from '../lib/douyin-browse.js';
 
 const ok = (m) => console.log('✓', m);
 
@@ -109,6 +110,67 @@ const ok = (m) => console.log('✓', m);
 	assert.equal(cards.length, 0, '拿不到作品 ID 就不发卡片');
 	assert.deepEqual(texts, [link], '🔴 链接要原样发文字，不能丢');
 	ok('解析失败：退回文字，链接不丢');
+}
+
+// ── 7. 🔴 SSRF 防护：非抖音域名 / 非 HTTPS / 内网与回环地址一律拒发请求 ──
+{
+	const badInputs = [
+		'http://v.douyin.com/abc',
+		'http://127.0.0.1:8080/video/7707911549709601777',
+		'http://169.254.169.254/latest/meta-data',
+		'https://v.douyin.com@127.0.0.1/abc',
+		'https://v.douyin.com.evil.com/video/7707911549709601777',
+		'https://v.douyin.com:8443/abc',
+		'https://evil.com/video/7707911549709601777',
+	];
+	let calls = 0;
+	for (const url of badInputs) {
+		const r = await resolveDouyinShortLink(url, {
+			fetchImpl: async () => { calls++; return { headers: { get: () => 'https://www.douyin.com/video/7707911549709601777' } }; },
+		});
+		assert.equal(r, '', `非法入口应直接拒绝: ${url}`);
+	}
+	assert.equal(calls, 0, '非法入口不得发起任何网络请求');
+	ok('SSRF 防护：非法初始地址拒发请求');
+}
+
+// ── 8. 🔴 SSRF 防护：恶意重定向不得跟跳或提 ID ──
+{
+	const evilLocations = [
+		'http://127.0.0.1:8080/video/7707911549709601777',
+		'http://169.254.169.254/a',
+		'https://evil.com/video/7707911549709601777',
+	];
+	for (const loc of evilLocations) {
+		const visited = [];
+		const r = await resolveDouyinShortLink('https://v.douyin.com/abc', {
+			fetchImpl: async (u) => {
+				visited.push(u);
+				return { headers: { get: () => loc } };
+			},
+		});
+		assert.equal(r, '', `恶意重定向应拦截: ${loc}`);
+		assert.equal(visited.length, 1, '命中非法 Location 后不得继续下一跳');
+	}
+	ok('SSRF 防护：恶意重定向全部拦截');
+}
+
+// ── 9. DouyinBrowser.resolveShort 收口复用 resolveDouyinShortLink ──
+{
+	const visited = [];
+	const fakeBrowser = {
+		fetch: async (u) => {
+			visited.push(u);
+			if (u.endsWith('/ok')) return { headers: { get: () => 'https://www.iesdouyin.com/share/note/7707911549709601777/' } };
+			return { headers: { get: () => 'http://127.0.0.1:8080/x' } };
+		},
+	};
+	const id = await DouyinBrowser.prototype.resolveShort.call(fakeBrowser, 'https://v.douyin.com/ok');
+	assert.equal(id, '7707911549709601777', 'DouyinBrowser.resolveShort 应正确解析 iesdouyin note');
+	const blocked = await DouyinBrowser.prototype.resolveShort.call(fakeBrowser, 'https://v.douyin.com/evil');
+	assert.equal(blocked, '', 'DouyinBrowser.resolveShort 也必须拦截内网重定向');
+	assert.equal(visited.length, 2, '各只发起 1 次合法请求，拦截后不发第二跳');
+	ok('DouyinBrowser.resolveShort：收口复用且受 SSRF 守卫保护');
 }
 
 console.log('抖音短链发卡片：测试全部通过');

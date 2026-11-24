@@ -181,6 +181,34 @@ export async function run(t) {
 		setKv(db, 'bili.comments.cursor', { time: 0 });
 		r = await social.pollComments();
 		assert.equal(db.prepare("SELECT status FROM social_reply WHERE notify_id = '7'").get().status, 'stale');
+
+		// 回评论长度跟着 comments.replyChars 走（#193）：以前固定截在 120，设置页填的值不生效。
+		// 走真实 pollComments（不是只测 cleanSocialText 纯函数——那个本来按参数工作）。
+		{
+			const long = '字'.repeat(150);
+			const sentMessage = () => {
+				const last = reqs.filter((x) => x.path === '/x/v2/reply/add').at(-1);
+				return Object.fromEntries(new URLSearchParams(last.init.body)).message;
+			};
+			cfg.comments.perHour = 10;
+			cfg.comments.replyChars = 160;
+			llmOut = long;
+			setKv(db, 'bili.comments.cursor', { time: nowS - 1 });
+			fs.feed = [item(8, 555, '路人甲', '说长一点', nowS)];
+			const r160 = await social.pollComments();
+			assert.equal(r160.replied, 1, 'replyChars=160 回了一条');
+			assert.equal(sentMessage(), long, 'replyChars=160：150 字不被固定 120 截断');
+
+			cfg.comments.replyChars = 40;
+			setKv(db, 'bili.comments.cursor', { time: nowS });
+			fs.feed = [item(9, 555, '路人甲', '再长一点', nowS + 1)];
+			const r40 = await social.pollComments();
+			assert.equal(r40.replied, 1, 'replyChars=40 回了一条');
+			assert.equal(sentMessage().length, 40, 'replyChars=40：按配置截到 40');
+			assert.ok(sentMessage().startsWith('字'.repeat(39)), '截断保留开头');
+			cfg.comments.perHour = 2;
+			cfg.comments.replyChars = undefined;
+		}
 	}
 	ok('回评论：第一次不回旧的 / 自己的不回 / [不回] / 每小时上限 / 楼中楼 / 认识的人 / 失败记下 / 不重复 / 太旧不回');
 

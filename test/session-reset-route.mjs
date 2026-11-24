@@ -116,6 +116,8 @@ assert.equal(oldDbRow?.status, 'retired', '旧会话应标成 retired');
 const newDbRow = findChatSession(db, 'qq', 'private:30001');
 assert.equal(newDbRow?.session_id, okRes.json.sessionId, '新会话应成为 active');
 assert.equal(newDbRow?.workspace_path, customWs, '重置后的新会话应沿用原工作区');
+// 2026-11-23 用户反馈：换新会话后题头变了。resetSession 必须沿用旧标题，不让 chatTitle 重算。
+assert.equal(newDbRow?.title, beforeRow.title, '换新会话应沿用旧标题');
 ok('合法 channelId 退役旧会话并新建同工作区会话');
 
 console.log('session-reset-route ok');

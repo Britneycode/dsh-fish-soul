@@ -109,6 +109,20 @@ test('群聊反例：无 senderId 的纯文本仍被拒，不借单聊这条放�
   } finally { db.close(); }
 });
 
+test('放行只针对文本：单聊里无 senderId 的非文本不走这条，仍由既有媒体分支处理', async () => {
+  // 非文本（语音 / 图片 / 表情）无 senderId 时，由上面既有的媒体分支放行，不借本 PR 这条文本放行。
+  // 这条用例钉住「文本放行」的作用范围：把它扩到非文本也不会改变这里的入库结果。
+  const { db, ch } = world({ read: async () => ({ ok: true, convId: CONV, messages: [
+    { fromMe: false, type: 'voice', text: '', time: T0, media: { seconds: 3 } },
+  ], needsPageRead: true }) });
+  try {
+    await ch.readConversation(readArgs('dom-nontext'));
+    const rows = db.prepare("SELECT payload FROM douyin_inbox WHERE channel_id='douyin:测试联系人'").all();
+    assert.equal(rows.length, 1, '非文本无 sender 由既有媒体分支放行，行为与本 PR 无关');
+    assert.equal(JSON.parse(rows[0].payload).userId, `douyin:${PEER}`);
+  } finally { db.close(); }
+});
+
 test('群聊里连昵称都没有的无 sender 文本也不入库', async () => {
   const { db, ch } = world({ groupNames: ['测试群'], read: async () => ({ ok: true, convId: GROUP_CONV, messages: [domMsg('完全认不出是谁', { senderName: '' })], needsPageRead: true }) });
   try {

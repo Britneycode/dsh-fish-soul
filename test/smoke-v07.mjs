@@ -570,8 +570,11 @@ export async function run(t) {
 			p = await call('GET', '/models/state');
 			assert.equal(p.json.ok, true);
 			assert.deepEqual(p.json.providers, [{ id: 'ds', name: 'DeepSeek', models: [{ id: 'ds-chat', name: 'V3' }, { id: 'ds-r1', name: 'R1' }] }]);
-			assert.deepEqual(p.json.features.map((f) => f.id), ['dream', 'extract', 'schedule', 'browse', 'social', 'import', 'slang', 'diary', 'mood', 'other']);
+			// 契约变更（2026-11-24 识图模型）：FEATURES 新增 vision，排在 other 前。
+			assert.deepEqual(p.json.features.map((f) => f.id), ['dream', 'extract', 'schedule', 'browse', 'social', 'import', 'slang', 'diary', 'mood', 'vision', 'other']);
 			assert.deepEqual(p.json.features[6].resolved, { provider: 'ds', model: 'ds-chat', from: 'host' });
+			// vision 的语义是「不配 = 不启用」，不是「跟 DSH 默认」：没配时 resolved 必须是 null，面板才不会显示「现在用 ds-chat」
+			assert.equal(p.json.features[9].resolved, null, 'vision 没配时 resolved 要是 null（不启用），不能回落到宿主默认');
 			assert.deepEqual(p.json.hostDefault, { provider: 'ds', model: 'ds-chat' });
 			p = await call('POST', '/models/config', { models: { slang: { provider: 'ds', model: 'ds-r1' }, dream: { provider: '', model: 'x' } }, prices: { 'ds-r1': { in: 4, out: '16' }, '': { in: 1 } } });
 			assert.equal(p.json.ok, true);

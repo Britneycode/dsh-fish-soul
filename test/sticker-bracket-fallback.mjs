@@ -1,5 +1,5 @@
-// [表情:xx] 兜底：模型自己造的格式，库里有的换成真图发，没有的剥掉。
-// 红验证：删掉 gateway 里 兜底表情包 的调用 → 「走 sendReply」那条红；删掉函数体 → 纯函数那几条红。
+// [表情:xx] 兜底：模型自己造的格式，库里有的换成真图发，没有的保留原样，让主人看到她本来想发什么。
+// 红验证：把兜底表情包 的未命中分支改回返回空串 → 「保留」那几条红；删掉 gateway 里 兜底表情包 的调用 → 「走 sendReply」那条红。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -57,17 +57,23 @@ test('匹配到 → 换成 ![名](_stickers/文件)', () => {
 	assert.equal(out, '好耶 ![兔子OK](_stickers/兔子OK.gif)', '匹配到要换成真图');
 });
 
-// ── 2. 纯函数：匹配不到 → 剥掉，不发文字 ──
-test('匹配不到 → 剥掉', () => {
+// ── 2. 纯函数：匹配不到 → 保留原样，不静默丢掉（#189） ──
+test('匹配不到 → 保留原样', () => {
 	const files = ['兔子OK.gif'];
 	const out = 兜底表情包('好耶 [表情:比耶开心]', files);
-	assert.equal(out, '好耶 ', '库里没有就剥掉');
+	assert.equal(out, '好耶 [表情:比耶开心]', '库里没有就原样留着');
 });
 
-// ── 3. 纯函数：空贴纸列表 → 全部剥掉 ──
-test('空列表 → 剥掉', () => {
+// ── 3. 纯函数：空贴纸列表 → 全部保留 ──
+test('空列表 → 保留原样', () => {
 	const out = 兜底表情包('好耶 [表情:兔子OK]', []);
-	assert.equal(out, '好耶 ', '空列表也剥掉');
+	assert.equal(out, '好耶 [表情:兔子OK]', '空列表也原样留着');
+});
+
+// ── 3b. 纯函数：空名 [表情:] 也保留（#189：空名同样让主人看到） ──
+test('空名 [表情:] → 保留原样', () => {
+	const out = 兜底表情包('好耶 [表情:] 再见', ['兔子OK.gif']);
+	assert.equal(out, '好耶 [表情:] 再见', '空名也原样留着');
 });
 
 // ── 4. 纯函数：不含 [表情: → 原样返回 ──
@@ -106,8 +112,8 @@ test('走 sendReply：[表情:兔子OK] 变成真图，不是文字', async () =
 	assert.equal(sent[1].segs[0].type, 'image', '第二条是图');
 });
 
-// ── 7. 接线：库里没有的名字 → 剥掉，不发文字 ──
-test('走 sendReply：[表情:不存在] 剥掉，不发文字', async () => {
+// ── 7. 接线：库里没有的名字 → 原样当文字发出去，主人看得到她本来想发什么（#189） ──
+test('走 sendReply：[表情:不存在] 原样发出，不被静默剥掉', async () => {
 	const ws = join(process.env.DSH_HOME, 'ws-send2');
 	mkdirSync(join(ws, '_stickers'), { recursive: true });
 	writeFileSync(join(ws, '_stickers', '兔子OK.gif'), 'GIF89a');
@@ -122,7 +128,7 @@ test('走 sendReply：[表情:不存在] 剥掉，不发文字', async () => {
 
 	assert.equal(sent.length, 1, `应该只发 1 条（纯文字），实际 ${sent.length}`);
 	assert.equal(sent[0].segs[0].type, 'text', '第一条是文字');
-	assert.equal(sent[0].segs[0].data.text, '好耶', '文字部分干净，没有 [表情: 残留');
+	assert.equal(sent[0].segs[0].data.text, '好耶 [表情:不存在]', '库里没有的名字原样留着，主人看得到');
 });
 
 // ── 8. 接线（assertWire 形式）：剪断 listStickers，[表情:兔子OK] 就发不出图 ──

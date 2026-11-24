@@ -134,7 +134,7 @@ function navButtons() {
 	return found;
 }
 function clickNav(label) {
-	const button = navButtons().find((node) => node.props['aria-label'] === label);
+	const button = navButtons().find((node) => node.props['aria-label'] === label || node.children.includes(label));
 	assert(button, `应渲染导航按钮「${label}」`);
 	button.props.onClick();
 	main.flush();
@@ -154,4 +154,9 @@ assert(cleared.has(clock.id), '离开主动开口时应清理原虚拟时钟 int
 assert.equal(activeClockTimers().length, 0, '离开主动开口后不应残留虚拟时钟 interval');
 main.unmount();
 tabs.unmount();
-console.log('✓ 生活页虚拟时钟：子页切入时启动，切出时清理');
+clickNav('主动开口');
+const guideClock = activeClockTimers()[0];
+clickNav('使用引导');
+assert(cleared.has(guideClock.id), '从主动开口进入使用引导时应清理时钟 interval');
+assert.equal(activeClockTimers().length, 0, '使用引导页不应残留时钟 interval');
+console.log('✓ 生活页虚拟时钟：子页切入时启动，切出或进入引导时清理');

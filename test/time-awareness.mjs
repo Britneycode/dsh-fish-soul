@@ -83,4 +83,43 @@ ok('idleLabel：分 / 小时 / 天，30 分钟内静默');
 	ok('Journal.lastSpokeAt：没说过话返回 0');
 }
 
+// ── 5. #196：关掉日程后，基调和日程整段都不该再注入 ──
+{
+	const off = stateLineText({
+		virtualIsoLocal: '2026-11-23 23:08:00', weekday: '周一', tone: '平静', slot: null, scheduleEnabled: false
+	});
+	assert.equal(off, '[此刻状态] 虚拟时间 2026-11-23 23:08:00（周一）', `关掉日程后只剩时间，实际：${off}`);
+	assert.ok(!off.includes('基调'), '不该再有基调');
+	assert.ok(!off.includes('今天没排日程'), '不该再有「今天没排日程」');
+
+	// 关掉时即使 slot 还在（快照里有），也不能漏出来
+	const offSlot = stateLineText({
+		virtualIsoLocal: '2026-11-23 23:08:00', weekday: '周一', tone: '平静',
+		slot: { range: '22:00-24:00', availability: 'idle', activity: '刷视频' }, scheduleEnabled: false
+	});
+	assert.ok(!offSlot.includes('时段'), '关掉日程后时段也不能出现');
+	assert.ok(!offSlot.includes('刷视频'), '关掉日程后活动内容也不能出现');
+
+	// 默认不传 = 开（旧调用方行为不变）
+	const def = stateLineText({ virtualIsoLocal: '2026-11-23 23:08:00', weekday: '周一', tone: '平静', slot: null });
+	assert.ok(def.includes('基调 平静') && def.includes('今天没排日程'), '不传 scheduleEnabled 保持旧行为');
+
+	// 关掉时 idle 仍要保留（它跟日程无关，是「距上次说话」）
+	const offIdle = stateLineText({
+		virtualIsoLocal: '2026-11-23 23:08:00', weekday: '周一', idleMs: 3 * 3600_000, scheduleEnabled: false
+	});
+	assert.ok(offIdle.includes('距上次说话 3 小时'), '关掉日程不影响 idle 提示');
+	ok('stateLineText：#196 关掉日程后基调/时段/没排日程整段不注入，idle 不受影响');
+}
+
+// ── 6. #196 接线：index.js 的 stateLine 必须把 life.scheduleEnabled() 传进去 ──
+// 只测纯函数不够——函数写对了但没人传参，关掉日程照样注入。读源码断言参数确实接上。
+{
+	const { readFileSync } = await import('node:fs');
+	const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
+	assert.ok(/scheduleEnabled:\s*life\.scheduleEnabled\(\)/.test(src),
+		'index.js 的 stateLine 必须把 life.scheduleEnabled() 传给 stateLineText');
+	ok('#196 接线：stateLine 把 life.scheduleEnabled() 传进 stateLineText');
+}
+
 console.log('时间观念：测试全部通过');

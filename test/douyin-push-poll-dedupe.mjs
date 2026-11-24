@@ -102,6 +102,20 @@ function polledMessage({ text, at, seq = null }) {
 	return m;
 }
 
+test('接口形状的轮询消息也不能与推送重复入库', async () => {
+	reset();
+	seedCursor();
+	const at = Date.now() - 5_000;
+	const text = '接口路也只回一次';
+	const ch = makeChannel({ read: async () => ({ ok: true, convId: CONV, messages: [{ fromMe: false, senderId: PEER, convId: CONV, kind: 7, text, time: at }] }) });
+	ch.host.browser.events = [frameEvent(CONV, [text], { time: at })];
+	await ch.consumePushFrames();
+	await ch.drainInbox();
+	await readOnce(ch);
+	assert.equal(inboxIds().length, 1, '接口形状与推送形状必须命中同一个唯一键');
+	assert.deepEqual(ch.delivered.map((m) => m.text), [text]);
+});
+
 const inboxIds = () => db.prepare('SELECT message_id FROM douyin_inbox ORDER BY id').all().map((r) => r.message_id);
 const inboxTexts = () => db.prepare('SELECT payload FROM douyin_inbox ORDER BY id').all().map((r) => JSON.parse(r.payload).text);
 
@@ -163,6 +177,7 @@ test('同一条无 seq 消息：推送路与轮询路入库的 messageId 必须�
 
 	ch.host.browser.events = [frameEvent(CONV, [text], { time: at })];
 	await ch.consumePushFrames();
+	await ch.drainInbox();
 	const pushId = inboxIds()[0];
 
 	db.exec('DELETE FROM douyin_inbox'); // 只清收件箱、保留游标：让轮询路把它当新消息再算一次 ID
@@ -180,8 +195,12 @@ test('对方连发两句一样的话：两条都要入库（不能按内容一�
 	const at = Date.now() - 5_000;
 	const ch = makeChannel();
 
-	ch.host.browser.events = [frameEvent(CONV, ['在', '在'], { time: at })];
-	await ch.consumePushFrames();
+	ch.pushStats = { stored: 0 };
+	ch.storePushMessages({ name: NAME, convId: CONV, identity: `douyin:${PEER}`, messages: [
+		{ fromMe: false, senderId: PEER, convId: CONV, type: 'text', text: '在', time: at },
+		{ fromMe: false, senderId: PEER, convId: CONV, type: 'text', text: '在', time: at },
+	] });
+	await ch.drainInbox();
 
 	assert.deepEqual(inboxTexts(), ['在', '在'], `连发的两句必须都收到，实际 ${JSON.stringify(inboxTexts())}`);
 });

@@ -22,7 +22,11 @@ try {
  r=await s.post({force:true});assert.equal(r.ok,false);assert.equal(clicks,1,'手动强制也不能重发');
  s=make(); pending=s.postJobs.pending();assert.equal(pending.status,'unknown');
  assert.equal(s.resolvePost(pending.id,'published').ok,true);assert.equal(db.prepare("SELECT COUNT(*) n FROM social_post WHERE platform='douyin'").get().n,1);assert.equal(s.postState('2026-11-09').count,1);
+ // 核实「已发布」后她也该记得自己发过这条（2026-11-23 用户反馈：抖音私信没有发图文的记忆）
+ const mem=db.prepare("SELECT content,channel_id,evidence FROM memory WHERE channel_id LIKE 'douyin:post:manual-%'").get();
+ assert.ok(mem,'人工核实已发布后要写一条记忆');assert.match(mem.content,/我在抖音发了条图文：/);assert.equal(mem.evidence,'自己发的（人工核实）');
  assert.equal(s.resolvePost(pending.id,'published').ok,false,'不能重复记账');
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM memory WHERE channel_id LIKE 'douyin:post:manual-%'").get().n,1,'重复核实不能再写一条');
  mode='ok';r=await s.post({force:true});assert.equal(r.ok,true);assert.equal(clicks,2);assert.equal(db.prepare("SELECT COUNT(*) n FROM social_post WHERE platform='douyin'").get().n,2);
  driver.listRecommendedMusic=async()=>({ok:true,songs:['歌'],counts:{'歌':2}});
  seen=[];r=await s.post({force:true});assert.equal(r.ok,true,r.error);assert.equal(seen.at(-1),true,'同名歌要告诉发布去点第一张');assert.equal(clicks,3);

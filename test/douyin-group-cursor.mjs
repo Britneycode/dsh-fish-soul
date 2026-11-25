@@ -87,7 +87,7 @@ test('合法群游标（identity: group:<convId>）仍然钉住自己的 convId�
   } finally { db.close(); }
 });
 
-test('污染游标的 group 标记不会让随后读到的单聊 ID 被当成群', async () => {
+test('污染的群游标重新捕获到真正的群之后，游标仍然是群', async () => {
   const { db, ch } = world({ read: async () => ({ ok: true, convId: GROUP_CONV, messages: [] }) });
   try {
     setKv(db, 'douyin.conv.polluted', polluted());

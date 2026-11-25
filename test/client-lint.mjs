@@ -50,11 +50,11 @@ assert.match(narrow, /\.fs-tab\{flex:none\}/);
 assert.match(narrow, /grid-template-rows:auto minmax\(0,1fr\)/);
 console.log('  ✓ 窄容器：顶部导航吸顶、单行并可横向滚动');
 
-// 插件主题自包含，宿主浅色时覆盖；数值与进度条沿用统一规则。
-assert.match(css, /--bg-window:#0f1116;--bg-sidebar:#0b0d11;--bg-surface:#14171f;--bg-control:#0b0d12/);
-assert.match(css, /--border-hairline:rgba\(255,255,255,\.055\);--border-subtle:rgba\(255,255,255,\.095\)/);
+// 插件主题遵循宿主 --dsw-alias-* 令牌并提供暗/浅色兜底；数值与进度条沿用统一规则。
+assert.match(css, /--bg-window:var\(--dsw-alias-bg-module-platform,#0f1116\);--bg-sidebar:var\(--dsw-alias-bg-module-platform,#0b0d11\);--bg-surface:var\(--dsw-alias-bg-layer-1,#14171f\);--bg-control:var\(--dsw-alias-bg-layer-3,#0b0d12\)/);
+assert.match(css, /--border-hairline:var\(--dsw-alias-border-l2,rgba\(255,255,255,\.055\)\);--border-subtle:var\(--dsw-alias-border-l3,rgba\(255,255,255,\.095\)\)/);
 assert.match(css, /html\[data-ds-theme-source\] body:not\(\[data-ds-dark-theme\]\)/);
-assert.match(css, /--accent:#4d6bfe/);
+assert.match(css, /--accent:var\(--dsw-alias-state-business-primary,#4d6bfe\)/);
 assert.match(css, /\.fs-track\{[^}]*height:5px/);
 assert.match(css, /\.fs-row-meta\{[^}]*font-variant-numeric:tabular-nums/);
 assert.doesNotMatch(main, /desc && !tip \? h\("span", \{ className: "fs-row-desc"/);

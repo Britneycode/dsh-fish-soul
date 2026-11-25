@@ -21,7 +21,7 @@ const { openDatabase } = await import('../lib/db.js');
 const { registerRoutes } = await import('../lib/routes.js');
 const { LifeEngine } = await import('../lib/life.js');
 const { ChatGateway, CHAT_TOOLS } = await import('../lib/gateway.js');
-const { claimDueTasks, createScheduledTask, getScheduledTask, listScheduledTasks, taskToApi, updateScheduledTask } = await import('../lib/scheduled-tasks.js');
+const { claimDueTasks, createScheduledTask, deleteScheduledTask, formatLocalDateTime, getScheduledTask, listScheduledTasks, parseLocalDateTime, taskToApi, updateScheduledTask } = await import('../lib/scheduled-tasks.js');
 
 const db = openDatabase();
 
@@ -47,9 +47,14 @@ const cfg = {
 
 const delivered = [];
 let deliverOk = true;
+let onDeliver = null;
 const life = new LifeEngine({
 	db, clock, getConfig: () => cfg, callLlm: async () => null,
-	deliver: async (channelId, reason, meta) => { delivered.push({ channelId, reason, meta }); return deliverOk; }
+	deliver: async (channelId, reason, meta) => {
+		delivered.push({ channelId, reason, meta });
+		if (onDeliver !== null) await onDeliver(channelId, reason, meta);
+		return deliverOk;
+	}
 });
 
 const deps = {
@@ -249,6 +254,117 @@ const newTask = (over = {}) => ({
 	assert.equal(onceRow.status, 'completed', '仅一次的任务跑完就是完成了');
 	assert.equal(onceRow.enabled, 0, '跑完就关掉');
 	ok('失败退避重试 + 成功重排 + 不重复投递 + 仅一次跑完即完成');
+
+{
+	// A. 投递层必须自己查白名单 —— 面板建/改时虽然校验过，但任务落库后白名单可能收紧，
+	//    改库或未来新入口也可能写出非法 target。直接把库里的 target 改成不在白名单的值，
+	//    投递时必须被拦，不允许真发出去。
+	const bad = createScheduledTask(db, {
+		name: '坏目标', prompt: '别发', recurrence: 'interval', intervalMinutes: 20,
+		nextRunAt: REAL_NOW - 1000, dailyHhmm: null, target: 'private:10001'
+	}, { now: REAL_NOW - 1000 });
+	db.prepare("UPDATE scheduled_task SET target_channel_id = 'group:66666' WHERE id = ?").run(bad.id);
+	db.prepare('UPDATE scheduled_task SET status = ?, next_run_at = ? WHERE id = ?').run('active', REAL_NOW - 1, bad.id);
+	deliverOk = true;
+	delivered.length = 0;
+	await life.flushScheduledTasks();
+	assert.equal(delivered.length, 0, '目标不在白名单 → 一条都不能发出去');
+	const badRow = getScheduledTask(db, bad.id);
+	assert.ok(badRow.last_error.includes('不在白名单'), `要记下原因，实际：${badRow.last_error}`);
+	assert.equal(badRow.status, 'active', '拦住也不能直接完成，要走失败退避');
+	ok('投递层白名单：落库后目标被改成非法值也拦得住');
+
+	// B. 重排要按「投递完成的那一刻」算。模拟 deliver 耗时：认领时刻是 T，deliver 里把钟拨到 T+90s。
+	//     间隔 1 分钟的任务：若用认领时刻算，next = T+60s，而完成时刻 T+90s 已经过了它，
+	//     下一轮会立刻再跑。修复后按固定步长跳过已过去的槽位，next 严格晚于 T+90s 且保持步长对齐。
+	const slow = createScheduledTask(db, {
+		name: '慢投递', prompt: '慢慢发', recurrence: 'interval', intervalMinutes: 1,
+		nextRunAt: REAL_NOW - 1, dailyHhmm: null, target: 'private:10001'
+	}, { now: REAL_NOW - 1 });
+	db.prepare('UPDATE scheduled_task SET status = ?, next_run_at = ? WHERE id = ?').run('active', REAL_NOW - 1, slow.id);
+	const realNow = Date.now;
+	let doneAt = 0;
+	onDeliver = () => {
+		const t = realNow() + 90_000;
+		doneAt = t;
+		Date.now = () => t;
+	};
+	try {
+		delivered.length = 0;
+		await life.flushScheduledTasks();
+	} finally {
+		onDeliver = null;
+		Date.now = realNow;
+	}
+	const slowRow = getScheduledTask(db, slow.id);
+	assert.ok(doneAt > 0, 'deliver 要被走到');
+	assert.ok(slowRow.next_run_at > doneAt && slowRow.next_run_at <= doneAt + 60_000,
+		`下一次必须严格晚于投递完成时刻且对齐步长（(${doneAt}, ${doneAt + 60_000}]），实际 ${slowRow.next_run_at}`);
+	ok('重排用投递完成时刻：deliver 耗时压过下一个点也不会立刻重跑');
+
+	// C. 投递期间并发改表或删任务：不能用认领前快照把新排期覆写掉。
+	const editedStr = formatLocalDateTime(Date.now() + 10 * 60_000);
+	const editedAt = parseLocalDateTime(editedStr);
+
+	const concInterval = createScheduledTask(db, {
+		name: '并发改间隔', prompt: '跑', recurrence: 'interval', intervalMinutes: 20,
+		nextRunAt: REAL_NOW - 1, dailyHhmm: null, target: 'private:10001'
+	}, { now: REAL_NOW - 1 });
+	onDeliver = () => {
+		updateScheduledTask(db, concInterval.id, { at: editedStr }, { now: Date.now() });
+	};
+	try {
+		await life.flushScheduledTasks();
+	} finally {
+		onDeliver = null;
+	}
+	const concIntervalRow = getScheduledTask(db, concInterval.id);
+	assert.equal(concIntervalRow.status, 'active');
+	assert.equal(concIntervalRow.next_run_at, editedAt, '间隔任务投递期间被改期，完成写回不能用旧快照覆写');
+
+	const concOnce = createScheduledTask(db, {
+		name: '并发改单次', prompt: '跑', recurrence: 'once',
+		nextRunAt: REAL_NOW - 1, dailyHhmm: null, intervalMinutes: null, target: 'private:10001'
+	}, { now: REAL_NOW - 1 });
+	onDeliver = () => {
+		updateScheduledTask(db, concOnce.id, { at: editedStr }, { now: Date.now() });
+	};
+	try {
+		await life.flushScheduledTasks();
+	} finally {
+		onDeliver = null;
+	}
+	const concOnceRow = getScheduledTask(db, concOnce.id);
+	assert.equal(concOnceRow.status, 'active', '单次任务投递期间被改期，不能被旧快照标成 completed');
+	assert.equal(concOnceRow.enabled, 1);
+	assert.equal(concOnceRow.next_run_at, editedAt);
+
+	const concDel = createScheduledTask(db, {
+		name: '并发删除', prompt: '跑', recurrence: 'once',
+		nextRunAt: REAL_NOW - 1, dailyHhmm: null, intervalMinutes: null, target: 'private:10001'
+	}, { now: REAL_NOW - 1 });
+	onDeliver = () => {
+		deleteScheduledTask(db, concDel.id);
+	};
+	try {
+		await life.flushScheduledTasks();
+	} finally {
+		onDeliver = null;
+	}
+	assert.equal(getScheduledTask(db, concDel.id), undefined, '投递期间被删除的任务不能出错或被重新写回');
+	ok('投递期间并发改期 / 删除不被认领前快照覆写');
+
+	// D. 每天任务滞后超过 24 小时后投递完成，下一次必须跳到严格晚于当前的 HH:mm。
+	const overdueDaily = createScheduledTask(db, {
+		name: '滞后每日', prompt: '早安', recurrence: 'daily',
+		nextRunAt: REAL_NOW - 3 * 86_400_000, dailyHhmm: '09:30', intervalMinutes: null, target: 'private:10001'
+	}, { now: REAL_NOW - 3 * 86_400_000 });
+	await life.flushScheduledTasks();
+	const dailyDoneRow = getScheduledTask(db, overdueDaily.id);
+	assert.equal(dailyDoneRow.status, 'active');
+	assert.ok(dailyDoneRow.next_run_at > Date.now(), '滞后多日的 daily 任务重排后必须严格晚于现在');
+	ok('滞后多日的 daily 任务重排不会落回过去');
+}
 }
 
 // ───────────────────────── ⑤ 虚拟钟加速不该让任务提前跑 ─────────────────────────
@@ -324,15 +440,29 @@ const newTask = (over = {}) => ({
 		assert.ok(body.includes(`${key}:`), `update 工具要能改 ${key}`);
 	}
 
-	// 工具真的能改（走工具用的那个函数）
+	// 工具真的能改（走工具用的那个函数，且带 allowedTarget 边界）
 	const target = listScheduledTasks(db).find((t) => t.name === '盯服务器');
-	const res = updateScheduledTask(db, target.id, { name: '改了名', enabled: false }, { now: Date.now() });
+	const groupTask = createScheduledTask(db, {
+		name: '群任务', prompt: '群里好', recurrence: 'interval', intervalMinutes: 20,
+		nextRunAt: Date.now() + 600_000, dailyHhmm: null, target: 'group:88888'
+	}, { now: Date.now() });
+	const deniedGroup = updateScheduledTask(db, groupTask.id, { prompt: '篡改' }, { now: Date.now(), allowedTarget: 'private:10001' });
+	assert.equal(deniedGroup.ok, false, 'AI 工具边界必须拒绝修改发往群聊的任务');
+	assert.equal(getScheduledTask(db, groupTask.id).prompt, '群里好', '被拒后群任务提示词不能变动');
+
+	const deniedTarget = updateScheduledTask(db, target.id, { target: 'group:88888' }, { now: Date.now(), allowedTarget: 'private:10001' });
+	assert.equal(deniedTarget.ok, false, 'AI 工具边界不允许改发往的目标');
+	assert.equal(getScheduledTask(db, target.id).target_channel_id, 'private:10001');
+
+	const res = updateScheduledTask(db, target.id, { name: '改了名', enabled: false }, { now: Date.now(), allowedTarget: 'private:10001' });
 	assert.equal(res.ok, true, res.error);
 	assert.equal(getScheduledTask(db, target.id).name, '改了名');
 	assert.equal(getScheduledTask(db, target.id).enabled, 0, '关掉要真的关掉');
-	const again = updateScheduledTask(db, target.id, { prompt: '' }, { now: Date.now() });
+	const again = updateScheduledTask(db, target.id, { prompt: '' }, { now: Date.now(), allowedTarget: 'private:10001' });
 	assert.equal(again.ok, false, '空的提示词要被拒');
-	ok('AI 工具：能看能改，没有建 / 删');
+	assert.ok(body.includes('allowedTarget:') && body.includes('life.masterChannel('), 'index.js 必须把主人私聊目标传入 allowedTarget');
+	assert.ok(!body.includes("'target'"), 'index.js 的 update 字段白名单不能包含 target');
+	ok('AI 工具：能看能改主人私聊任务，不能改群任务 / 目标 / 建删');
 }
 
 // ───────────────────────── ⑨ 网关唤醒：定时任务那一轮给的是用户的指示 ─────────────────────────

@@ -267,7 +267,7 @@ ok('抖音评论桥：Node 侧调用（透传 / 异常不外抛 / 桥没装）')
 }
 
 {
-  // [表情:名字] 兜底：模型自己造的格式——库里有的换成真图发，没有的剥掉（跟 QQ 出站同一条兜底）
+  // [表情:名字] 兜底：模型自己造的格式——库里有的换成真图发，没有的原样保留（跟 QQ 出站同一条兜底，#189）
   const { DouyinSocial } = await import('../lib/douyin-social.js');
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const { tmpHome } = await import('./_tmp.mjs');
@@ -286,11 +286,11 @@ ok('抖音评论桥：Node 侧调用（透传 / 异常不外抛 / 桥没装）')
   assert.equal(r1.text.trim(), '哈哈', '[表情:xx] 从文字里换掉');
   assert.equal(r1.images.length, 1, '换成了一张真图');
   assert.ok(r1.images[0].bytes.equals(PNG2), '读的是文件本体');
-  // 库里没有：剥掉，不把方括号发到评论里
+  // 库里没有：原样保留，不静默剥掉（主人看得到她本来想发什么）
   const r2 = await social.replyImages('哈哈 [表情:比耶开心]');
-  assert.equal(r2.text.trim(), '哈哈', '库里没有就剥掉');
-  assert.equal(r2.images.length, 0, '剥掉就是没有图，不是发文字');
-  console.log('✓ [表情:名字] 兜底：库里有的换真图，没有的剥掉');
+  assert.equal(r2.text.trim(), '哈哈 [表情:比耶开心]', '库里没有就原样留着');
+  assert.equal(r2.images.length, 0, '没有图就是没有图');
+  console.log('✓ [表情:名字] 兜底：库里有的换真图，没有的原样保留');
 }
 
 {

@@ -84,7 +84,7 @@ assert.match(main, /hasUpdate: updateAvailable/);
 assert.match(main, /onUpdateState: setUpdateAvailable/);
 assert.match(css, /\.fs\.fs-standalone \.fs-side,\.fs\.fs-settings \.fs-side\{[^}]*position:sticky;top:0/);
 assert.match(main, /\["memory", "记忆", \[\["retrieval", "检索设置"\], \["people", "人物与关系"\], \["memories", "记忆内容"\], \["recall-test", "检索测试"\], \["weekly", "周记"\], \["archives", "记忆存档"\], \["backups", "导入与备份"\]\]\]/);
-assert.match(main, /\["daily", "日常", \[\["life", "主动开口"\], \["relay", "熟人传话"\], \["activity", "最近动态"\], \["diary", "日记"\], \["stickers", "表情包"\], \["slang", "学到的说法"\]\]\]/);
+assert.match(main, /\["daily", "日常", \[\["life", "主动开口"\], \["scheduled-tasks", "定时任务"\], \["relay", "熟人传话"\], \["activity", "最近动态"\], \["diary", "日记"\], \["stickers", "表情包"\], \["slang", "学到的说法"\]\]\]/);
 assert.match(main, /\["channels", "平台", \[\["qq", "QQ"\], \["bili", "B站"\], \["douyin", "抖音"\]\]\]/);
 assert.match(main, /remembered\.current/);
 console.log('  ✓ 两级导航：完整分类、吸顶、状态记忆和更新提示');

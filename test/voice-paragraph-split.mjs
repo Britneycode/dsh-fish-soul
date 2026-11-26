@@ -62,4 +62,32 @@ const ok = (name) => console.log('✓', name);
 	ok('行首空白后的 [语音] 也拆开');
 }
 
-console.log('voice-paragraph-split: 6 组全部通过');
+// ── ⑦ CRLF：单换行粘着的 [语音] 段也要能拆开（\r 夹在中间时下游 split(/\n{2,}/) 拆不开） ──
+{
+	const t = '前文。\r\n[语音] 想说的。';
+	const r = normalizeVoiceParagraphs(t);
+	const paras = r.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+	assert.equal(paras.length, 2, 'CRLF 下也要拆成两段');
+	assert.ok(paras[1].startsWith('[语音]'), '第二段是 [语音] 段');
+	assert.ok(!r.includes('\r'), '归一后不该残留 \\r');
+	ok('CRLF 单换行粘着的 [语音] 段也能拆开');
+}
+
+// ── ⑧ CRLF 已经是空行：不重复插入、不残留 \r ──
+{
+	const t = '前文。\r\n\r\n[语音] 想说的。';
+	const r = normalizeVoiceParagraphs(t);
+	const paras = r.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+	assert.equal(paras.length, 2, '已经空行隔开的两段');
+	assert.ok(!/\n{3,}/.test(r), '不该插入多余空行');
+	ok('CRLF 已空行隔开时不重复插入');
+}
+
+// ── ⑨ 没有 [语音] 的纯 CRLF 文本：一个字节都不动 ──
+{
+	const t = 'a\r\nb\r\nc';
+	assert.equal(normalizeVoiceParagraphs(t), t, '没有 [语音] 时不归一换行、完全不动');
+	ok('无 [语音] 的 CRLF 文本原样返回');
+}
+
+console.log('voice-paragraph-split: 9 组全部通过');

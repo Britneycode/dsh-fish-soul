@@ -90,4 +90,15 @@ const ok = (name) => console.log('✓', name);
 	ok('无 [语音] 的 CRLF 文本原样返回');
 }
 
-console.log('voice-paragraph-split: 9 组全部通过');
+
+// ── ⑩ 全角空格（U+3000）缩进：下游 VOICE_RE 用 \s 是认的，提纯也必须认 ──
+{
+	const t = '前文。\n\u3000\u3000[语音] 全角缩进的。';
+	const r = normalizeVoiceParagraphs(t);
+	const paras = r.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
+	assert.equal(paras.length, 2, '全角空格缩进的 [语音] 也要拆开（否则下游认得出却拆不开）');
+	assert.ok(paras[1].replace(/^\u3000+/, '').startsWith('[语音]'), '第二段是 [语音] 段');
+	ok('全角空格缩进的 [语音] 段也能拆开');
+}
+
+console.log('voice-paragraph-split: 10 组全部通过');

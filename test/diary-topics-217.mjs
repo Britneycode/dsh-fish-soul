@@ -90,7 +90,10 @@ test('prompt 真的把名单交给模型：出现昵称 + 「只能挑今天真�
 	await makeDiary(db, { onPrompt: (p) => { prompt = p; }, topics: [] }).tick({ force: true });
 
 	assert.match(prompt, /只能挑今天真的跟你说过话的这些人/);
-	assert.match(prompt, /- 真实昵称甲（主人）/);
+	// 契约变更（M2）：标注从名册行挪到行外 —— 行里带「（主人）」会被「原样照抄」照进去，
+	// who 变成「真实昵称甲（主人）」就永远对不上 display_name。这里断言新的正确形状。
+	assert.match(prompt, /^- 真实昵称甲$/m, '名册行是干净的名字');
+	assert.match(prompt, /上面第一个是你的主人/);
 	assert.match(prompt, /- 真实昵称乙/);
 	assert.match(prompt, /who 必须原样照抄上面的名字/, '要明确禁止编称呼');
 });
@@ -166,4 +169,103 @@ test('提示词里写的真是今天聊过的内容（材料没被改坏）', as
 	assert.match(prompt, /和真实昵称甲：聊了晚饭吃什么/);
 	assert.match(prompt, /今天想明白一件事/);
 	assert.match(prompt, /今天是 2026-11-24/);
+});
+
+// ── 独立审查抓出的四个问题（M1~M4），每条都配一条会变红的断言 ──
+
+test('M1 回归：master 行默认叫「主人」，主人今天没进小结时也不能把人丢掉', async () => {
+	const db = freshDb();
+	// ensureMasterPerson 建出的 master 行 display_name 就是「主人」（db.js:684）
+	db.prepare("DELETE FROM person WHERE canonical_id = 'master'").run();
+	db.prepare("INSERT INTO person (canonical_id, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master','主人','close',0,?,?)").run(NOW, NOW);
+	ins(db, 'user:p_abc', 'episode', '问了高数');   // 今天只有 p_abc 说过话，master 不在名单里
+
+	const r = await makeDiary(db, { topics: [{ who: '主人', topic: '想跟他说说话' }] }).tick({ force: true });
+	assert.equal(r.topics[0]?.ownerId, 'user:master', '「主人」必须能认，不能因为名单里没有就丢掉');
+	assert.deepEqual(makeDiary(db).topicsFor('user:master', NOW), ['想跟他说说话']);
+});
+
+test('M2：名册行里不带（主人）标注 —— 照抄整行也必须能认出', async () => {
+	const db = freshDb();
+	ins(db, 'user:master', 'episode', '聊了晚饭');
+
+	let prompt = '';
+	// 模型照抄整行（如果行尾有标注，who 就会带上它）
+	const r = await makeDiary(db, { onPrompt: (p) => { prompt = p; }, topics: [{ who: '真实昵称甲（主人）', topic: '想问他' }] }).tick({ force: true });
+
+	assert.match(prompt, /^- 真实昵称甲$/m, '名册行是干净的名字');
+	assert.doesNotMatch(prompt, /- 真实昵称甲（主人）/, '标注不能长在要照抄的那一行里');
+	assert.match(prompt, /上面第一个是你的主人/, '主人信息要另外说一句');
+	assert.equal(r.topics[0]?.ownerId, 'user:master', '照抄带括号注解也要能认');
+});
+
+test('M3：认不出的排在前面，也不能把合法的挤掉（配额在过滤之后）', async () => {
+	const db = freshDb();
+	ins(db, 'user:master', 'episode', '聊了晚饭');
+
+	const r = await makeDiary(db, {
+		topics: [
+			{ who: '某UP主', topic: '想问单片机' },
+			{ who: '楼下老板', topic: '想问进货' },
+			{ who: '路人丙', topic: '想问路' },
+			{ who: '主人', topic: '想跟他说说话' }   // 第 4 条，旧的 slice(0,3) 会把它砍掉
+		]
+	}).tick({ force: true });
+
+	assert.deepEqual(r.topics.map((t) => t.who), ['主人'], '合法的那条不能被 3 条垃圾挤掉');
+	assert.equal(r.topics.length, 1);
+});
+
+test('M3：仍然最多存 3 条（配额没被放大）', async () => {
+	const db = freshDb();
+	ins(db, 'user:master', 'episode', '聊了晚饭');
+	ins(db, 'user:p_abc', 'episode', '问了高数');
+
+	const r = await makeDiary(db, {
+		topics: Array.from({ length: 6 }, (_, i) => ({ who: i % 2 ? '主人' : '真实昵称乙', topic: `话题${i}` }))
+	}).tick({ force: true });
+	assert.equal(r.topics.length, 3, '上限还是 3 条');
+});
+
+test('M4：忙日 20 条群小结之后，晚间私聊小结仍在名册里（取最近 20 条，不是最早 20 条）', async () => {
+	const db = freshDb();
+	// 20 条白天的群小结（更早）
+	for (let i = 0; i < 20; i++) {
+		db.prepare(`INSERT INTO memory (character_id, owner_id, channel, channel_id, kind, content, keywords, importance, emotion, source_session, created_at, updated_at, status)
+		 VALUES ('feiyu','group:123456','qq','group:123456','episode',?,'',2,0,'',?,?,'active')`).run(`群聊第${i}段`, NOW - 3600_000 * 5 + i, NOW - 3600_000 * 5 + i);
+	}
+	// 晚间 22:00 的私聊小结（最晚）
+	db.prepare(`INSERT INTO memory (character_id, owner_id, channel, channel_id, kind, content, keywords, importance, emotion, source_session, created_at, updated_at, status)
+	 VALUES ('feiyu','user:master','qq','private:10001','episode','晚上聊了心事','',2,0,'',?,?,'active')`).run(NOW, NOW);
+
+	const mat = makeDiary(db).material('2026-11-24');
+	assert.ok(mat.people.some((p) => p.name === '真实昵称甲'), '晚间私聊的人必须在名册里');
+	assert.ok(!mat.people.some((p) => p.ownerId.startsWith('group:')), '群不进名册');
+});
+
+test('person 行不存在（LEFT JOIN 给 null）时，名册里不出现 null / undefined 名字', () => {
+	const db = freshDb();
+	// owner_id 是人形状但 person 表里没有这一行
+	db.prepare(`INSERT INTO memory (character_id, owner_id, channel, channel_id, kind, content, keywords, importance, emotion, source_session, created_at, updated_at, status)
+	 VALUES ('feiyu','user:ghost','qq','private:ghost','episode','幽灵聊过','',2,0,'',?,?,'active')`).run(NOW, NOW);
+	ins(db, 'user:master', 'episode', '聊了晚饭');
+
+	const mat = makeDiary(db).material('2026-11-24');
+	assert.ok(!mat.people.some((p) => !p.name), '没有 name 的条目不能进名册');
+	assert.deepEqual(mat.people.map((p) => p.name), ['真实昵称甲']);
+});
+
+test('S1：全角弯引号 / 【】包着的「主人」也认得出', async () => {
+	const db = freshDb();
+	ins(db, 'user:master', 'episode', '聊了晚饭');
+
+	const r = await makeDiary(db, {
+		topics: [
+			{ who: '“主人”', topic: 'a' },
+			{ who: '【主人】', topic: 'b' },
+			{ who: '‘主人’', topic: 'c' }
+		]
+	}).tick({ force: true });
+	assert.equal(r.topics.length, 3);
+	assert.ok(r.topics.every((t) => t.ownerId === 'user:master'));
 });

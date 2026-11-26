@@ -1,5 +1,14 @@
 # dsh-fish-soul 变更记录
 
+- v0.19.2：修复日记「想聊的」永远注入不到提示词（#217，PR #218）；发图文 / 回评论改用完整人格卡（PR #215）；后台模型调用加日预算护栏、评论空回复加指数退避，并把 gateway / 抖音通道 / 宿主入口按行数上限拆成独立模块（`npm run typecheck`）。
+  - **日记想聊的对象认不出人（#217，PR #218）**：`[昨晚日记里想跟 X 聊的]` 这一行**从来没生效过**，且没有任何报错。写日记时按 `who` 反查人（`findOwnerByName` 是 `WHERE display_name = ?` 精确等值），而 prompt 只让模型输出 `{"who":"对方的名字"}`，**从没把可用的名册给它** —— 模型只能编「主人」「某UP主」这类称呼，display_name 却是真实 QQ 昵称，永远不相等 ⇒ `ownerId` 恒为 `null` ⇒ `topicsFor()` 按 ownerId 精确过滤 ⇒ 空数组。三处一起改：材料里带出「今天真的跟她说过话的人」（私聊小结的 owner 是人，群的 owner 是群，排除；刷视频记忆的 owner 是 self，也不进）；prompt 把这份名单交给模型并要求原样照抄；解析时名单优先 → 「主人」这种唯一语义的称呼（`“主人”` `【主人】` `真实昵称（主人）` 这类包法都能剥）→ 名单外按名字回查。认不出人的条目不落库（`topicsFor` 永远匹配不上 `null`，存下来一次都注入不出来）。
+  - **名册取「最近 20 条」而不是「最早 20 条」**：原来的 `ORDER BY created_at LIMIT 20` 取的是当天最早的小结，且群 episode 也占名额 —— 忙日里晚间私聊小结被截掉 ⇒ 名册为空 ⇒ prompt 整段不渲染 ⇒ 模型回到自由编称呼 ⇒ 全部认不出 ⇒ **修复静默失效**。改成取最近 20 条再翻回正序。同时把配额截断挪到「过滤掉认不出的人」之后（否则 3 条垃圾能把合法的那条挤掉，丢就彻底没了）。
+  - **发图文 / 回评论用完整人格卡（PR #215）**：以前 `postPrompt` / `replyPrompt` 只拿 `persona.brief`（前 300 字），「性格」「对话示例」「看事情的方式」整段被截掉，发出去的东西没有人格味儿。`social.js` 新增 `personaBlock()`（完整 staticText + anchor + postHistory + 世界书命中条目），宿主侧注入 `personaFull()` 给 B站 / 抖音社交模块（刷视频与日常主动不走这条，行为不变）。
+  - **后台模型调用日预算护栏**：`LlmRouter` 支持 `llm.budget.dailyCalls` / `dailyTokens`（默认 0 = 不限），到上限直接快速失败并给出「今日后台模型调用已达上限（N/M）」的明确原因，不再把额度悄悄烧完；跨天按日重置。设置页「模型」可读写这两项与各模型状态。
+  - **评论空回复指数退避**：B站 / 抖音回评论时模型回了空串，以前会紧接着重试（白烧额度），现在记失败次数并按 10 分钟起、封顶 1 小时退避，成功一次即清零；同时修掉抖音「`/\[不回\]/`」正则不生效导致模型说了不回还照发的问题。
+  - **大文件拆分 + 类型检查入口**：`lib/gateway.js` 拆出 `gateway-dispatch.js` / `gateway-session.js`，抖音通道拆出 `douyin-host.js` / `douyin-pure.js`，宿主入口拆出 `index-tools.js`（每个文件控制在 1500 行内）；新增 `npm run typecheck`（`tsconfig.check.json`）给核心模块做静态检查。对外导出契约由测试钉住。
+  - **测试**：新增 `test/diary-topics-217.mjs`（14 组）与 `test/llm-budget-and-social-backoff.mjs`（8 组），均已登记进测试链；#217 的七处修复各配一条会变红的断言（逐条做过红验证）。合并后本地 218 并行 + 3 个真 Chromium 套件 = 221/221 绿，`npm run typecheck` 通过。
+
 - v0.19.1：止住模型高失败率与 token 异常消耗，合并 `[语音]` 段单换行提纯补齐（#210，PR #214/#216）与抖音浏览器清理残留 `Crashed` 标记（PR #213）。
   - **模型高失败率与 token 异常消耗止血**：`LlmRouter` 增加按模型连续失败 3 次后的指数冷却（5m→60m，冷却期直接走健康兜底或快速失败）；补全 `thinkAteBudget` 对宿主 `EMPTY_RESPONSE`、隐藏思考与 `length` 截断的识别，并在命中时清理被污染的 `llm.roomy`；把 `thinkFallback` 抢救提前至 `roomy` 重试与失败记账前；拦截超时带图调用退回纯文字重试，补齐中断用量记账；统一抽取并复用 `parseLlmJson`。周记（`WeeklyCompressor`，`maxTokens` 800→1500，1h→24h 退避）、学说法（`SlangLearner`，移除无效 `drop` 并裁剪已有词表与对话长度，2000 + `thinkFallback`，30m→24h 分群退避）、Dream（`LifeEngine`，截断记忆拼接至 4000 字，2000 + `thinkFallback`，30m→24h 按人退避并对齐 `valid_to IS NULL`）与聊完记一下（`ChatDigester`，2000 + `thinkFallback`，5m→60m 退避且连续 5 次丢弃毒批）全面补齐失败退避与预算。
   - **`[语音]` 段单换行粘着提纯与全角空格 / CRLF / DSH 桌面端补齐（#210，PR #214 / #216）**：新增 `normalizeVoiceParagraphs` 将行首（含半角空格 / tab / 全角空格缩进）且未空行分隔的 `[语音]` 段自动补空行拆成独立段，兼容 CRLF 换行，并补齐 DSH 桌面端 `saveDesktopVoice` 入口。

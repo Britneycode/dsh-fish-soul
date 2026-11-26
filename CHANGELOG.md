@@ -1,5 +1,11 @@
 # dsh-fish-soul 变更记录
 
+- v0.19.1：止住模型高失败率与 token 异常消耗，合并 `[语音]` 段单换行提纯补齐（#210，PR #214/#216）与抖音浏览器清理残留 `Crashed` 标记（PR #213）。
+  - **模型高失败率与 token 异常消耗止血**：`LlmRouter` 增加按模型连续失败 3 次后的指数冷却（5m→60m，冷却期直接走健康兜底或快速失败）；补全 `thinkAteBudget` 对宿主 `EMPTY_RESPONSE`、隐藏思考与 `length` 截断的识别，并在命中时清理被污染的 `llm.roomy`；把 `thinkFallback` 抢救提前至 `roomy` 重试与失败记账前；拦截超时带图调用退回纯文字重试，补齐中断用量记账；统一抽取并复用 `parseLlmJson`。周记（`WeeklyCompressor`，`maxTokens` 800→1500，1h→24h 退避）、学说法（`SlangLearner`，移除无效 `drop` 并裁剪已有词表与对话长度，2000 + `thinkFallback`，30m→24h 分群退避）、Dream（`LifeEngine`，截断记忆拼接至 4000 字，2000 + `thinkFallback`，30m→24h 按人退避并对齐 `valid_to IS NULL`）与聊完记一下（`ChatDigester`，2000 + `thinkFallback`，5m→60m 退避且连续 5 次丢弃毒批）全面补齐失败退避与预算。
+  - **`[语音]` 段单换行粘着提纯与全角空格 / CRLF / DSH 桌面端补齐（#210，PR #214 / #216）**：新增 `normalizeVoiceParagraphs` 将行首（含半角空格 / tab / 全角空格缩进）且未空行分隔的 `[语音]` 段自动补空行拆成独立段，兼容 CRLF 换行，并补齐 DSH 桌面端 `saveDesktopVoice` 入口。
+  - **抖音浏览器清理残留 `Crashed` 标记（PR #213）**：`cleanLocks` 同步把 `Default/Preferences` 中强杀遗留的 `profile.exit_type: "Crashed"` 重置为 `Normal`，启动不再弹出「要恢复页面吗」气泡。
+  - **测试**：新增 `test/llm-failure-backoff.mjs`、`test/voice-paragraph-split.mjs`、`test/voice-paragraph-split-wire.mjs`、`test/douyin-crash-restore.mjs`，同步接入测试链；`check-release-version`、`check-test-chain`、`check-secrets` 及核心回归全部通过。
+
 - v0.19.0：新增用户自管定时任务模块（#190，PR #212），并完成设置面板深浅色对比度、布局密度与交互细节优化。
   - **用户自管定时任务模块（#190，PR #212）**：在设置页「日常 → 定时任务」提供定时任务的创建、编辑、启停与删除，支持「仅一次」「每隔 N 分钟（最少 1 分钟）」「每天 HH:mm（角色时区 UTC+8）」三种排期，走真实时钟（不受虚拟钟倍率加速影响），不占主动开口配额也不受活跃时段限制；投递时使用用户编写的唤醒提示词触发回复。
   - **定时任务安全边界与并发重排加固**：AI 侧仅暴露 `scheduled_tasks_list` 与 `scheduled_tasks_update`（无新建与删除入口），且 `scheduled_tasks_update` 仅限在主人私聊中修改发往主人私聊的任务，拒绝修改目标或改写群聊任务；真实投递层在发送前二次校验 `isWhitelisted`；投递完成/失败写回前重读数据库最新行，避免认领前快照覆写投递期间的并发改期或删除，并修正滞后多日的 `daily` 任务重排基准。

@@ -1,0 +1,20 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"lib": ["ES2023", "DOM"],
+		"allowJs": true,
+		"checkJs": false,
+		"noEmit": true,
+		"strict": false,
+		"skipLibCheck": true
+	},
+	"include": [
+		"types/node-ambient.d.ts",
+		"lib/llm.js",
+		"lib/soul-memory.js",
+		"lib/life.js",
+		"lib/gateway.js"
+	]
+}

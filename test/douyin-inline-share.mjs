@@ -62,12 +62,12 @@ const makeAdapter = (cfg = {}) => new DouyinAdapter({
 }
 
 /** 造一个能记录卡片的适配器。 */
-const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false } = {}) => {
+const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false, shareCard = true } = {}) => {
 	const cards = [];
 	const texts = [];
 	const adapter = new DouyinAdapter({
 		db: () => ({}),
-		getConfig: () => ({ douyin: { enabled: true, shareCard: true } }),
+		getConfig: () => ({ douyin: { enabled: true, shareCard } }),
 		inbox: () => null,
 		channel: () => ({
 			async shareCard(p) {
@@ -166,14 +166,51 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false 
 	ok('通道没有 shareCard：退回文字，不整条抛');
 }
 
-// 🔴 边界②：链接和句子混在一段里 → 整段当文字，不发卡片（否则前面那半句会消失）
+// 🔴 边界②（升级为无损拆分）：链接和句子混在一段里时，把文字与链接无损拆开，既发原生卡片又保留全部文字
 {
 	const { adapter, cards, texts } = spyAdapter();
 	const mixed = '看这个 https://www.douyin.com/video/7707911549709601777 挺好笑';
 	await adapter.send({ channel_id: 'douyin:未云' }, mixed, [], '0:1:123:456');
-	assert.equal(cards.length, 0, '混在句子里的链接不发卡片');
-	assert.deepEqual(texts, [mixed], '整段原样发文字，一个字都不丢');
-	ok('混排：整段当文字，不拆（否则前半句会消失）');
+	assert.deepEqual(cards, [{ friendName: '未云', videoId: '7707911549709601777', convId: '0:1:123:456' }], '句中链接应拆成原生卡片');
+	assert.equal(texts.length, 1);
+	assert.ok(texts[0].includes('看这个') && texts[0].includes('挺好笑'), `混排文案不能丢：${JSON.stringify(texts)}`);
+	ok('混排：无损拆分，既发原生卡片又完整保留前后文案');
+}
+
+{
+	const { adapter, cards, texts } = spyAdapter();
+	await adapter.send(
+		{ channel_id: 'douyin:未云' },
+		'猫跳舞笑死\nhttps://www.douyin.com/video/7707911549709601777',
+		[],
+		'0:1:123:456'
+	);
+	assert.deepEqual(cards, [{ friendName: '未云', videoId: '7707911549709601777', convId: '0:1:123:456' }]);
+	assert.deepEqual(texts, ['猫跳舞笑死']);
+	ok('单换行文+链：同样能拆出文字与原生卡片');
+}
+
+{
+	const { adapter, cards, texts } = spyAdapter();
+	await adapter.send(
+		{ channel_id: 'douyin:未云' },
+		'猫跳舞那个（链接 https://www.douyin.com/note/7707911549709601777）',
+		[],
+		'0:1:123:456'
+	);
+	assert.deepEqual(cards, [{ friendName: '未云', videoId: '7707911549709601777', convId: '0:1:123:456' }]);
+	assert.deepEqual(texts, ['猫跳舞那个']);
+	ok('（链接 URL）外壳：清掉空壳只留真实文案与原生卡片');
+}
+
+{
+	// shareCard 开关关闭时，混排也不得拆卡，原样发文字
+	const { adapter, cards, texts } = spyAdapter({ shareCard: false });
+	const mixed = '看这个 https://www.douyin.com/video/7707911549709601777 挺好笑';
+	await adapter.send({ channel_id: 'douyin:未云' }, mixed, [], '0:1:123:456');
+	assert.equal(cards.length, 0, 'shareCard 关闭时不发卡片');
+	assert.deepEqual(texts, [mixed], 'shareCard 关闭时混排全文原样发送');
+	ok('shareCard 开关关闭：混排不拆卡，原文发文本');
 }
 
 // 只有卡片、没有文字时不能因为「没有文字段」就报错

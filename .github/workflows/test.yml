@@ -75,7 +75,7 @@ jobs:
       #    `CDP 端口 43009 没响应`，105 秒才挂。
       #    ⇒ **加套件会改变并行调度**：并行批里不该留任何真启浏览器的套件。
       #    判据：本地串行绿 + 本地并行 4 绿 + diff 里没动那个模块 ⇒ 先怀疑调度。
-      - run: node test/parallel.mjs 4 --skip "douyin-browser|douyin-music|douyin-video-driver"
+      - run: node test/parallel.mjs 4 --skip "douyin-browser|douyin-music|douyin-video-driver|douyin-wave12-fixes"
         if: steps.docs.outputs.only != '1'
         env:
           FISH_SOUL_CDP_WAIT_MS: '90000'
@@ -95,5 +95,11 @@ jobs:
       - name: 抖音视频驱动套件（也真启 Chromium，单独跑）
         if: steps.docs.outputs.only != '1'
         run: node test/douyin-video-driver.mjs
+        env:
+          FISH_SOUL_CDP_WAIT_MS: '90000'
+
+      - name: 抖音优化与回归套件（也真启 Chromium，单独跑）
+        if: steps.docs.outputs.only != '1'
+        run: node test/douyin-wave12-fixes.mjs
         env:
           FISH_SOUL_CDP_WAIT_MS: '90000'

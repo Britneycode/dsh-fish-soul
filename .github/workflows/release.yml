@@ -12,6 +12,7 @@ concurrency:
   cancel-in-progress: true
 permissions:
   contents: write
+  id-token: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -82,11 +83,17 @@ jobs:
           done
           echo "::error::未等到已发布的 GitHub Release v$VER；完成 Release 后重跑此 workflow"
           exit 1
-      - name: npm publish
-        # 两条入口共用；重跑时已有 npm 版本则跳过。
+      - name: 准备支持受信任发布的 Node / npm
         if: steps.v.outputs.skip != '1'
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 升级 npm CLI（受信任发布要求 >=11.5.1）
+        if: steps.v.outputs.skip != '1'
+        run: npm install -g npm@latest && npm --version
+      - name: npm publish
+        # 两条入口共用；重跑时已有 npm 版本则跳过，走 npm 受信任发布（OIDC）免长期 Token。
+        if: steps.v.outputs.skip != '1'
         run: |
           VER='${{ steps.v.outputs.ver }}'
           CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://registry.npmjs.org/dsh-fish-soul/$VER?check=${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-publish")
@@ -98,11 +105,11 @@ jobs:
             echo "::error::查询 npm 版本失败（HTTP $CODE），不发布"
             exit 1
           fi
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "::error::缺 NPM_TOKEN secret，npm 没发出去（Git 侧已完成，记得手动补 publish）"
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::缺少 GitHub Actions OIDC 环境（请确认 workflow 已配置 id-token: write 并在 npm 绑定受信任发布）"
             exit 1
           fi
-          npm publish --//registry.npmjs.org/:_authToken="$NPM_TOKEN"
+          npm publish --provenance
       - name: 校验四环
         # 收尾校验：npm latest 要等于本次版本、gitHead 要等于本次提交。
         #

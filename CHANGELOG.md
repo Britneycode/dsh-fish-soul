@@ -1,5 +1,10 @@
 # dsh-fish-soul 变更记录
 
+- v0.19.4：切换至 npm 受信任发布（OIDC Trusted Publishing + `--provenance`），并发布 `v0.19.3` 周期的全部抖音全链路优化、跨条近义复读守卫与分享无损拆卡改动（`v0.19.3` 因旧 `NPM_TOKEN` 失效未发上 npm，由本版本正式发布）。
+  - **发版链路切至 npm 受信任发布**：`.github/workflows/release.yml` 声明 `id-token: write` 并升级至 Node 22 + 最新 npm CLI，使用无长期 Token 的 `npm publish --provenance`；同步更新 `test/release-workflow.mjs` 对应测试。
+  - **抖音私信 / 群聊 / 评论 / 发布与刷视频优化（含原 `v0.19.3` 变更）**：`Browser.goto()` 保持单调 `seq` 游标；`enterChat` 精确匹配会话名且未命中拒点首行；`sendDM` 单条文本防重；`readDMDom` 合并连续气泡并抽取 `douyin-pure.js`；完善群聊 `douyin-group:` 身份、去前缀、`callNames` 与未点名 backlog；评论支持楼中楼与 `NEEDS_VERIFY` 状态区分；图文/视频发布在定位发布按钮前不触发 `beforeSubmit()`；刷视频解锁 `/note/`；新增 `test/douyin-wave12-fixes.mjs`（含 Chromium + CDP 端到端）及 CI 串行隔离。
+  - **跨条近义复读守卫与分享无损拆卡（含原 `v0.19.3` 变更）**：`findRepeatedParagraphs` 新增 `threshold = 0.8` 近义复读识别，网关新增 `shouldClearRecentSent` 防止 ≤ 2 字敷衍语或 180 秒重复入站冲掉 5 分钟复读守卫；提示词明确要求分享链接独立成段，且 `DouyinAdapter.send()` 通过 `splitDouyinShareParagraph` 实现句中混排、单换行、`（链接 URL）` 与 Markdown 链接的无损拆卡。
+
 - v0.19.3：抖音私信 / 群聊 / 评论 / 发布与刷视频全链路稳定性优化；补齐跨条近义复读守卫与防冲洗；抖音分享链接补全独立成段提示词并支持出站无损拆卡。
   - **抖音私信 / 群聊精准读写与发送防重**：`Browser.goto()` 保持单调 `seq` 游标不归零；`enterChat` 精确匹配会话名且未命中时拒点首行；`sendDM` 仅对单条文本加未发送去重确认；`readDMDom` 合并连续气泡并抽取 `douyin-pure.js`；补齐群会话 `douyin-group:` 身份解析、前缀剥离、`callNames` 触发与未点名 backlog；修复 Protobuf 群会话 ID / 引用上下文 / 分享卡片标题作者解析及大整数 `cid`/`uid` 精度。
   - **抖音评论 / 发布 / 刷视频闭环加固**：评论桥升级支持楼中楼回复、`NEEDS_VERIFY` 写入未知态区分与 `DouyinSocial` 分类型阻断、未登录护栏及认人；发布图文 / 视频在未定位到发布按钮前绝不提前触发 `beforeSubmit()`；刷视频 HTTP 通道解锁 `/note/` 链接与正文摘要；`douyin.js` / `gateway.js` / `index.js` 继续满足 `< 1500` 行约束。

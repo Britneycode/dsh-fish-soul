@@ -1,5 +1,12 @@
 # dsh-fish-soul 变更记录
 
+- v0.19.3：抖音私信 / 群聊 / 评论 / 发布与刷视频全链路稳定性优化；补齐跨条近义复读守卫与防冲洗；抖音分享链接补全独立成段提示词并支持出站无损拆卡。
+  - **抖音私信 / 群聊精准读写与发送防重**：`Browser.goto()` 保持单调 `seq` 游标不归零；`enterChat` 精确匹配会话名且未命中时拒点首行；`sendDM` 仅对单条文本加未发送去重确认；`readDMDom` 合并连续气泡并抽取 `douyin-pure.js`；补齐群会话 `douyin-group:` 身份解析、前缀剥离、`callNames` 触发与未点名 backlog；修复 Protobuf 群会话 ID / 引用上下文 / 分享卡片标题作者解析及大整数 `cid`/`uid` 精度。
+  - **抖音评论 / 发布 / 刷视频闭环加固**：评论桥升级支持楼中楼回复、`NEEDS_VERIFY` 写入未知态区分与 `DouyinSocial` 分类型阻断、未登录护栏及认人；发布图文 / 视频在未定位到发布按钮前绝不提前触发 `beforeSubmit()`；刷视频 HTTP 通道解锁 `/note/` 链接与正文摘要；`douyin.js` / `gateway.js` / `index.js` 继续满足 `< 1500` 行约束。
+  - **跨条复读守卫加固**：`findRepeatedParagraphs` 在默认 2 分钟精确匹配之外新增 `threshold = 0.8` 的二元组相似度判定（拦下换近义词复读）；网关新增 `shouldClearRecentSent`，对 ≤ 2 字敷衍短语（如「嗯」「好」/ 纯图）及 180 秒内同频道重复入站不再清除 `recentSent`，并将 `dropRepeats` / `noteSent` 窗口扩至 5 分钟，接入抖音私信与群聊入口。
+  - **抖音分享链接提示词与出站无损拆卡**：`lib/index.js` 在 `shareCard === true` 的私信规则及「最近在抖音刷到的」提示词中明确要求链接单独成段；`lib/douyin-share-inline.js` 新增 `splitDouyinShareParagraph`、`DouyinAdapter.send()` 改用无损拆段，句中混排、单换行、`（链接 URL）` 外壳及 Markdown 链接均可在不丢文案的前提下转为原生卡片（`shareCard: false` 维持原文文本）。
+  - **测试与 CI**：新增 `test/douyin-wave12-fixes.mjs`（9 组，含真实 Chromium + CDP 本地 mock 端到端）并登记进测试链及 `.github/workflows/test.yml` 独立 Chromium 串行步骤；同步更新 `test/douyin-inline-share.mjs`。
+
 - v0.19.2：修复日记「想聊的」永远注入不到提示词（#217，PR #218）；发图文 / 回评论改用完整人格卡（PR #215）；后台模型调用加日预算护栏、评论空回复加指数退避，并把 gateway / 抖音通道 / 宿主入口按行数上限拆成独立模块（`npm run typecheck`）。
   - **日记想聊的对象认不出人（#217，PR #218）**：`[昨晚日记里想跟 X 聊的]` 这一行**从来没生效过**，且没有任何报错。写日记时按 `who` 反查人（`findOwnerByName` 是 `WHERE display_name = ?` 精确等值），而 prompt 只让模型输出 `{"who":"对方的名字"}`，**从没把可用的名册给它** —— 模型只能编「主人」「某UP主」这类称呼，display_name 却是真实 QQ 昵称，永远不相等 ⇒ `ownerId` 恒为 `null` ⇒ `topicsFor()` 按 ownerId 精确过滤 ⇒ 空数组。三处一起改：材料里带出「今天真的跟她说过话的人」（私聊小结的 owner 是人，群的 owner 是群，排除；刷视频记忆的 owner 是 self，也不进）；prompt 把这份名单交给模型并要求原样照抄；解析时名单优先 → 「主人」这种唯一语义的称呼（`“主人”` `【主人】` `真实昵称（主人）` 这类包法都能剥）→ 名单外按名字回查。认不出人的条目不落库（`topicsFor` 永远匹配不上 `null`，存下来一次都注入不出来）。
   - **名册取「最近 20 条」而不是「最早 20 条」**：原来的 `ORDER BY created_at LIMIT 20` 取的是当天最早的小结，且群 episode 也占名额 —— 忙日里晚间私聊小结被截掉 ⇒ 名册为空 ⇒ prompt 整段不渲染 ⇒ 模型回到自由编称呼 ⇒ 全部认不出 ⇒ **修复静默失效**。改成取最近 20 条再翻回正序。同时把配额截断挪到「过滤掉认不出的人」之后（否则 3 条垃圾能把合法的那条挤掉，丢就彻底没了）。

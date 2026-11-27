@@ -1,5 +1,10 @@
 # dsh-fish-soul 变更记录
 
+- v0.19.5：抖音私信主人发图文 / 视频按 uid 授权、新增 `make_douyin_note` 工具与设置页指定图文内容；私信 / 评论分享的视频也抽帧看画面；表情发完自动关闭面板（#220 / #223 / #224）。
+  - **抖音私聊主人授权按 uid（#220 / PR #222）**：`isMasterChannel` 对 `douyin:` 通道恒 false（channelId 是昵称，不能当授权身份），但工具层拿它做授权 ⇒ 主人自己的抖音私聊被永久误拒。新增 `isMasterPrivateChat()` 按平台拆：QQ 走 `isMasterChannel`；抖音比对会话身份（`douyin:<uid>`）与 `masterDouyinIdentity()`，改名 / 同名冒充过不了。新增 `make_douyin_note` 图文工具；`/douyin/post-now` 接收可选 `text`，设置页「作品和评论」新增「指定内容」输入框（留空仍按心情随机）。
+  - **私信 / 评论分享的视频也抽帧（#223 / PR #225）**：`describe()` 两条路径（`httpDescribe` 接口路 + `readDetail` 浏览器兜底）都补 `frameForWatch`，开关、每日配额、异常兜底全复用「自己刷视频」那套，拿不到画面照旧只给文字。
+  - **表情发完自动关面板（#224 / PR #226）**：`sendEmoji` 成功与未确认两条路径都收尾关闭表情面板（点面板外区域），幂等且失败不报，不影响已发出的表情。
+
 - v0.19.4：切换至 npm 受信任发布（OIDC Trusted Publishing + `--provenance`），并发布 `v0.19.3` 周期的全部抖音全链路优化、跨条近义复读守卫与分享无损拆卡改动（`v0.19.3` 因旧 `NPM_TOKEN` 失效未发上 npm，由本版本正式发布）。
   - **发版链路切至 npm 受信任发布**：`.github/workflows/release.yml` 声明 `id-token: write` 并升级至 Node 22 + 最新 npm CLI，使用无长期 Token 的 `npm publish --provenance`；同步更新 `test/release-workflow.mjs` 对应测试。
   - **抖音私信 / 群聊 / 评论 / 发布与刷视频优化（含原 `v0.19.3` 变更）**：`Browser.goto()` 保持单调 `seq` 游标；`enterChat` 精确匹配会话名且未命中拒点首行；`sendDM` 单条文本防重；`readDMDom` 合并连续气泡并抽取 `douyin-pure.js`；完善群聊 `douyin-group:` 身份、去前缀、`callNames` 与未点名 backlog；评论支持楼中楼与 `NEEDS_VERIFY` 状态区分；图文/视频发布在定位发布按钮前不触发 `beforeSubmit()`；刷视频解锁 `/note/`；新增 `test/douyin-wave12-fixes.mjs`（含 Chromium + CDP 端到端）及 CI 串行隔离。

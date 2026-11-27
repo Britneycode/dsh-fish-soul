@@ -1,5 +1,11 @@
 # dsh-fish-soul 变更记录
 
+- v0.19.6：空间占用、Token 消耗与记忆检索链路优化（三批合入）。
+  - **空间与基础**：抖音浏览器磁盘/媒体缓存上限与启动前安全清缓存；storage.keep 默认 10；周记前快照 12h 节流；Dream 原文核对提示词写入 corrected；await 向量预取消首轮退化；chat_fts rowid 对齐 + 索引；chat_search 默认放行及隐私/截断边界。
+  - **Token 与多模态控本**：allowedTools 按开关与身份过滤、setupAgent 兜底收紧；单轮内稳定说话方式与贴纸列表保前缀缓存；短消息跳过刷视频摘要；补标签失败 24h 冷却；>500KB/1024px 入站图缩略；vision 防重复回退 hostDefault；视频抽帧降分辨率。
+  - **记忆质量与检索热路径**：blobToF32 零拷贝对齐；EmbeddingClient 128 条 LRU；vectorRanks excludePrivate；recallSync 跳过未命中；VectorWorker 增量 backfillStep；recall 工具 tokenBudget 截断；ChatDigester 墓碑防回填；ChatJournal pending 跨重启持久化；跨人合并与删人清理；idx_memory_kind_created 索引。
+  - ⚠️ 合并时把抖音工具授权统一成 isMasterPrivateChat（对方新 allowedTools 用 isMasterChannel 会让主人抖音私聊丢 make_douyin_video/note，#220），图文/视频按各自开关（post/video.enabled）放行。
+
 - v0.19.5：抖音私信主人发图文 / 视频按 uid 授权、新增 `make_douyin_note` 工具与设置页指定图文内容；私信 / 评论分享的视频也抽帧看画面；表情发完自动关闭面板（#220 / #223 / #224）。
   - **抖音私聊主人授权按 uid（#220 / PR #222）**：`isMasterChannel` 对 `douyin:` 通道恒 false（channelId 是昵称，不能当授权身份），但工具层拿它做授权 ⇒ 主人自己的抖音私聊被永久误拒。新增 `isMasterPrivateChat()` 按平台拆：QQ 走 `isMasterChannel`；抖音比对会话身份（`douyin:<uid>`）与 `masterDouyinIdentity()`，改名 / 同名冒充过不了。新增 `make_douyin_note` 图文工具；`/douyin/post-now` 接收可选 `text`，设置页「作品和评论」新增「指定内容」输入框（留空仍按心情随机）。
   - **私信 / 评论分享的视频也抽帧（#223 / PR #225）**：`describe()` 两条路径（`httpDescribe` 接口路 + `readDetail` 浏览器兜底）都补 `frameForWatch`，开关、每日配额、异常兜底全复用「自己刷视频」那套，拿不到画面照旧只给文字。

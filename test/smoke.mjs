@@ -598,7 +598,7 @@ assert.equal(host.created[0].meta.cwd, wsDir);
 	assert.equal(section.text(at('main-session')), '', '同一个世界里的宿主会话仍然拿不到');
 	ok('#41 人格卡 / 瞬态块 per-agent 挂在自家会话上，宿主会话照旧干净');
 }
-assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'send_elsewhere', 'relay_to_friend', 'make_douyin_video', 'scheduled_tasks_list', 'scheduled_tasks_update', 'web_search', 'web_fetch', 'fish_search'] }); // #26 联网工具不筛；relay_to_friend = 熟人传话（默认关）；#190 定时任务只给看和改
+assert.deepEqual(host.restricts[0][1], { allow: ['remember', 'recall', 'forget', 'chat_search', 'send_elsewhere', 'scheduled_tasks_list', 'scheduled_tasks_update'] }); // 仅暴露当前开启且当前通道有权限的工具
 assert.equal(f1.msg.source.kind, 'fish-soul/qq');
 assert.match(f1.msg.content[0].text, /我想喝冰美式/);
 assert.match(host.titles[0][1], /QQ·主人（主人）/);

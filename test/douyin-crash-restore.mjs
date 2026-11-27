@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpHome } from './_tmp.mjs';
-import { cleanLocks } from '../lib/channels/vendor/douyin-bridge/browser.mjs';
+import { cleanLocks, cleanProfileCache } from '../lib/channels/vendor/douyin-bridge/browser.mjs';
 
 const ok = (name) => console.log('✓', name);
 
@@ -46,4 +46,44 @@ writeFileSync(join(home, 'broken', 'Default', 'Preferences'), '{ not json');
 cleanLocks(join(home, 'broken')); // JSON 坏了也只能忽略，不能启动失败
 ok('没有 Preferences / JSON 坏了都不报错');
 
-console.log('douyin-crash-restore: 3 组全部通过');
+// ── ④ cleanProfileCache：只清可丢弃缓存，保留 Cookies / Local Storage / IndexedDB 等登录态 ──
+const cacheTestProfile = join(home, 'cache-clean-profile');
+const disposableDirs = [
+	join(cacheTestProfile, 'Default', 'Cache'),
+	join(cacheTestProfile, 'Default', 'Code Cache'),
+	join(cacheTestProfile, 'Default', 'GPUCache'),
+	join(cacheTestProfile, 'Default', 'Service Worker', 'CacheStorage'),
+	join(cacheTestProfile, 'Default', 'Service Worker', 'ScriptCache'),
+	join(cacheTestProfile, 'GrShaderCache'),
+	join(cacheTestProfile, 'optimization_guide_model_store'),
+];
+for (const d of disposableDirs) {
+	mkdirSync(d, { recursive: true });
+	writeFileSync(join(d, 'blob.bin'), 'cache');
+}
+writeFileSync(join(cacheTestProfile, 'BrowserMetrics-123.pma'), 'metrics');
+
+const loginFiles = [
+	join(cacheTestProfile, 'Default', 'Cookies'),
+	join(cacheTestProfile, 'Default', 'Local Storage', 'CURRENT'),
+	join(cacheTestProfile, 'Default', 'IndexedDB', 'db.log'),
+	join(cacheTestProfile, 'Default', 'Preferences'),
+	join(cacheTestProfile, 'Local State'),
+];
+for (const f of loginFiles) {
+	mkdirSync(join(f, '..'), { recursive: true });
+	writeFileSync(f, 'keep-me');
+}
+
+cleanProfileCache(cacheTestProfile);
+
+for (const d of disposableDirs) {
+	assert.equal(existsSync(d), false, `可重建缓存目录应被清理：${d}`);
+}
+assert.equal(existsSync(join(cacheTestProfile, 'BrowserMetrics-123.pma')), false, 'BrowserMetrics*.pma 应被清理');
+for (const f of loginFiles) {
+	assert.equal(existsSync(f), true, `登录态/站点存储必须保留：${f}`);
+}
+ok('cleanProfileCache 只删可丢弃缓存，保留 Cookies / Local Storage / IndexedDB / Preferences / Local State');
+
+console.log('douyin-crash-restore: 4 组全部通过');

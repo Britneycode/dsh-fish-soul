@@ -136,4 +136,54 @@ const make = (name) => {
 	archive.stop();
 }
 
-console.log('✓ chat-archive-fts：8 组断言全过');
+// ── ⑨ rowid 对齐、EXPLAIN QUERY PLAN、at 索引、老库触发器迁移 ──
+{
+	const archive = make('dsh-cfts9-');
+	archive.add('private:111', { who: '111', text: '测试对齐索引与执行计划' });
+	const db = archive.open();
+	const ftsRow = db.prepare('SELECT rowid, id FROM chat_fts').get();
+	assert.equal(Number(ftsRow.rowid), Number(ftsRow.id), 'add() 写入后 chat_fts.rowid 必须等于 id');
+	const plan = db.prepare('EXPLAIN QUERY PLAN DELETE FROM chat_fts WHERE rowid = 1').all();
+	const details = plan.map((p) => String(p.detail ?? '')).join(' ');
+	assert.match(details, /INDEX 0:=/, `WHERE rowid = 1 应走 FTS5 rowid 主键查找（INDEX 0:=）：${details}`);
+	const idxs = db.prepare('PRAGMA index_list(chat_text)').all();
+	assert.ok(idxs.some((idx) => idx.name === 'chat_text_at'), 'chat_text 必须有 chat_text_at 索引');
+	archive.stop();
+
+	// 老库迁移：触发器仍为 WHERE id = old.id，且 chat_fts rowid 与 id 错位
+	const legacyHome = tmpHome('dsh-cfts9-legacy-');
+	process.env.DSH_HOME = legacyHome;
+	const { DatabaseSync } = await import('node:sqlite');
+	const { fishSoulDir } = await import('../lib/db.js');
+	const { mkdirSync } = await import('node:fs');
+	const { join } = await import('node:path');
+	mkdirSync(fishSoulDir(), { recursive: true });
+	const legacyDb = new DatabaseSync(join(fishSoulDir(), 'chat-archive.db'));
+	legacyDb.exec(`
+		CREATE TABLE chat_text(id INTEGER PRIMARY KEY, channel_id TEXT NOT NULL, who TEXT NOT NULL, self INTEGER NOT NULL, content TEXT NOT NULL, at INTEGER NOT NULL);
+		CREATE INDEX chat_text_channel_at ON chat_text(channel_id, at DESC);
+		CREATE VIRTUAL TABLE chat_fts USING fts5(id UNINDEXED, terms);
+		CREATE TRIGGER chat_fts_ad AFTER DELETE ON chat_text BEGIN
+			DELETE FROM chat_fts WHERE id = old.id;
+		END;
+	`);
+	legacyDb.prepare('INSERT INTO chat_text(id,channel_id,who,self,content,at) VALUES(?,?,?,?,?,?)').run(2, 'private:111', '111', 0, '旧库里的鲸鱼消息', Date.now());
+	legacyDb.prepare('INSERT INTO chat_text(id,channel_id,who,self,content,at) VALUES(?,?,?,?,?,?)').run(5, 'group:222', '222', 0, '旧库里的海豚消息', Date.now());
+	// 故意不传 rowid：产生 rowid=1,id=2 和 rowid=2,id=5 错位
+	legacyDb.prepare('INSERT INTO chat_fts(id, terms) VALUES(?, ?)').run(2, '鲸鱼');
+	legacyDb.prepare('INSERT INTO chat_fts(id, terms) VALUES(?, ?)').run(5, '海豚');
+	legacyDb.close();
+
+	const migrated = new ChatArchive({ getConfig: CFG, log: () => {} });
+	const mdb = migrated.open();
+	const rows = mdb.prepare('SELECT rowid, id FROM chat_fts ORDER BY id').all();
+	assert.deepEqual(rows.map((r) => [Number(r.rowid), Number(r.id)]), [[2, 2], [5, 5]], '打开老库时必须将错位的 chat_fts rowid 对齐到 id');
+	const trg = mdb.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'chat_fts_ad'").get();
+	assert.match(trg.sql, /WHERE\s+rowid\s*=\s*old\.id/i, 'chat_fts_ad 必须迁移为 WHERE rowid = old.id');
+	migrated.remove('private:111');
+	assert.equal(migrated.search('鲸鱼').rows.length, 0, '迁移后删会话必须同步清掉对应 FTS 行');
+	assert.equal(migrated.search('海豚').rows.length, 1, '迁移后未删会话必须保留在 FTS 中');
+	migrated.stop();
+}
+
+console.log('✓ chat-archive-fts：9 组断言全过');

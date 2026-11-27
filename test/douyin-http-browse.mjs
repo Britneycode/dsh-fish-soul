@@ -261,3 +261,57 @@ const keepAlive = setTimeout(() => {}, 120_000);
 
 clearTimeout(keepAlive);
 console.log('✓ 抖音刷视频纯 HTTP：签名 / 公共参数 / 过滤 / 退回浏览器 / 细看一条');
+
+// ── #223：私信/评论分享的视频也要抽帧（不能只给文案 + 热评）──
+{
+	const { DouyinBrowser } = await import('../lib/douyin-browse.js');
+	const home = tmpHome('dsh-dyframes-');
+	const prevHome = process.env.DSH_HOME;
+	process.env.DSH_HOME = home;
+	const { openDatabase } = await import('../lib/db.js');
+	const db = openDatabase();
+	process.env.DSH_HOME = prevHome;
+
+	const mk = (framesEnabled, framesOf) => {
+		const http = {
+			jar: new Map([['sessionid', 'S']]), isLoggedIn: () => true, lastError: '', ensureCookies: async () => true,
+			detail: async () => ({ ok: true, detail: { desc: '海边日落', author: { nickname: '作者乙' }, video: { play_addr: { url_list: ['https://v/1'] }, duration: 15000 } } }),
+			comments: async () => ({ ok: true, list: [{ text: '好看', user: { nickname: '路人' } }] }),
+		};
+		return new DouyinBrowser({
+			db,
+			clock: { now: () => Date.now() },
+			host: { running: false, loggedIn: true, browser: null, exclusive: async (_l, fn) => fn() },
+			getConfig: () => ({ browse: { enabled: true, perDay: 3, videosPerSession: 3, like: false, share: false, mode: 'http', frames: framesEnabled, framesPerDay: 6 } }),
+			callLlm: async (prompt) => (/九宫格/.test(prompt) ? '海边有人在散步' : '还行'),
+			persona: () => ({ name: '鱼', brief: '' }),
+			worker: { enqueueRealtime: () => {} },
+			log: () => {},
+			dwellMs: [1, 2],
+			http,
+			frames: framesOf
+		});
+	};
+
+	// 开关开着 + 抽帧拿到图 → 介绍里要出现「画面：」
+	let frameCalls = 0;
+	const on = mk(true, async () => { frameCalls++; return { data: 'IMG' }; });
+	const withShot = await on.describe({ ids: ['7001'] });
+	assert.equal(frameCalls, 1, '开关开着时 describe 必须真的去抽帧');
+	assert.match(String(withShot[0]), /画面：海边有人在散步/, '私信分享的视频要能说出画面');
+
+	// 开关关着 → 一次都不抽，且介绍里没有「画面：」
+	let offCalls = 0;
+	const off = mk(false, async () => { offCalls++; return { data: 'IMG' }; });
+	const noShot = await off.describe({ ids: ['7002'] });
+	assert.equal(offCalls, 0, '开关关着时不能抽帧');
+	assert.doesNotMatch(String(noShot[0]), /画面：/, '关着时不该凭空多出画面那一行');
+	console.log('✓ #223 私信分享视频按开关抽帧，关着时行为不变');
+
+	// 抽帧抛错不能把整条介绍打掉
+	const bad = mk(true, async () => { throw new Error('抽帧炸了'); });
+	const survived = await bad.describe({ ids: ['7003'] });
+	assert.match(String(survived[0] || ''), /海边日落/, '抽帧失败也要照旧给出文字介绍');
+	console.log('✓ #223 抽帧失败不影响文字介绍');
+	db.close();
+}

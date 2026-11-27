@@ -105,7 +105,7 @@ mod.testHooks.douyinSocial = {
 	driver: fakeDriver,
 	videoGen: fakeVideoGen,
 	// 真 callLlm 要走宿主模型服务（测试里没有）→ 文案直接给，别把「模型不可用」当成接线坏了
-	callLlm: async (prompt) => (/短视频/.test(prompt) ? '厨房的蒸汽糊住了窗' : '今天风挺大的')
+	callLlm: async (prompt) => (/短视频/.test(prompt) ? '厨房的蒸汽糊住了窗' : /配背景音乐/.test(prompt) ? '歌' : '今天风挺大的')
 };
 // 真发了网络请求就该炸：这个套件一条网线都不该摸
 mod.testHooks.webFetch = async () => { throw new Error('测试不该发网络'); };
@@ -479,6 +479,40 @@ try {
 		assert.equal(genCalls.at(-1).opts.prompt, '三个人，一个文件，零会议', '应直接按传入文案生成');
 		assert.equal(driverCalls.prepareVideo, beforePrep + 1, '应走到抖音视频上传发布');
 		ok('W10 OpenMotion：服务商保存回显 + 主人私聊放行 OpenMotion MCP + make_douyin_video 发抖音视频');
+	}
+
+	// ── #220：抖音主人私聊按 uid 授权，图文工具与设置页能指定内容 ──
+	{
+		await call('/channels/douyin-config', 'POST', { enabled: true, masterUid: 'douyin:77001' });
+		const { createHash } = await import('node:crypto');
+		const { setKv } = await import('../lib/db.js');
+		const cursorKey = (name) => `douyin.conv.${createHash('sha1').update(name).digest('hex').slice(0, 16)}`;
+		setKv(db, cursorKey('主人'), { identity: 'douyin:77001' });
+		setKv(db, cursorKey('路人'), { identity: 'douyin:77002' });
+		setKv(db, cursorKey('冒充主人'), { identity: 'douyin:77003' });
+		const gw = mod.testHooks.gateway;
+		for (const [sid, channelId] of [['sess-dy-master', 'douyin:主人'], ['sess-dy-guest', 'douyin:路人'], ['sess-dy-fake', 'douyin:冒充主人']]) {
+			gw.bound.set(sid, { channel_id: channelId, title: sid, workspace_path: '' });
+		}
+		assert.equal(gw.isMasterPrivateChat('douyin:主人'), true, '主人抖音 uid 应放行');
+		assert.equal(gw.isMasterPrivateChat('douyin:路人'), false, '别人的 uid 应拒绝');
+		assert.equal(gw.isMasterPrivateChat('douyin:冒充主人'), false, '昵称像主人不能冒充');
+		assert.equal(gw.isMasterPrivateChat('douyin:未读过的会话'), false, '没有身份游标时不能放行');
+
+		const note = registeredTools.get('make_douyin_note');
+		assert.ok(note, 'make_douyin_note 工具必须注册');
+		assert.ok(gw.allowedTools(null, 'private:10001').includes('make_douyin_note'), '聊天工具白名单包含图文工具');
+		assert.match(String(await note.execute({ text: '不能发' }, { sessionId: 'sess-dy-guest' })), /主人/, '路人抖音私聊不能用图文工具');
+		const beforeNote = driverCalls.prepareNote;
+		const published = await note.execute({ text: '今天的云很低，像没睡醒' }, { sessionId: 'sess-dy-master' });
+		assert.match(String(published), /已经发布到抖音了：今天的云很低，像没睡醒/, '主人应能按指定文案发图文');
+		assert.equal(driverCalls.prepareNote, beforeNote + 1, '图文工具必须接到真实发布驱动');
+		const beforeRoute = driverCalls.prepareNote;
+		const viaRoute = await call('/douyin/post-now', 'POST', { text: '晚饭前把窗边的杯子收了' });
+		assert.equal(viaRoute.ok, true, `设置页指定内容应发布成功：${viaRoute.error}`);
+		assert.equal(viaRoute.text, '晚饭前把窗边的杯子收了', '路由不能把指定文案换成随机内容');
+		assert.equal(driverCalls.prepareNote, beforeRoute + 1, '设置页指定文案应到达发布驱动');
+		ok('#220 抖音主人 uid 授权 + 图文工具 + 设置页指定内容');
 	}
 
 	console.log('\n抖音视频接线：面板 → 路由 → DouyinSocial → driver → 账本，整条通了');

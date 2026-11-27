@@ -92,4 +92,19 @@ const mkLife = (reply) => new LifeEngine({
 	assert.equal(db.prepare('SELECT status FROM memory WHERE id = ?').get(id).status, 'active', '重要度 5 的不许判失效');
 }
 
-console.log('✓ memory-invalidate-kind：6 组断言全过');
+// ── ⑦ transcriptReview 开启时提示词指向 corrected，不能指向 outdated ──
+{
+	const id = seed('主人养了一只柯基');
+	let capturedPrompt = '';
+	const life = new LifeEngine({
+		db, clock: { now: () => now }, getConfig: () => ({ memory: { transcriptReview: true } }),
+		callLlm: async (prompt) => { capturedPrompt = prompt; return '{}'; },
+		deliver: async () => true, log: () => {}, persona: () => ({}),
+		transcripts: { sample: () => [{ who: '主人', self: false, content: '我其实养的是橘猫', at: now - 1000 }] }
+	});
+	await life.runDream('user:master');
+	assert.match(capturedPrompt, /把错的填进 corrected/, '原文核对必须指导模型填入 corrected');
+	assert.doesNotMatch(capturedPrompt, /把错的填进 outdated/, '不能再误导模型填进需要 by 的 outdated');
+}
+
+console.log('✓ memory-invalidate-kind：7 组断言全过');

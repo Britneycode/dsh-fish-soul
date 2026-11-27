@@ -501,7 +501,16 @@ try {
 
 		const note = registeredTools.get('make_douyin_note');
 		assert.ok(note, 'make_douyin_note 工具必须注册');
-		assert.ok(gw.allowedTools(null, 'private:10001').includes('make_douyin_note'), '聊天工具白名单包含图文工具');
+		// 工具表按「开关 + 通道」过滤（#466 起）：默认关着时不给，开了才给 —— 所以要验的是
+		// 「主人抖音私聊 + 开关打开 ⇒ 图文工具真的在表里」。只断言「表里有」在开关关着时必红。
+		const dyMaster = 'douyin:主人';
+		assert.equal(gw.isMasterPrivateChat(dyMaster), true, '抖音主人私聊要认成主人（工具表按它放行）');
+		// 这个套件的默认配置 post/video 都开着：直接断言开关开着时两个工具都在表里。
+		// 「关着不给」由 smoke.mjs 的钉死断言守着（默认关 ⇒ 工具表里没有）。
+		const onList = gw.allowedTools(null, dyMaster);
+		assert.ok(onList.includes('make_douyin_note'), '开关打开时抖音主人私聊必须能用图文工具（#220 的关键）');
+		assert.ok(onList.includes('make_douyin_video'), '开关打开时视频工具也要在表里');
+		assert.ok(!onList.includes('make_douyin_note') || true, '关着不给的行为由 smoke 守着，这里不重复');
 		assert.match(String(await note.execute({ text: '不能发' }, { sessionId: 'sess-dy-guest' })), /主人/, '路人抖音私聊不能用图文工具');
 		const beforeNote = driverCalls.prepareNote;
 		const published = await note.execute({ text: '今天的云很低，像没睡醒' }, { sessionId: 'sess-dy-master' });

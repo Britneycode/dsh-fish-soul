@@ -18,7 +18,7 @@ const log=[];const storage=new MemoryArchive({db,getConfig,clock:{now:()=>now},l
 const chats=new ChatArchive({getConfig,log:(...x)=>log.push(x)});
 try{
  const id=insertMemory(db,null,{ownerId:'user:a',channel:'private',channelId:'private:a',kind:'fact',content:'用户的私密记忆',private:true},now);
- assert.equal(storage.config().auto,true);assert.equal(chats.state().enabled,false);assert.equal(storage.state().tiers.recent,1);
+ assert.equal(storage.config().auto,true);assert.equal(storage.config().keep,10);assert.equal(chats.state().enabled,false);assert.equal(storage.state().tiers.recent,1);
  const journal=new ChatJournal({onAdd:(c,l)=>chats.add(c,l)});journal.add('private:a',{who:'A',text:'默认不能保存'});assert.equal(chats.state().count,0);
  saveConfig({chatArchive:{enabled:true,channels:['private:a'],days:30}});
  journal.add('private:b',{who:'B',text:'未选择会话'});journal.add('private:a',{who:'A',text:'已选择会话'});
@@ -27,7 +27,7 @@ try{
  chats.db.prepare('UPDATE chat_text SET at=?').run(now-31*86400000);chats.prune();assert.equal(chats.state().count,0);
  journal.add('private:a',{who:'A',text:'新的聊天文本'});assert.equal(chats.state().count,1);
  const snap=await storage.snapshot({force:true});assert.equal(snap.ok,true);assert(storage.list().some(x=>x.file===snap.file));
- assert.equal((await storage.snapshot()).reused,true);assert.equal(db.prepare('SELECT status FROM memory WHERE id=?').get(id).status,'active');
+ assert.equal((await storage.snapshot()).reused,true);assert.equal((await storage.snapshot({minAgeMs:12*3600_000})).reused,true);assert.equal(db.prepare('SELECT status FROM memory WHERE id=?').get(id).status,'active');
  const gz=readFileSync(join(fishSoulDir(),'archives',snap.file));assert.equal(gunzipSync(gz).subarray(0,15).toString(),'SQLite format 3');
  assert(!gunzipSync(gz).includes(Buffer.from('新的聊天文本')),'单独聊天库不进入记忆快照');
  if(posix)assert.equal(statSync(join(fishSoulDir(),'archives',snap.file)).mode&0o777,0o600);

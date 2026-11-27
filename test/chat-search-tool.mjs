@@ -12,8 +12,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { tmpHome } from './_tmp.mjs';
+import { QQ_SESSION_TOOLS, CHAT_TOOLS } from '../lib/gateway-session.js';
+import { formatChatSearchRows } from '../lib/chat-archive-fts.js';
 
 const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
+
+// ── ⓪ chat_search 已放进 QQ_SESSION_TOOLS / CHAT_TOOLS，默认会话可调用 ──
+assert.ok(QQ_SESSION_TOOLS.includes('chat_search'), 'chat_search 必须在 QQ_SESSION_TOOLS 里，否则默认记忆档位会拦掉');
+assert.ok(CHAT_TOOLS.includes('chat_search'), 'chat_search 必须在 CHAT_TOOLS 里');
 
 // ── ① 工具注册了 ──
 {
@@ -22,10 +28,30 @@ const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
 	const body = m[0];
 	// ── ② 它真的调了检索层 ──
 	assert.match(body, /chatArchive\.search\(/, 'chat_search 必须调 chatArchive.search（别自己另写一套查询）');
-	// ── ③ 参数默认落到当前会话（隐私） ──
-	assert.match(body, /String\(args\.channel \?\? ''\)\.trim\(\) \|\| session\.channelId/, '不填 channel 时必须回落到当前会话，否则能翻别人的私聊');
+	// ── ③ 仅主人 / DSH 可跨会话查，非主人强行传别的 channel 必须拒绝（隐私） ──
+	assert.match(body, /requestedChannel[\s\S]*canCrossChannel[\s\S]*isMasterChannel/, '必须校验 requestedChannel 与 canCrossChannel / isMasterChannel');
+	assert.match(body, /const channel = requestedChannel \|\| session\.channelId \|\| ''/, '不填 channel 时必须回落到当前会话');
+	assert.match(body, /formatChatSearchRows\(/, 'chat_search 返回结果必须走 formatChatSearchRows 截断');
 	// ── ④ 失败要和「没找到」分开说 ──
 	assert.match(body, /if \(!res\.ok\)/, '检索失败必须单独分支，不能当成「没找到」');
+}
+
+// ── ④b formatChatSearchRows 单条与总量截断 ──
+{
+	const now = Date.now();
+	const withSnippet = formatChatSearchRows([{ who: '111', self: false, content: 'A'.repeat(300), snippet: '「命中」片段', at: now }]);
+	assert.match(withSnippet, /「命中」片段/, '超长行有 snippet 时应优先用 snippet');
+	assert.ok(withSnippet.length < 100, '超长行不应整段原样输出');
+
+	const noSnippet = formatChatSearchRows([{ who: '111', self: false, content: 'B'.repeat(300), snippet: '', at: now }]);
+	assert.match(noSnippet, /B{240}…/, '无 snippet 的超长行应截断到 240 字符并加省略号');
+
+	const manyRows = Array.from({ length: 20 }, (_, i) => ({
+		who: '111', self: false, content: `第${i}条：` + 'X'.repeat(210), snippet: '', at: now
+	}));
+	const capped = formatChatSearchRows(manyRows);
+	assert.match(capped, /已省略/, '超过总字符预算时应截断并提示省略条数');
+	assert.ok(capped.length <= 3050, `总输出应受控于上限（实际 ${capped.length}）`);
 }
 
 // ── ⑤ 检索层端到端：工具拿到的东西确实是原文 ──

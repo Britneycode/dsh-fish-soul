@@ -40,7 +40,9 @@ const BLOCKED = new Map([
 	['6cee4e6e3291b439', '机器人自己的 QQ 号（曾误填成主人）'],
 	['2463c5745dfd7e12', '另一个真实 QQ 号'],
 	['e1b94d6a65728571', '主人 B站 uid'],
-	['be5b56a1d03f0159', '主人另一个 B站 uid']
+	['be5b56a1d03f0159', '主人另一个 B站 uid'],
+	['a06fffbdfb91b9a6', '主人昵称'],
+	['e0ffe58da2bbfd95', '第三方真实昵称']
 ]);
 
 // ── baseline：已知存量（文件路径 → 该文件里允许出现的值哈希）。只减不增。
@@ -93,16 +95,71 @@ function scanText(rel, src, label) {
 	}
 }
 
+// ── 非数字标识符（昵称）：中文昵称不是 \d token，得单独扫。
+//    只比对哈希，不存真值。
+//
+//    🔴 切分必须**显式排除中文标点**（2026-11-28）：
+//       `[^\x00-\x7f]+` 把「测试昵称：某人的名字」整段当成一个词
+//       （`：` 也是非 ASCII），哈希对不上任何昵称 ⇒ 防线看起来在、实际大部分位置漏检。
+//       中文标点 + 全角符号按区间排除，剩下的才是「词」。
+const PUNCT_CN = '\u3000-\u303f\uff00-\uffef\u2010-\u2027\u2030-\u205e';
+const NON_ASCII = new RegExp(`[^\\x00-\\x7f${PUNCT_CN}]+`, 'g');
+
+/**
+ * 昵称扫描：**切分命中** + **滑窗子串兜底**，两条都要。
+ *
+ * 🔴 只靠切分不够（2026-11-28 实测）：
+ *    `// 某某某说的` → 切出「某某某说的」，和「某某某」哈希不等 ⇒ 漏；
+ *    `回复某某某：好的` → 切出「回复某某某」⇒ 漏。
+ *    中文没有分词，昵称天然会粘在相邻的字里 —— 切分只能覆盖「昵称独立成词」那部分。
+ *
+ *    做法：对每个切出来的词再**滑窗切成所有子串**（长度 2..16），逐个算哈希比对。
+ *    这样「回复某某某」里能滑出「某某某」，「某某某说的」里也能滑出「某某某」。
+ *    仍然只比哈希、不存真值 —— 存真值等于这个脚本自己就是泄漏源。
+ *    代价：短昵称（2 字）若恰好是常用词会误报。这比漏报好（仓库公开、提交不可撤回）；
+ *    真撞上了就往 baseline 里登记那一个文件，而不是放宽扫描。
+ */
+function nicknameHits(text) {
+	const found = [];
+	const seen = new Set();
+	const words = [...text.matchAll(NON_ASCII)].map((m) => m[0]);
+	for (const w of words) {
+		// ① 整词命中
+		if (BLOCKED.has(h(w)) && !seen.has(w)) { seen.add(w); found.push({ word: w, index: text.indexOf(w) }); }
+		// ② 粘连兜底：从候选里滑窗切出所有子串再比
+		for (let i = 0; i < w.length; i++) {
+			for (let n = 2; n <= Math.min(w.length - i, 16); n++) {
+				const sub = w.slice(i, i + n);
+				if (BLOCKED.has(h(sub)) && !seen.has(sub)) {
+					seen.add(sub);
+					found.push({ word: sub, index: text.indexOf(sub) });
+				}
+			}
+		}
+	}
+	return found;
+}
+function scanNicknames(rel, src, label) {
+	for (const { word, index } of nicknameHits(src)) {
+		const hash = h(word);
+		const line = src.slice(0, index).split('\n').length;
+		const where = `${rel}:${line}${label}`;
+		if (baseline.get(rel)?.has(hash)) { known.push(`${where}（${BLOCKED.get(hash)}，存量）`); continue; }
+		hits.push(`${where} 出现${BLOCKED.get(hash)}`);
+	}
+}
+
 for (const rel of listRepoFiles()) {
 	// ① 工作区副本
 	let src;
 	try { src = readFileSync(join(root, rel), 'utf8'); } catch { continue; }
 	scanText(rel, src, '');
+	scanNicknames(rel, src, '');
 
 	// ② 索引里的版本（staged）——「先 git add 密内容，再把工作区改干净」时
 	//    工作区是干净的、索引里是密的 ⇒ 只扫工作区会放过这次要提交的内容。
 	const staged = spawnSync('git', ['show', `:${rel}`], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-	if (staged.status === 0 && staged.stdout !== src) scanText(rel, staged.stdout, '（已暂存版本）');
+	if (staged.status === 0 && staged.stdout !== src) { scanText(rel, staged.stdout, '（已暂存版本）'); scanNicknames(rel, staged.stdout, '（已暂存版本）'); }
 }
 
 assert.deepEqual(hits, [], `这些地方出现了真实身份标识符（仓库是公开的，提交后不可撤回）：\n${hits.join('\n')}\n\n改法：换成明显假的占位符（如 12345678 / 1234567890123456789）。`);

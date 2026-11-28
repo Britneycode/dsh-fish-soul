@@ -98,7 +98,8 @@ ok(send('private:2974723499', [blob2], now + 40000).length === 1, '模拟：别�
 import { readFileSync } from 'node:fs';
 const gwSrc = readFileSync(new URL('../lib/gateway.js', import.meta.url), 'utf8');
 ok(gwSrc.includes('this.dropRepeats(row, paragraphs)'), 'sendReply 里接着跨条复读守卫（接线没被摘掉）');
-ok(gwSrc.includes('this.recentSent?.delete(m.channelId)'), '收到对方新消息会清该频道的「刚发过」记录（用户再问不误拦）');
+ok(gwSrc.includes('this.shouldClearRecentSent(m.channelId, m.text)'), '收到对方新消息会把「刚发过」标成旧话题（不再整份清空）');
+ok(gwSrc.includes('h.stale = true'), '★★ 标记 stale 而不是 delete —— 清空会让跨条复读守卫在正常多轮对话里彻底失效');
 ok(gwSrc.includes('this.noteSent(row, paragraphs)'), '发送成功后才记「刚发过」（失败的内容不被拦）');
 
 const { ChatGateway } = await import('../lib/gateway.js');
@@ -117,9 +118,10 @@ ok(fake.recentSent.get('private:123456').length === 1, 'noteSent：发过的内�
 // 第二轮没新输入：原样重发 → 拦
 ok(ChatGateway.prototype.dropRepeats.call(fake, row, [long1]).length === 0, 'dropRepeats：没新输入时原样重发被拦');
 ok(notes.some((n) => n.kind === 'filtered' && n.reason.includes('跨条复读')), '拦的时候在动态面板留了 filtered 记录');
-// 用户又开口了：记录清空 → 同样的话照常发
-fake.recentSent.delete('private:123456');
-ok(ChatGateway.prototype.dropRepeats.call(fake, row, [long1]).length === 1, '用户开口后：同样的话再答一遍不被拦');
+// 用户又开口了（换话题）→ 记录标成 stale：一字不差仍然拦，换个说法放行
+ChatGateway.prototype.shouldClearRecentSent.call(fake, 'private:123456', '你今天吃什么了');
+ok(ChatGateway.prototype.dropRepeats.call(fake, row, [long1]).length === 0, '用户开口后：一字不差复读仍被拦（这才是「发重复的话」）');
+ok(ChatGateway.prototype.dropRepeats.call(fake, row, [long1.replace('你那边天气怎么样呀', '你那边天气咋样啊')]).length === 1, '用户开口后：换个说法回答放行（用户再问不误拦）');
 
 // ── 审查回归（P1）：同轮短句只差一个字不误杀（minLen 6→12 后）──
 ok(dedupeParagraphs('你今天几点睡的\n\n你今天几点睡呀').dropped === 0, '同轮只差一个字的短句不误杀');

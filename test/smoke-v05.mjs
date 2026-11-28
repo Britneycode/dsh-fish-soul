@@ -255,7 +255,7 @@ export async function run(t) {
 		assert.ok(!db.prepare("SELECT 1 FROM memory WHERE content LIKE '%无聊的会议%'").get(), '划走的不记');
 		const qqb = context.text(at(sid1));
 		assert.match(qqb, /\[你最近在抖音刷到的（想聊再提，别硬塞）\]\n- 《/);
-		assert.match(qqb, /\n- 《山顶日出》：想去爬山了（链接 https:\/\/www\.douyin\.com\/video\/\d+）\n/); assert.match(qqb, /\n- 《小猫》（猫博主）：团子也这么睡，可爱死了（链接 https:\/\/www\.douyin\.com\/video\/\d+）\n/);
+		assert.match(qqb, /\n- 《山顶日出》：想去爬山了（链接 https:\/\/www\.douyin\.com\/video\/\d+）(?:\n|$)/); assert.match(qqb, /\n- 《小猫》（猫博主）：团子也这么睡，可爱死了（链接 https:\/\/www\.douyin\.com\/video\/\d+）(?:\n|$)/);
 	}
 	ok('抖音刷视频：跳过直播 / 广告 / 看过的；读详情写感受；划走不记、点赞要模型说了才点；感受进 QQ 会话上下文');
 

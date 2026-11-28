@@ -9,7 +9,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const MP3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(64, 1)]);
 
 export async function run(t) {
-	const { assert, ok, call, sleep, waitFor, context, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod, conn } = t;
+	const { assert, ok, call, sleep, waitFor, context, section, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod, conn } = t;
 	const { setKv, getKv } = await import('../lib/db.js');
 	const llmMod = await import('../lib/llm.js');
 	const voiceMod = await import('../lib/voice.js');
@@ -347,10 +347,10 @@ export async function run(t) {
 		p = await call('GET', '/models/state');
 		assert.deepEqual({ ...p.json.web, providers: undefined }, { enabled: false, perDay: 20, usedToday: 0, available: true, provider: 'host', providers: undefined, hostAvailable: true, hostState: 'found', hasApiKey: false, apiKeyMasked: '', baseURL: '', sessionAllow: 'memory' });
 		assert.deepEqual(p.json.web.providers.map((x) => x.id), ['host', 'bocha', 'tavily', 'brave', 'searxng']);
-		assert.match(context.text(at(sid)), /现在不能上网查/);
+		assert.match(section.text(at(sid)), /现在不能上网查/);
 		p = await call('POST', '/models/config', { web: { enabled: true, perDay: 2 } });
 		assert.equal(p.json.web.enabled, true);
-		assert.match(context.text(at(sid)), /可以先用 web_search 查/);
+		assert.match(section.text(at(sid)), /可以先用 web_search 查/);
 		assert.equal(guard({ agent: { id: sid }, name: 'web_search' }), undefined);
 		assert.equal(guard({ agent: { id: sid }, name: 'web_fetch' }), undefined);
 		assert.match(guard({ agent: { id: sid }, name: 'web_search' }), /次数用完了/);
@@ -402,7 +402,7 @@ export async function run(t) {
 		assert.equal(p.json.results[1].site, 'b.example.org');
 		assert.equal((await call('GET', '/models/state')).json.web.usedToday, used0, '测一下不算次数');
 		// 会话里：上下文提 fish_search；护栏放行 fish_search、挡宿主的 web_search；主会话不能用 fish_search
-		assert.match(context.text(at(sid)), /可以先用 fish_search 查/);
+		assert.match(section.text(at(sid)), /可以先用 fish_search 查/);
 		assert.match(guard({ agent: { id: sid }, name: 'web_search' }), /请用 fish_search/);
 		assert.match(guard({ agent: { id: 'main-session' }, name: 'fish_search' }), /只给鱼的聊天会话用/);
 		assert.equal(guard({ agent: { id: sid }, name: 'fish_search' }), undefined);

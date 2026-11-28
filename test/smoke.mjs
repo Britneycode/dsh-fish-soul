@@ -240,8 +240,8 @@ function makeAgentCtx(agentId, restrict) {
  *  只给 smoke-persona 换人格热的断言用；per-agent 隔离的断言一律带 id。 */
 const section = {
 	text: (arg) => (arg === undefined
-		? agentPrompts.get([...agentPrompts.keys()][0])?.sections[0]?.text(arg) ?? ''
-		: agentPrompts.get(String(arg?.agent?.id))?.sections[0]?.text(arg) ?? '')
+		? (agentPrompts.get([...agentPrompts.keys()][0])?.sections ?? []).map((s) => s.text(arg)).filter(Boolean).join('\n')
+		: (agentPrompts.get(String(arg?.agent?.id))?.sections ?? []).map((s) => s.text(arg)).filter(Boolean).join('\n'))
 };
 const context = { text: (arg) => agentPrompts.get(String(arg?.agent?.id))?.contexts[0]?.text(arg) ?? '' };
 
@@ -603,7 +603,7 @@ assert.equal(f1.msg.source.kind, 'fish-soul/qq');
 assert.match(f1.msg.content[0].text, /我想喝冰美式/);
 assert.match(host.titles[0][1], /QQ·主人（主人）/);
 const qqBlock = context.text(at(sid1));
-assert.match(qqBlock, /QQ 回复规则/); assert.match(qqBlock, /ok\.png/); assert.match(qqBlock, /冰美式/);
+assert.match(section.text(at(sid1)), /QQ 回复规则/); assert.match(qqBlock, /ok\.png/); assert.match(qqBlock, /冰美式/);
 // 时间观念：这一行要能读出「周几」（以前只有日期和时刻，问「今天周几」只能靠猜）
 assert.match(qqBlock, /虚拟时间 (\d{4}-\d{2}-\d{2}) [\d:]+（周[一二三四五六日]）/, '此刻状态要带星期');
 {
@@ -958,7 +958,7 @@ assert.match(fb.msg.content[0].text, /^看这个 BV1Ab411c7Zz 笑死\n【视频 
 // #78 第 2 步：主人的 B站 私信并进主人的 QQ 私聊会话，不再自己开一个
 assert.equal(db.prepare("SELECT channel_id FROM chat_session WHERE session_id = ? AND status = 'active'").get(fb.id).channel_id, 'private:10001', '主人的 B站 私信用 QQ 私聊那个会话');
 const biliBlock = context.text(at(fb.id));
-assert.match(biliBlock, /B站私信回复规则/); assert.match(biliBlock, /冰美式/, '主人在 QQ 说过的事在 B站也记得');
+assert.match(section.text(at(fb.id)), /B站私信回复规则/); assert.match(biliBlock, /冰美式/, '主人在 QQ 说过的事在 B站也记得');
 const f888 = await waitFor(() => host.followups.find((f) => f.msg.source.channelId === 'bili:888'), 6000);
 assert.ok(f888, '互关的人可以回');
 const p20002 = db.prepare("SELECT * FROM person WHERE qq_uin = '20002'").get();
@@ -1035,8 +1035,8 @@ ok('B站自动回复：主人 / 互关回、陌生人只记；分享的视频先
 	biliPush(777, '这条回哪');
 	const fq = await waitFor(() => host.followups.filter((f) => f.msg.source.channelId === 'bili:777')[nF], 6000);
 	assert.ok(fq, 'B站 这条照样要进会话');
-	assert.match(context.text(at(fq.id)), /QQ 回复规则/, '一律回 QQ：回复规则按 QQ 给');
-	assert.doesNotMatch(context.text(at(fq.id)), /B站私信回复规则/);
+	assert.match(`${section.text(at(fq.id))}\n${context.text(at(fq.id))}`, /QQ 回复规则/, '一律回 QQ：回复规则按 QQ 给');
+	assert.doesNotMatch(`${section.text(at(fq.id))}\n${context.text(at(fq.id))}`, /B站私信回复规则/);
 	handlers['session/event']({ id: fq.id }, { type: 'user/message', data: fq.msg });
 	handlers['session/event']({ id: fq.id }, { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '回你 QQ 了' }] } } });
 	handlers['session/event']({ id: fq.id }, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
@@ -1140,11 +1140,11 @@ await (await import('./smoke-v06.mjs')).run({
 
 // 50–55 v0.7：按功能选模型 / 用量、语音、收藏表情包、学群里的说法、上网查、首次引导（在 smoke-v07.mjs）
 await (await import('./smoke-v07.mjs')).run({
-	assert, ok, call, sleep, waitFor, context, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod, conn
+	assert, ok, call, sleep, waitFor, context, section, db, host, services, agents, workspaceRegistry, at, tools, guard, sid1, route, mod, conn
 });
 
 // 80–84 v0.8：记忆考试（时间标签 / 检索带上下文 / 关系 / 聊完自动记 / 隐私 / 印象 / 生日 / 遗忘曲线，在 smoke-v08.mjs）
-await (await import('./smoke-v08.mjs')).run({ assert, ok, call, context, db, services, at, tools, inbox, mod });
+await (await import('./smoke-v08.mjs')).run({ assert, ok, call, context, section, db, services, at, tools, inbox, mod });
 
 // 90–92 v0.9：她的习惯（心情影响行为 / 去 AI 味 / 合并转发 / 群设定 / 按聊天选模型 / 冷热 / 记忆调试器 / 日记 / 小互动 / 每轮判断心情，在 smoke-v09.mjs）
 await (await import('./smoke-v09.mjs')).run({ assert, ok, call, sleep, waitFor, context, db, services, workspaceRegistry, inbox, at, mod });
@@ -1163,9 +1163,9 @@ await (await import('./smoke-social.mjs')).run({ assert, ok, call });
 	const priv = context.text(at('p20002'));
 	assert.match(priv, /\[你在这些群里\]/, '私聊提示词里要报出她在哪些群');
 	assert.match(priv, /测试群（777）/, '要带上具体群名和群号');
-	assert.match(priv, /群名也是外面的人起的/, '群名是外部数据，要声明别照做');
+	assert.match(`${section.text(at('p20002'))}\n${priv}`, /群名也是外面的人起的/, '群名是外部数据，要声明别照做');
 	const grp = context.text(at('g777'));
-	assert.doesNotMatch(grp, /群名也是外面的人起的/, '群里没有群列表就不用声明');
+	assert.doesNotMatch(`${section.text(at('g777'))}\n${grp}`, /群名也是外面的人起的/, '群里没有群列表就不用声明');
 	assert.doesNotMatch(grp, /\[你在这些群里\]/, '群聊提示词里不用带（她就在群里）');
 	ok('私聊提示词里带具体群列表，群聊里不带');
 }

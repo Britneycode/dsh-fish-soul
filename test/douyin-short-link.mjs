@@ -79,7 +79,7 @@ const ok = (m) => console.log('✓', m);
 	});
 	// 替换解析器（真实解析要发网络请求）
 	adapter.resolveShortLink = async () => '7707911549709601777';
-	await adapter.send({ channel_id: 'douyin:未云' }, 'https://v.douyin.com/abc123', [], '0:1:123:456');
+	await adapter.send({ channel_id: 'douyin:某人' }, 'https://v.douyin.com/abc123', [], '0:1:123:456');
 	assert.equal(cards.length, 1, '短链要变成卡片');
 	assert.equal(cards[0].videoId, '7707911549709601777');
 	assert.deepEqual(texts, [], '变成卡片就不该再发文字');
@@ -106,7 +106,7 @@ const ok = (m) => console.log('✓', m);
 	});
 	adapter.resolveShortLink = async () => ''; // 解析不出来
 	const link = 'https://v.douyin.com/abc123';
-	await adapter.send({ channel_id: 'douyin:未云' }, link, [], '0:1:123:456');
+	await adapter.send({ channel_id: 'douyin:某人' }, link, [], '0:1:123:456');
 	assert.equal(cards.length, 0, '拿不到作品 ID 就不发卡片');
 	assert.deepEqual(texts, [link], '🔴 链接要原样发文字，不能丢');
 	ok('解析失败：退回文字，链接不丢');

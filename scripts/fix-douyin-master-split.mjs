@@ -4,7 +4,7 @@
 //  ① master 行同时挂 QQ + B站，但没挂抖音 ⇒ 主人的抖音消息被建成独立 person 行 ⇒
 //     「抖音的记忆跟 QQ/B站 分开」。根因是 `douyin.masterUid` 是空的：认人走
 //     `resolveOrCreatePlatformPerson({ masterId: cfg.masterUid || '' })`，空就认不出主人。
-//  ② `person.douyin_uid` 里混着裸昵称（`Re.`）和截断 uid（`uid:<被 Number 抹平的 19 位数字>`），
+//  ② `person.douyin_uid` 里混着裸昵称（`某某`）和截断 uid（`uid:<被 Number 抹平的 19 位数字>`），
 //     而认人按这一列精确匹配 ⇒ 同一个人的不同写法各占一行。
 //
 // 用法：node scripts/fix-douyin-master-split.mjs [--dry-run]
@@ -25,7 +25,7 @@ if (!existsSync(dbPath)) { console.error('找不到库：', dbPath); process.exi
 const MERGES = [
 	// 主人的抖音身份 → master（内容是他本人：「这是我呀」「你在干嘛呢」+ 我发的测试消息）
 	{ from: 'p_4c0644fc', to: 'master' },
-	// 两个「Re.」是同一个人：内容对得上（在打什么 / 王者 / 赛车游戏 / [晚上好]），
+	// 两个「某某」是同一个人：内容对得上（在打什么 / 王者 / 赛车游戏 / [晚上好]），
 	// 一行是 QQ 身份挂着裸昵称，一行是抖音 uid
 	{ from: 'p_e70d82a7', to: 'p_4eb7df52' }
 ];
@@ -69,7 +69,7 @@ function mergeOne(from, to, col) {
 		// ⚠️ `person.douyin_uid` 是 UNIQUE：先摘掉旧行的键、删掉旧行，再写到目标行上。
 		//
 		// 🔴 判据不能写成 `dst[col] === null` —— 目标行上那个键可能是**脏值**（真机里
-		//    `p_4eb7df52` 的 douyin_uid 是裸昵称 `Re.`，不是 null），那样就跳过写入，
+		//    `p_4eb7df52` 的 douyin_uid 是裸昵称 `某某`，不是 null），那样就跳过写入，
 		//    合并后目标行还挂着脏身份。正确判据是「目标行的键不是这个键」。
 		if (key !== null && key !== undefined && dst[col] !== key) {
 			db.prepare(`UPDATE person SET ${col} = NULL WHERE canonical_id = ?`).run(from);
@@ -89,7 +89,7 @@ function mergeOne(from, to, col) {
 
 // 主人那一行要并到 master 的 douyin_uid（master 原本是空的）
 mergeOne('p_4c0644fc', 'master', 'douyin_uid');
-// 两个 Re. 合并：并到挂着 QQ 的那行（真人身份更硬），把抖音 uid 挂上去
+// 两个「某某」合并：并到挂着 QQ 的那行（真人身份更硬），把抖音 uid 挂上去
 mergeOne('p_e70d82a7', 'p_4eb7df52', 'douyin_uid');
 
 // ── 删掉确认过的脏行 ──

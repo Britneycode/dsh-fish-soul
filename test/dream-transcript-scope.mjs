@@ -4,8 +4,8 @@
 //   `transcriptSample` 拼的通道名是 `qq:<qq_uin>` 和 canonical_id（`p_4eb7df52`），
 //   而聊天存档里存的是 gateway 的 channelId（`private:<QQ>` / `douyin:<昵称>` / `bili:<uid>`）
 //   ⇒ **永远对不上** ⇒ 每次都走到「无 channel 过滤的全库取样」。
-//   真机数据：给抖音陌生人 Re. 整理时，取样实际拿到的是主人 45 条私聊 + 群里 757 条 + 另一个抖音号 80 条
-//   ⇒ 模型把「养的鱼叫肥鱼」「浙江大学生AI竞赛」写成了 Re. 的印象。
+//   真机数据：给抖音陌生人整理时，取样实际拿到的是主人 45 条私聊 + 群里 757 条 + 另一个抖音号 80 条
+//   ⇒ 模型把「养的鱼叫肥鱼」「浙江大学生AI竞赛」写成了那个人的印象。
 //
 // 这里的断言打的是「取样范围」，不是「有没有调 sample」——
 // 后者拆掉修复照样绿（本项目踩过很多次的坑）。
@@ -50,7 +50,7 @@ test('#166 给某个人整理时，只取他自己那条私聊的原文（不碰
 	const t = fakeTranscripts({
 		'private:1234567890': [roomy('我想养鱼，叫肥鱼', NOW - 2 * H)],
 		'group:1125962189': [roomy('群里说了一堆插件的事', NOW - 3 * H)],
-		'douyin:未云': [roomy('未云的私聊', NOW - 4 * H)]
+		'douyin:某人': [roomy('某人的私聊', NOW - 4 * H)]
 	});
 	const life = engine(t);
 	// 这个人只有 B站 UID，没有 QQ 号 ⇒ 只能取 bili:<uid> 那条
@@ -65,11 +65,11 @@ test('#166 给某个人整理时，只取他自己那条私聊的原文（不碰
 test('#166 取不到就返回空，绝不退化成「无 channel 过滤的全库取样」', () => {
 	const t = fakeTranscripts({
 		'private:1234567890': [roomy('主人的秘密', NOW - 1 * H)],
-		'douyin:Re.': [roomy('陌生人的招呼', NOW - 1 * H)]
+		'douyin:某某': [roomy('陌生人的招呼', NOW - 1 * H)]
 	});
 	const life = engine(t);
 	// 这个人连 QQ 号都没有（只有抖音身份）⇒ 没有任何可用的通道
-	const person = { canonical_id: 'p_4eb7df52', display_name: 'Re.', qq_uin: null, bili_uid: null, douyin_uid: 'douyin:1111222233334444' };
+	const person = { canonical_id: 'p_4eb7df52', display_name: '某某', qq_uin: null, bili_uid: null, douyin_uid: 'douyin:1111222233334444' };
 	const out = life.transcriptSample('user:p_4eb7df52', [{ created_at: NOW }], person);
 
 	assert.deepEqual(t.calls, [], '没有可用通道时连 sample 都不该调（更别说无过滤取样）');
@@ -88,8 +88,8 @@ test('#166 通道名按存档的真实形状拼：private:<QQ> / bili:<uid>（�
 test('#166 候选通道名也能来自「这个人自己的记忆行」（抖音昵称那路靠它）', () => {
 	const life = engine(fakeTranscripts({}));
 	assert.deepEqual(
-		life.transcriptChannelsOf({ qq_uin: null, bili_uid: null }, [{ channel: 'douyin-private', channel_id: 'douyin:Re.' }]),
-		['douyin:Re.']
+		life.transcriptChannelsOf({ qq_uin: null, bili_uid: null }, [{ channel: 'douyin-private', channel_id: 'douyin:某某' }]),
+		['douyin:某某']
 	);
 });
 

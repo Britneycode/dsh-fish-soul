@@ -7,8 +7,8 @@ const { openDatabase, getKv, setKv } = await import('../lib/db.js');
 const { DouyinChannel } = await import('../lib/channels/douyin.js');
 const db = openDatabase();
 setKv(db, 'douyin.bootstrapped', true);
-const key = `douyin.conv.${(await import('node:crypto')).createHash('sha1').update('未云').digest('hex').slice(0,16)}`;
-setKv(db, key, { name: '未云', sig: '旧', window: [] });
+const key = `douyin.conv.${(await import('node:crypto')).createHash('sha1').update('某人').digest('hex').slice(0,16)}`;
+setKv(db, key, { name: '某人', sig: '旧', window: [] });
 setKv(db, `douyin.retry.${key}`, Date.now()); // 刚失败 → 窗口内
 const d = new Date(); const hh = String(d.getHours()).padStart(2,'0'); const mm = String(d.getMinutes()).padStart(2,'0');
 let reads = 0;
@@ -17,7 +17,7 @@ const ch = new DouyinChannel({
   getConfig:()=>({enabled:true}), log:()=>{}, onMessage:async()=>({done:true}),
   driver:{
     checkLogin:async()=>true,
-    list:async()=>({ok:true,conversations:[{name:'未云',unread:0,time:hh+':'+mm,preview:'新预览'}]}),
+    list:async()=>({ok:true,conversations:[{name:'某人',unread:0,time:hh+':'+mm,preview:'新预览'}]}),
     read:async()=>{ reads++; return {ok:false,error:'x'}; },
   },
   pollRangeMs:[1000,2000],

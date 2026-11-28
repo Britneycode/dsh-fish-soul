@@ -82,12 +82,12 @@ const src = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8');
 	const chans = life.transcriptChannelsOf(
 		{ qq_uin: null, bili_uid: null },
 		[
-			{ channel: 'douyin-private', channel_id: 'douyin:Re.' },
+			{ channel: 'douyin-private', channel_id: 'douyin:某某' },
 			{ channel: 'qq-group', channel_id: 'group:1125962189' },
 			{ channel: 'douyin-group', channel_id: 'douyin-group:某群' }
 		]
 	);
-	assert.deepEqual(chans, ['douyin:Re.'], '只取本人私聊通道；群通道要排除（群里的对话不是"他和我的对话"）');
+	assert.deepEqual(chans, ['douyin:某某'], '只取本人私聊通道；群通道要排除（群里的对话不是"他和我的对话"）');
 }
 
 // ── ④ 手动入口存在：/inspector/dream 走的就是同一个 runDream ──

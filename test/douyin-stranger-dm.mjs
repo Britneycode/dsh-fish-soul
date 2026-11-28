@@ -235,7 +235,7 @@ test('轮询路：第一次见到的会话，时间再旧也要读一次（不�
 
 test('轮询路：验证过的会话预览没变就不读（不回归已有会话）', async () => {
   reset();
-  const name = '未云';
+  const name = '某人';
   setKv(db, keyOf(name), {
     name, sig: '15:26|在线', convId: FRIEND_CONV, identity: `douyin:${FRIEND}`,
     window: ['h1', 'h2'], readAt: Date.now() - 60_000,
@@ -280,7 +280,7 @@ test('轮询路：连续读失败到上限的会话，不再每轮硬读（熔�
 // ── ④ 推送路不能覆盖轮询路的游标 ───────────────────────────────────────────
 test('推送路入库不能清掉游标里的窗口 / sig（否则下一轮轮询把同几条再收一遍）', async () => {
   reset();
-  const name = '未云';
+  const name = '某人';
   const key = keyOf(name);
   setKv(db, key, {
     name, sig: '15:26|在线', convId: FRIEND_CONV, identity: `douyin:${FRIEND}`,
@@ -305,8 +305,8 @@ test('面板只报还活着的会话；游标没了的失败计数要清掉', as
   setKv(db, `douyin.retry.${orphan}`, Date.now() - 2 * 3600_000);
   setKv(db, `douyin.readAt.${orphan}`, Date.now() - 2 * 3600_000);
   // 一条真的（游标在）
-  const live = keyOf('未云');
-  setKv(db, live, { name: '未云', sig: 'x', convId: FRIEND_CONV, identity: `douyin:${FRIEND}`, window: ['h'], readAt: Date.now() });
+  const live = keyOf('某人');
+  setKv(db, live, { name: '某人', sig: 'x', convId: FRIEND_CONV, identity: `douyin:${FRIEND}`, window: ['h'], readAt: Date.now() });
   setKv(db, `douyin.fails.${live}`, 1);
   setKv(db, `douyin.retry.${live}`, Date.now());
 

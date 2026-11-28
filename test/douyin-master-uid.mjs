@@ -27,14 +27,14 @@ const proto = mediaMethods;
 // 真实方法挂在 mediaMethods 上，用 Object.assign 造一个带这些方法的 this
 const makeGw = (cfg) => Object.assign(Object.create(proto), {
   db,
-  douyinConfig: () => ({ enabled: true, masterUid: cfg.masterUid ?? '', masterName: '未云' }),
+  douyinConfig: () => ({ enabled: true, masterUid: cfg.masterUid ?? '', masterName: '某人' }),
 });
 
 /** 建一个 master 行，douyin_uid 记成给定值（空串 = 没有） */
 function setMasterRow(douyinUid) {
   db.prepare("DELETE FROM person WHERE canonical_id = 'master'").run();
   db.prepare(
-    "INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, aliases, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master', '12345678', ?, '未云', '[]', 'close', 1, ?, ?)"
+    "INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, aliases, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master', '12345678', ?, '某人', '[]', 'close', 1, ?, ?)"
   ).run(douyinUid, Date.now(), Date.now());
 }
 
@@ -82,7 +82,7 @@ setMasterRow('douyin:111111111111111111');
 }
 
 // ── 5. 脏值不能被当成身份（不能因为填了点什么就放行）──────────────────────
-for (const bad of ['', '  ', '未云', '7000000000000000001', 'douyin:abc', 'uid:123']) {
+for (const bad of ['', '  ', '某人', '7000000000000000001', 'douyin:abc', 'uid:123']) {
   setMasterRow('');
   const gw = makeGw({ masterUid: bad });
   assert.equal(proto.masterDouyinIdentity.call(gw), '', `「${bad}」不是合法身份键`);

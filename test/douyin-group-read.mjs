@@ -85,8 +85,8 @@ const groupMsg = (seq, text, name) => ({
 		},
 		onMessage: async () => ({ queued: true })
 	});
-	await ch.readConversation({ c: { time: '' }, name: '未云', key: 'conv-single', st: null, sig: 'new', unread: true });
-	const rows = db.prepare("SELECT COUNT(*) n FROM douyin_inbox WHERE channel_id='douyin:未云'").get().n;
+	await ch.readConversation({ c: { time: '' }, name: '某人', key: 'conv-single', st: null, sig: 'new', unread: true });
+	const rows = db.prepare("SELECT COUNT(*) n FROM douyin_inbox WHERE channel_id='douyin:某人'").get().n;
 	assert.equal(rows, 1, '单聊照常入库');
 	ok('单聊：没被群聊的改动带坏');
 }

@@ -45,13 +45,13 @@ const ok = (n) => console.log('✓', n);
 	// 两个 key 交替出现时，各自仍按窗口合并。只看队尾会拆成 4 条。
 	let now = 2_500_000;
 	const d = new DiagLog({ db, now: () => now });
-	d.add('douyin-inbox-gap:douyin:未云', { channelId: 'douyin:未云' }, 'warn');
+	d.add('douyin-inbox-gap:douyin:某人', { channelId: 'douyin:某人' }, 'warn');
 	now += 1000;
-	d.add('douyin-inbox-gap:douyin:Re.', { channelId: 'douyin:Re.' }, 'warn');
+	d.add('douyin-inbox-gap:douyin:某某', { channelId: 'douyin:某某' }, 'warn');
 	now += 1000;
-	d.add('douyin-inbox-gap:douyin:未云', { channelId: 'douyin:未云' }, 'warn');
+	d.add('douyin-inbox-gap:douyin:某人', { channelId: 'douyin:某人' }, 'warn');
 	now += 1000;
-	d.add('douyin-inbox-gap:douyin:Re.', { channelId: 'douyin:Re.' }, 'warn');
+	d.add('douyin-inbox-gap:douyin:某某', { channelId: 'douyin:某某' }, 'warn');
 	const list = d.list();
 	assert.equal(list.length, 2, `交替出现仍应各留一条，实际 ${list.length}`);
 	assert.deepEqual(list.map((e) => e.count).sort(), [2, 2]);

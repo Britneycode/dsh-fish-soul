@@ -91,7 +91,7 @@ function seedConversation(identity) {
 {
 	db.exec("DELETE FROM kv WHERE key LIKE 'douyin.conv.%'");
 	const ch = channel('douyin:37638767132');
-	setKv(db, 'douyin.conv.dirty0000000000', { name: '脏的', identity: 'Re.', readAt: Date.now() });
+	setKv(db, 'douyin.conv.dirty0000000000', { name: '脏的', identity: '某某', readAt: Date.now() });
 	assert.equal(ch.masterUidMismatch(), null, 'identity 不是 douyin:<数字uid> 的行不能拿来当证据');
 	ok('脏 identity → 不算已学到的身份');
 }

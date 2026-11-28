@@ -208,9 +208,9 @@ const panelData = {
       identityState: { selfUids: ['999'], disabledByFlag: false },
       inbox: {
         counts: { processing: 1, unknown: 12, pending: 2 },
-        gaps: [{ id: 1, channelId: 'douyin:Re.', reason: '读取过程中断，请手动检查' }],
+        gaps: [{ id: 1, channelId: 'douyin:某某', reason: '读取过程中断，请手动检查' }],
         gapCount: 12,
-        review: [{ id: 5, channelId: 'douyin:Re.', text: '在吗' }],
+        review: [{ id: 5, channelId: 'douyin:某某', text: '在吗' }],
         unknownTotal: 12,
         pendingTotal: 2,
       },

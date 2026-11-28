@@ -19,7 +19,7 @@ let dyThrows = null;
 const cfg = {
 	qq: { enabled: true }, masterQqUin: '10001',
 	bili: { enabled: true, masterUid: '555', autoReply: true },
-	douyin: { enabled: true, masterName: '未云', autoReply: true }
+	douyin: { enabled: true, masterName: '某人', autoReply: true }
 };
 
 const bili = {
@@ -105,7 +105,7 @@ const ok = (msg) => { console.log('  ✓ ' + msg); };
 {
 	assert.equal(gw.isMasterChannel('private:10001'), true, '主人 QQ 私聊算主人');
 	assert.equal(gw.isMasterChannel('group:991'), false, '群聊不算主人');
-	assert.equal(gw.isMasterChannel('douyin:未云'), false, '昵称不能授予主人权限');
+	assert.equal(gw.isMasterChannel('douyin:某人'), false, '昵称不能授予主人权限');
 	ok('只有主人的私聊算主人');
 }
 

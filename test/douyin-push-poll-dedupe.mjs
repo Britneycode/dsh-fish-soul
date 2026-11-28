@@ -30,7 +30,7 @@ new DouyinInbox(db).status(); // 建表（懒创建）
 const SELF = '900001';
 const PEER = '7000000000000000001';
 const CONV = `0:1:${SELF}:${PEER}`;
-const NAME = '未云';
+const NAME = '某人';
 const keyOf = (name) => `douyin.conv.${createHash('sha1').update(String(name)).digest('hex').slice(0, 16)}`;
 
 function reset() {

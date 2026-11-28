@@ -266,7 +266,7 @@ const biliChat = (uid) => ({ channelId: `bili:${uid}`, chatType: 'private', targ
 {
 	// 13. 昵称配置（主人的真实写法）+ 二次确认：保留配置，但挡住冒充
 	//
-	// 真机配置就是 `未云=19000000001` 这种**昵称**格式。完全禁掉会让主人白配一次；
+	// 真机配置就是 `某人=19000000001` 这种**昵称**格式。完全禁掉会让主人白配一次；
 	// 完全放行就是 PR #96 的冒充洞。折中：昵称只用来**定位**，
 	// 授权必须有「已确认的事实」—— person 表里这行同时有 douyin_uid + qq_uin。
 	const { createHash } = await import('node:crypto');

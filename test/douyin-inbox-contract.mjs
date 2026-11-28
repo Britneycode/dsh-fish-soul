@@ -64,7 +64,7 @@ test('onDouyinMessage 交给模型时必须返回 queued（否则标 unknown 挡
     resolveDouyinPerson: () => ({ canonical_id: 'master' }),
     note: () => {}, enqueue: () => {}, soul: { memorizeUnanswered: () => {} },
   });
-  const m = { channelId: `douyin:未云`, userId: `douyin:${PEER}`, nickname: '未云', text: '在吗', messageId: 's1', timeMs: Date.now(), convId: CONV };
+  const m = { channelId: `douyin:某人`, userId: `douyin:${PEER}`, nickname: '某人', text: '在吗', messageId: 's1', timeMs: Date.now(), convId: CONV };
   const r = await gw.onDouyinMessage(m);
   assert.equal(r?.queued, true, '交给模型必须返回 queued，结算由 turn/end 回写');
 });
@@ -72,7 +72,7 @@ test('onDouyinMessage 交给模型时必须返回 queued（否则标 unknown 挡
 test('三条消息全部进入 processing，没有 unknown（不再一条之后全哑）', async () => {
   db.exec('DELETE FROM douyin_inbox');
   const ch = makeChannel([1, 2, 3].map((i) => ({ fromMe: false, senderId: PEER, convId: CONV, type: 'text', text: `消息${i}`, time: Date.now() + i })));
-  await ch.readConversation({ c: {}, name: '未云', key: keyOf('未云'), st: null, sig: 'x', unread: true });
+  await ch.readConversation({ c: {}, name: '某人', key: keyOf('某人'), st: null, sig: 'x', unread: true });
 
   const rows = db.prepare('SELECT status FROM douyin_inbox ORDER BY id').all();
   assert.equal(rows.length, 3, '三条都入库');
@@ -90,7 +90,7 @@ test('超过时限的旧消息标 done（不是 unknown），不挡同会话后�
     { fromMe: false, senderId: PEER, convId: CONV, type: 'text', text: '旧消息', time: old },
     { fromMe: false, senderId: PEER, convId: CONV, type: 'text', text: '新消息', time: Date.now() },
   ]);
-  await ch.readConversation({ c: {}, name: '未云', key: keyOf('未云'), st: null, sig: 'x', unread: true });
+  await ch.readConversation({ c: {}, name: '某人', key: keyOf('某人'), st: null, sig: 'x', unread: true });
 
   const rows = db.prepare('SELECT status FROM douyin_inbox ORDER BY id').all();
   assert.equal(rows.length, 2, '两条都入库');
@@ -106,11 +106,11 @@ test('抖音回合的回复要真的发出去（不能无条件早退）', async
   Object.assign(gw, {
     db, log: () => {}, stopped: false,
     douyin: { connected: true }, bili: null,
-    bound: new Map([['s', { channel_id: `douyin:未云`, title: '抖音·未云', workspace_path: 'D:/tmp' }]]),
+    bound: new Map([['s', { channel_id: `douyin:某人`, title: '抖音·某人', workspace_path: 'D:/tmp' }]]),
     outbox: { hasQueued: () => false, enqueue: () => {} },
     recentSent: new Map(), turnMood: new Map(), interjectTurns: new Map(),
     paused: new Set(), stickers: null, replyTarget: () => 'source',
-    douyinConfig: () => ({ masterUid: `douyin:${PEER}`, masterName: '未云', enabled: true }),
+    douyinConfig: () => ({ masterUid: `douyin:${PEER}`, masterName: '某人', enabled: true }),
     biliConfig: () => ({}), voiceConfig: () => ({ enabled: false }), embeddingModel: () => ({}),
     moodOf: () => ({ delay: 1 }), moodPick: (_p, t) => t, cleanOut: (t) => t,
     firstDelay: () => 0, sleep: async () => {}, random: () => 0.5,
@@ -118,7 +118,7 @@ test('抖音回合的回复要真的发出去（不能无条件早退）', async
     note: () => {}, dmImages: async () => [], relayDmVoice: async (t) => String(t ?? ''),
     sendDouyin: async (_row, _text, _imgs, conv) => { douyinCalls++; return conv ? { ok: true, delivered: true } : { ok: false, delivered: false, error: '缺 convId' }; },
   });
-  const st = { channelId: `douyin:未云`, convId: CONV, text: '这是她的回复', images: [], messageIds: [], inboxIds: [] };
+  const st = { channelId: `douyin:某人`, convId: CONV, text: '这是她的回复', images: [], messageIds: [], inboxIds: [] };
   const r = await gw.sendReply('s', st);
   assert.equal(r, true, '抖音回复要成功');
   assert.equal(douyinCalls, 1, 'sendDouyin 必须真的被调用（原来这里被早退拦死）');
@@ -136,7 +136,7 @@ test('抖音内容不能借 QQ 通道泄露（隔离闸仍然有效）', async (
     outbox: { hasQueued: () => false, enqueue: () => {} },
     recentSent: new Map(), turnMood: new Map(), interjectTurns: new Map(),
     paused: new Set(), stickers: null, replyTarget: () => 'qq',
-    douyinConfig: () => ({ masterUid: `douyin:${PEER}`, masterName: '未云', enabled: true }),
+    douyinConfig: () => ({ masterUid: `douyin:${PEER}`, masterName: '某人', enabled: true }),
     biliConfig: () => ({}), voiceConfig: () => ({ enabled: false }), embeddingModel: () => ({}),
     moodOf: () => ({ delay: 1 }), moodPick: (_p, t) => t, cleanOut: (t) => t,
     firstDelay: () => 0, sleep: async () => {}, random: () => 0.5,
@@ -145,7 +145,7 @@ test('抖音内容不能借 QQ 通道泄露（隔离闸仍然有效）', async (
     channel: { send: async () => { qqCalls++; return 'mid'; } },
     sendDouyin: async () => ({ ok: true, delivered: true }),
   });
-  const st = { channelId: `douyin:未云`, convId: CONV, text: '抖音内容', images: [], messageIds: [], inboxIds: [] };
+  const st = { channelId: `douyin:某人`, convId: CONV, text: '抖音内容', images: [], messageIds: [], inboxIds: [] };
   const r = await gw.sendReply('s', st);
   assert.equal(r, false, '抖音回合不能借 QQ 通道发出去');
   assert.equal(qqCalls, 0, '一条都不能发到 QQ');
@@ -156,10 +156,10 @@ test('DOM 路补的图片 / 表情要能进来（它们没有 convId / senderId�
   db.exec('DELETE FROM douyin_inbox');
   const ch = makeChannel([
     { fromMe: false, senderId: PEER, convId: CONV, type: 'text', text: '你好', time: Date.now() },
-    { fromMe: false, type: 'image', text: '', media: { data: 'https://p3.douyinpic.com/a.jpg' }, senderName: '未云', y: 100 },
-    { fromMe: false, type: 'emoji', text: '', media: { name: '比心', data: 'https://p3.douyinpic.com/e.png' }, senderName: '未云', y: 200 },
+    { fromMe: false, type: 'image', text: '', media: { data: 'https://p3.douyinpic.com/a.jpg' }, senderName: '某人', y: 100 },
+    { fromMe: false, type: 'emoji', text: '', media: { name: '比心', data: 'https://p3.douyinpic.com/e.png' }, senderName: '某人', y: 200 },
   ]);
-  await ch.readConversation({ c: {}, name: '未云', key: keyOf('未云'), st: null, sig: 'x', unread: true });
+  await ch.readConversation({ c: {}, name: '某人', key: keyOf('某人'), st: null, sig: 'x', unread: true });
 
   const rows = db.prepare('SELECT payload FROM douyin_inbox ORDER BY id').all().map((r) => JSON.parse(r.payload));
   assert.ok(rows.some((m) => m.images?.some((i) => String(i.url).includes('.jpg'))), '图片要进来');
@@ -173,7 +173,7 @@ test('别的会话的消息不能混进来（串会话 / 冒充防护）', async
     // 自带身份，但属于**另一个**会话 —— senderBelongsToConversation 单独挡不住
     { fromMe: false, senderId: '888888888888888888', convId: `0:1:${SELF}:888888888888888888`, type: 'text', text: '我是骗子', time: Date.now() },
   ]);
-  await ch.readConversation({ c: {}, name: '未云', key: keyOf('未云'), st: null, sig: 'x', unread: true });
+  await ch.readConversation({ c: {}, name: '某人', key: keyOf('某人'), st: null, sig: 'x', unread: true });
 
   const rows = db.prepare('SELECT payload FROM douyin_inbox ORDER BY id').all().map((r) => JSON.parse(r.payload));
   assert.ok(!rows.some((m) => String(m.text ?? '').includes('骗子')), '别的会话的消息不能入库');
@@ -183,9 +183,9 @@ test('别的会话的消息不能混进来（串会话 / 冒充防护）', async
 test('单聊不会被昵称误判成群（DOM 媒体消息只有 senderName）', () => {
   const msgs = [
     { fromMe: false, senderId: PEER, convId: CONV, type: 'text', text: '你好' },
-    { fromMe: false, type: 'image', text: '', senderName: '未云' },
+    { fromMe: false, type: 'image', text: '', senderName: '某人' },
   ];
-  assert.equal(isGroupConversation(msgs, { name: '未云', groups: [] }), false, '同一个人 + 他的昵称不能被数成两个 peer');
+  assert.equal(isGroupConversation(msgs, { name: '某人', groups: [] }), false, '同一个人 + 他的昵称不能被数成两个 peer');
   // 真的两个人还是要判成群
   const realGroup = [
     { fromMe: false, senderId: '111', type: 'text', text: 'a' },

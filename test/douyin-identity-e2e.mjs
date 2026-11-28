@@ -24,7 +24,7 @@ function makeWorld({ masterUid = `douyin:${MASTER}`, allowList = [], replyAll = 
 	const followups = [];
 	const config = {
 		qq: { enabled: true }, masterQqUin: '123',
-		douyin: { enabled: true, autoReply: true, masterUid, masterName: '未云', allowList, replyAll, replyLink: false }
+		douyin: { enabled: true, autoReply: true, masterUid, masterName: '某人', allowList, replyAll, replyLink: false }
 	};
 	const douyin = {
 		connected: true,
@@ -42,7 +42,7 @@ function makeWorld({ masterUid = `douyin:${MASTER}`, allowList = [], replyAll = 
 	return { db, gw, sent, followups };
 }
 
-const inbound = (peer, { nickname = '未云', text = '在吗', convId } = {}) => ({
+const inbound = (peer, { nickname = '某人', text = '在吗', convId } = {}) => ({
 	channel: 'douyin', chatType: 'private',
 	channelId: `douyin:${nickname}`,
 	targetId: nickname,
@@ -66,9 +66,9 @@ test('主人按会话身份认出来（不是靠昵称）', async () => {
 
 test('同名冒充挡得住：昵称一样、身份不同 → 不是主人', async () => {
 	const { db, gw } = makeWorld();
-	const r = await gw.onDouyinMessage(inbound(STRANGER, { nickname: '未云' }));
+	const r = await gw.onDouyinMessage(inbound(STRANGER, { nickname: '某人' }));
 	assert.equal(r.review, '只记不回', '陌生人不回');
-	assert.equal(gw.isMasterChannel(`douyin:未云`), false);
+	assert.equal(gw.isMasterChannel(`douyin:某人`), false);
 	const stranger = db.prepare("SELECT * FROM person WHERE douyin_uid = ?").get(`douyin:${STRANGER}`);
 	assert.ok(stranger, '陌生人也有自己的行');
 	assert.notEqual(stranger.canonical_id, 'master', '名字一样也绝不能是主人');
@@ -84,14 +84,14 @@ test('白名单按身份，不按昵称', async () => {
 	}
 	// 白名单里放昵称不算数（旧配置不会因此生效）
 	{
-		const { db, gw } = makeWorld({ allowList: ['未云'] });
-		assert.equal((await gw.onDouyinMessage(inbound(STRANGER, { nickname: '未云' }))).review, '只记不回', '昵称在白名单不算授权');
+		const { db, gw } = makeWorld({ allowList: ['某人'] });
+		assert.equal((await gw.onDouyinMessage(inbound(STRANGER, { nickname: '某人' }))).review, '只记不回', '昵称在白名单不算授权');
 		db.close();
 	}
 });
 
 test('主人身份填错（写成昵称）→ 谁都不是主人，不会误授权', async () => {
-	const { db, gw } = makeWorld({ masterUid: '未云' });
+	const { db, gw } = makeWorld({ masterUid: '某人' });
 	assert.equal((await gw.onDouyinMessage(inbound(MASTER))).review, '只记不回', '主人身份不是合法身份键 → 不授权');
 	db.close();
 });
@@ -110,7 +110,7 @@ test('身份键写进 kv，转达时能反查出目标会话 ID', async () => {
 		},
 		onMessage: async () => ({ done: true })
 	});
-	await ch.readConversation({ c: { time: '' }, name: '未云', key: 'e2e-conv', st: null, sig: '1', unread: true });
+	await ch.readConversation({ c: { time: '' }, name: '某人', key: 'e2e-conv', st: null, sig: '1', unread: true });
 	assert.equal(getKv(db, `douyin.convId.douyin:${MASTER}`, ''), conv(MASTER), '会话身份 → 会话 ID 记下来了');
 
 	// 转达：拿这个 ID 才发得出去

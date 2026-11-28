@@ -34,36 +34,36 @@ const convKey = (name) => `douyin.conv.${createHash('sha1').update(String(name))
 
 test('拿不到真实 uid 就返回空串：昵称本身不是身份', async () => {
 	const db = openDatabase();
-	const ad = new DouyinAdapter({ db, getConfig: () => ({ masterQqUin: '12345678', douyin: { masterName: '未云', links: ['未云=12345678'] } }) });
+	const ad = new DouyinAdapter({ db, getConfig: () => ({ masterQqUin: '12345678', douyin: { masterName: '某人', links: ['某人=12345678'] } }) });
 	// 只有昵称、userId 为空、游标里也没有身份 → 不并会话
-	assert.equal(ad.douyinUinOf({ channelId: 'douyin:未云' }), '', '昵称算不出 QQ 号');
+	assert.equal(ad.douyinUinOf({ channelId: 'douyin:某人' }), '', '昵称算不出 QQ 号');
 	// 有昵称、有配置、但 uid 是昵称形状 → 同样不并
-	assert.equal(ad.douyinUinOf({ channelId: 'douyin:未云', userId: '未云' }), '', '昵称形状的 userId 不是身份');
+	assert.equal(ad.douyinUinOf({ channelId: 'douyin:某人', userId: '某人' }), '', '昵称形状的 userId 不是身份');
 });
 
 test('真实 uid + 主人配置 → 认得出；名字改了也认得出', async () => {
 	const db = openDatabase();
-	const ad = new DouyinAdapter({ db, getConfig: () => ({ masterQqUin: '12345678', douyin: { masterUid: `douyin:${MASTER_UID}`, masterName: '未云', links: [] } }) });
-	assert.equal(ad.douyinUinOf({ channelId: 'douyin:未云', userId: `douyin:${MASTER_UID}` }), '12345678');
+	const ad = new DouyinAdapter({ db, getConfig: () => ({ masterQqUin: '12345678', douyin: { masterUid: `douyin:${MASTER_UID}`, masterName: '某人', links: [] } }) });
+	assert.equal(ad.douyinUinOf({ channelId: 'douyin:某人', userId: `douyin:${MASTER_UID}` }), '12345678');
 	// 改了昵称（channel_id 变了）但 uid 不变 → 靠 userId 认出来
 	assert.equal(ad.douyinUinOf({ channelId: 'douyin:改了个名字', userId: `douyin:${MASTER_UID}` }), '12345678');
 });
 
 test('昵称匹配只挂候选，不自动绑定（冒充者改名也只能挂候选）', async () => {
 	const db = openDatabase();
-	setKv(db, 'douyin.uinCandidate.未云', null);
-	const ad = new DouyinAdapter({ db, getConfig: () => ({ masterQqUin: '12345678', douyin: { masterName: '未云', masterUid: '', links: ['未云=12345678'] } }) });
+	setKv(db, 'douyin.uinCandidate.某人', null);
+	const ad = new DouyinAdapter({ db, getConfig: () => ({ masterQqUin: '12345678', douyin: { masterName: '某人', masterUid: '', links: ['某人=12345678'] } }) });
 	// 冒充者的 uid 与主人不同，但昵称相同 → 挂候选、不并
-	assert.equal(ad.douyinUinOf({ channelId: 'douyin:未云', userId: `douyin:${PEER_UID}` }), '', '昵称匹配不自动绑');
+	assert.equal(ad.douyinUinOf({ channelId: 'douyin:某人', userId: `douyin:${PEER_UID}` }), '', '昵称匹配不自动绑');
 	const cands = ad.douyinUinCandidates();
-	assert.ok(cands.some((c) => c.name === '未云' && c.uid === PEER_UID), '要挂出候选给主人看');
+	assert.ok(cands.some((c) => c.name === '某人' && c.uid === PEER_UID), '要挂出候选给主人看');
 	// 未确认前，绑定表仍然是空
 	assert.equal(ad.douyinUinBinding(PEER_UID), '');
 });
 
 test('主人确认之后，绑定表生效且优先于昵称', async () => {
 	const db = openDatabase();
-	const ad = new DouyinAdapter({ db, getConfig: () => ({ masterQqUin: '12345678', douyin: { masterName: '未云', masterUid: '', links: ['未云=12345678'] } }) });
+	const ad = new DouyinAdapter({ db, getConfig: () => ({ masterQqUin: '12345678', douyin: { masterName: '某人', masterUid: '', links: ['某人=12345678'] } }) });
 	ad.bindDouyinUin(PEER_UID, '12345678');
 	assert.equal(ad.douyinUinBinding(PEER_UID), '12345678');
 	// 昵称改成别的，绑定表照样认
@@ -90,7 +90,7 @@ test('verifyInbound：自身回声挡掉、身份键非法挡掉、合法放行'
 	const db = openDatabase();
 	const ad = new DouyinAdapter({ db, getConfig: () => ({ douyin: {} }) });
 	assert.equal(ad.verifyInbound({ userId: `douyin:${PEER_UID}`, senderId: '900001' }, ['900001']).done, true, '自身回声');
-	assert.match(ad.verifyInbound({ userId: '未云' }, []).review, /身份/, '昵称身份被挡');
+	assert.match(ad.verifyInbound({ userId: '某人' }, []).review, /身份/, '昵称身份被挡');
 	assert.equal(ad.verifyInbound({ userId: `douyin:${PEER_UID}` }, []).ok, true, '合法身份放行');
 	// 明确：verifyInbound 不判 master / 白名单
 	assert.equal(ad.verifyInbound({ userId: `douyin:${MASTER_UID}` }, []).identity, `douyin:${MASTER_UID}`, '主人也走同一条放行');
@@ -131,7 +131,7 @@ test('douyinConfig 的归一规则：布尔严格、字符串 trim、数组过�
 	const ad = new DouyinAdapter({ db, getConfig: () => ({
 		masterQqUin: '12345678',
 		douyin: {
-			enabled: 'yes', autoReply: 1, masterName: '  未云  ', masterUid: ' douyin:123 ',
+			enabled: 'yes', autoReply: 1, masterName: '  某人  ', masterUid: ' douyin:123 ',
 			shareCard: 'true', allowList: [' a ', '', 'b'], replyAll: 'true',
 			groups: [' g1 ', ''], groupReply: 'true', callNames: ['叫 ', ''],
 			batchMs: '5000', replyWindowMinutes: 'not-a-number'
@@ -140,7 +140,7 @@ test('douyinConfig 的归一规则：布尔严格、字符串 trim、数组过�
 	const c = ad.douyinConfig();
 	assert.equal(c.enabled, false, '非布尔一律 false（不靠真值判断）');
 	assert.equal(c.autoReply, false, '非布尔一律 false');
-	assert.equal(c.masterName, '未云', '字符串要 trim');
+	assert.equal(c.masterName, '某人', '字符串要 trim');
 	assert.equal(c.masterUid, 'douyin:123', '主人身份要 trim');
 	assert.equal(c.shareCard, false, '非布尔一律 false');
 	assert.deepEqual(c.allowList, ['a', 'b'], '数组：trim + 去空');
@@ -158,7 +158,7 @@ test('手搓 this 只有 own douyinConfig 时，用它当配置源', async () =>
 	const db = openDatabase();
 	const self = Object.assign(Object.create(mediaMethods), {
 		db,
-		douyinConfig: () => ({ enabled: true, masterUid: `douyin:${MASTER_UID}`, masterName: '未云' })
+		douyinConfig: () => ({ enabled: true, masterUid: `douyin:${MASTER_UID}`, masterName: '某人' })
 	});
 	// 没有 getConfig：以前这个 this 上的 masterDouyinIdentity 就是靠 douyinConfig 拿配置的
 	assert.equal(self.masterDouyinIdentity(), `douyin:${MASTER_UID}`, 'own douyinConfig 是配置源');
@@ -168,7 +168,7 @@ test('手搓 this 只有 own douyinConfig 时，用它当配置源', async () =>
 test('抖音会话标题由适配器产出（私聊 / 群聊）', () => {
 	const db = openDatabase();
 	const ad = new DouyinAdapter({ db, getConfig: () => ({}) });
-	assert.equal(ad.title({ targetId: '未云', chatType: 'private' }), '抖音·未云');
+	assert.equal(ad.title({ targetId: '某人', chatType: 'private' }), '抖音·某人');
 	assert.equal(ad.title({ targetId: '某个群', chatType: 'group' }), '抖音群·某个群');
 });
 

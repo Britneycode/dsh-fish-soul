@@ -15,7 +15,7 @@ const notes = [];
 const cfg = {
 	qq: { enabled: true }, masterQqUin: '10001',
 	bili: { enabled: true, masterUid: '555', autoReply: true },
-	douyin: { enabled: true, masterName: '未云', autoReply: true },
+	douyin: { enabled: true, masterName: '某人', autoReply: true },
 	relay: { enabled: true, allowList: ['qq:10001', 'qq:10002', 'bili:555', 'douyin:770'], perDay: 10 }
 };
 

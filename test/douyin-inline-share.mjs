@@ -33,7 +33,7 @@ const makeAdapter = (cfg = {}) => new DouyinAdapter({
 
 {
 	const a = makeAdapter();
-	assert.deepEqual(a.shareTargetFor('未云', '0:1:123:456'), { convId: '0:1:123:456', name: '未云' }, '会话 ID 合法就能发');
+	assert.deepEqual(a.shareTargetFor('某人', '0:1:123:456'), { convId: '0:1:123:456', name: '某人' }, '会话 ID 合法就能发');
 	// 关键：**不要求**是主人 —— 这是「对所有会话生效」的核心
 	assert.ok(a.shareTargetFor('路人甲', '0:1:123:999') !== null, '非主人会话也能发卡片');
 	ok('shareTargetFor：有会话 ID 就能发，不限主人');
@@ -41,23 +41,23 @@ const makeAdapter = (cfg = {}) => new DouyinAdapter({
 
 {
 	const a = makeAdapter();
-	assert.equal(a.shareTargetFor('未云', ''), null, '没有会话 ID 不发');
-	assert.equal(a.shareTargetFor('未云', '未云'), null, '昵称不是会话 ID，不发');
-	assert.equal(a.shareTargetFor('未云', '0:2:123:456'), null, '群会话不是单聊，不发');
+	assert.equal(a.shareTargetFor('某人', ''), null, '没有会话 ID 不发');
+	assert.equal(a.shareTargetFor('某人', '某人'), null, '昵称不是会话 ID，不发');
+	assert.equal(a.shareTargetFor('某人', '0:2:123:456'), null, '群会话不是单聊，不发');
 	assert.equal(a.shareTargetFor('', '0:1:123:456'), null, '没有会话名不发');
 	ok('shareTargetFor：拿不到确认过的会话身份就退回文字');
 }
 
 {
 	const a = makeAdapter({ enabled: false });
-	assert.equal(a.shareTargetFor('未云', '0:1:123:456'), null, '抖音通道关着不发卡片');
+	assert.equal(a.shareTargetFor('某人', '0:1:123:456'), null, '抖音通道关着不发卡片');
 	ok('shareTargetFor：总开关关着就不发');
 }
 
 {
 	// 🔴 审查 #3：设置页那个「发原生卡片」开关关了，聊天里就不能发卡片
 	const a = makeAdapter({ shareCard: false });
-	assert.equal(a.shareTargetFor('未云', '0:1:123:456'), null, 'shareCard 开关关着就不发卡片');
+	assert.equal(a.shareTargetFor('某人', '0:1:123:456'), null, 'shareCard 开关关着就不发卡片');
 	ok('shareTargetFor：shareCard 开关关着就不发（开关不能形同虚设）');
 }
 
@@ -97,7 +97,7 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 		'还有个桌宠小鲸鱼的 结尾直接扭头走人',
 		'https://www.douyin.com/video/7680160212863652'
 	].join('\n\n');
-	const r = await adapter.send({ channel_id: 'douyin:未云' }, reply, [], '0:1:123:456');
+	const r = await adapter.send({ channel_id: 'douyin:某人' }, reply, [], '0:1:123:456');
 	assert.equal(cards.length, 2, `两条链接各发一张卡片，实际 ${cards.length}`);
 	assert.deepEqual(cards.map((c) => c.videoId), ['7707911549709601777', '7680160212863652']);
 	assert.equal(texts.length, 2, `两段文字照旧发，实际 ${texts.length}`);
@@ -110,10 +110,10 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 // 🔴 审查 #7：卡片必须绑到**本轮这条会话**，不能发给别人
 {
 	const { adapter, cards } = spyAdapter();
-	await adapter.send({ channel_id: 'douyin:未云' }, 'https://www.douyin.com/video/7707911549709601777', [], '0:1:123:456');
+	await adapter.send({ channel_id: 'douyin:某人' }, 'https://www.douyin.com/video/7707911549709601777', [], '0:1:123:456');
 	assert.equal(cards.length, 1, '发了一张卡');
 	assert.equal(cards[0].convId, '0:1:123:456', '卡片必须发到本轮这条会话（不能是别的会话）');
-	assert.equal(cards[0].friendName, '未云', '收件人名字必须来自本轮会话名');
+	assert.equal(cards[0].friendName, '某人', '收件人名字必须来自本轮会话名');
 	ok('卡片收件人绑定：convId 和名字都来自本轮会话');
 }
 
@@ -121,7 +121,7 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 {
 	const { adapter, texts } = spyAdapter({ cardOk: false });
 	const link = 'https://www.douyin.com/video/7707911549709601777';
-	const r = await adapter.send({ channel_id: 'douyin:未云' }, link, [], '0:1:123:456');
+	const r = await adapter.send({ channel_id: 'douyin:某人' }, link, [], '0:1:123:456');
 	assert.deepEqual(texts, [link], '卡片失败要退回原链接，不能丢内容');
 	assert.equal(r.ok, true, '退回的文字发出去了 ⇒ ok 仍然是 true（内容真的送到了）');
 	assert.equal(r.delivered, true, '文字回读到了 ⇒ delivered true');
@@ -134,7 +134,7 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 {
 	const { adapter, cards, texts } = spyAdapter({ cardSubmitted: true });
 	const link = 'https://www.douyin.com/video/7707911549709601777';
-	const r = await adapter.send({ channel_id: 'douyin:未云' }, link, [], '0:1:123:456');
+	const r = await adapter.send({ channel_id: 'douyin:某人' }, link, [], '0:1:123:456');
 	assert.equal(cards.length, 1, '提交过了');
 	assert.deepEqual(texts, [], '🔴 提交过就可能已经发出去了 —— 绝不能把链接再当文字发一遍');
 	assert.equal(r.ok, true, '内容大概率在那儿了 ⇒ ok=true（不谎报失败）');
@@ -160,7 +160,7 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 		note: () => {}, log: () => {}, diag: () => {}
 	});
 	const link = 'https://www.douyin.com/video/7707911549709601777';
-	const r = await adapter.send({ channel_id: 'douyin:未云' }, link, [], '0:1:123:456');
+	const r = await adapter.send({ channel_id: 'douyin:某人' }, link, [], '0:1:123:456');
 	assert.deepEqual(texts, [link], '通道不支持卡片 ⇒ 退回文字');
 	assert.equal(r.ok, true, '退回的文字发出去了');
 	ok('通道没有 shareCard：退回文字，不整条抛');
@@ -170,8 +170,8 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 {
 	const { adapter, cards, texts } = spyAdapter();
 	const mixed = '看这个 https://www.douyin.com/video/7707911549709601777 挺好笑';
-	await adapter.send({ channel_id: 'douyin:未云' }, mixed, [], '0:1:123:456');
-	assert.deepEqual(cards, [{ friendName: '未云', videoId: '7707911549709601777', convId: '0:1:123:456' }], '句中链接应拆成原生卡片');
+	await adapter.send({ channel_id: 'douyin:某人' }, mixed, [], '0:1:123:456');
+	assert.deepEqual(cards, [{ friendName: '某人', videoId: '7707911549709601777', convId: '0:1:123:456' }], '句中链接应拆成原生卡片');
 	assert.equal(texts.length, 1);
 	assert.ok(texts[0].includes('看这个') && texts[0].includes('挺好笑'), `混排文案不能丢：${JSON.stringify(texts)}`);
 	ok('混排：无损拆分，既发原生卡片又完整保留前后文案');
@@ -180,12 +180,12 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 {
 	const { adapter, cards, texts } = spyAdapter();
 	await adapter.send(
-		{ channel_id: 'douyin:未云' },
+		{ channel_id: 'douyin:某人' },
 		'猫跳舞笑死\nhttps://www.douyin.com/video/7707911549709601777',
 		[],
 		'0:1:123:456'
 	);
-	assert.deepEqual(cards, [{ friendName: '未云', videoId: '7707911549709601777', convId: '0:1:123:456' }]);
+	assert.deepEqual(cards, [{ friendName: '某人', videoId: '7707911549709601777', convId: '0:1:123:456' }]);
 	assert.deepEqual(texts, ['猫跳舞笑死']);
 	ok('单换行文+链：同样能拆出文字与原生卡片');
 }
@@ -193,12 +193,12 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 {
 	const { adapter, cards, texts } = spyAdapter();
 	await adapter.send(
-		{ channel_id: 'douyin:未云' },
+		{ channel_id: 'douyin:某人' },
 		'猫跳舞那个（链接 https://www.douyin.com/note/7707911549709601777）',
 		[],
 		'0:1:123:456'
 	);
-	assert.deepEqual(cards, [{ friendName: '未云', videoId: '7707911549709601777', convId: '0:1:123:456' }]);
+	assert.deepEqual(cards, [{ friendName: '某人', videoId: '7707911549709601777', convId: '0:1:123:456' }]);
 	assert.deepEqual(texts, ['猫跳舞那个']);
 	ok('（链接 URL）外壳：清掉空壳只留真实文案与原生卡片');
 }
@@ -207,7 +207,7 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 	// shareCard 开关关闭时，混排也不得拆卡，原样发文字
 	const { adapter, cards, texts } = spyAdapter({ shareCard: false });
 	const mixed = '看这个 https://www.douyin.com/video/7707911549709601777 挺好笑';
-	await adapter.send({ channel_id: 'douyin:未云' }, mixed, [], '0:1:123:456');
+	await adapter.send({ channel_id: 'douyin:某人' }, mixed, [], '0:1:123:456');
 	assert.equal(cards.length, 0, 'shareCard 关闭时不发卡片');
 	assert.deepEqual(texts, [mixed], 'shareCard 关闭时混排全文原样发送');
 	ok('shareCard 开关关闭：混排不拆卡，原文发文本');
@@ -216,7 +216,7 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 // 只有卡片、没有文字时不能因为「没有文字段」就报错
 {
 	const { adapter, cards } = spyAdapter();
-	const r = await adapter.send({ channel_id: 'douyin:未云' }, 'https://www.douyin.com/video/7707911549709601777', [], '0:1:123:456');
+	const r = await adapter.send({ channel_id: 'douyin:某人' }, 'https://www.douyin.com/video/7707911549709601777', [], '0:1:123:456');
 	assert.equal(cards.length, 1, '纯链接也要发卡片');
 	assert.equal(r.ok, true, '只有卡片也要算成功');
 	ok('纯链接：只发卡片，不发多余的空文字');
@@ -248,7 +248,7 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 		'还有个桌宠小鲸鱼的 结尾直接扭头走人',
 		'https://www.douyin.com/video/7680160212863652'
 	].join('\n\n');
-	await adapter.send({ channel_id: 'douyin:未云' }, reply, [], '0:1:123:456');
+	await adapter.send({ channel_id: 'douyin:某人' }, reply, [], '0:1:123:456');
 	assert.deepEqual(events, [
 		'text:猫跳舞那个 扭得特别有灵性',
 		'card:7707911549709601777',
@@ -272,7 +272,7 @@ const spyAdapter = ({ cardOk = true, cardSubmitted = false, noShareCard = false,
 		sendText: async () => ({ ok: false }),
 		note: () => {}, log: () => {}, diag: () => {}
 	});
-	await adapter.send({ channel_id: 'douyin:未云' }, '第一段\n\n第二段\n\n第三段', [], '0:1:123:456');
+	await adapter.send({ channel_id: 'douyin:某人' }, '第一段\n\n第二段\n\n第三段', [], '0:1:123:456');
 	assert.deepEqual(sends, [3], `连续文字段要合并成一次 send，实际 ${JSON.stringify(sends)}`);
 	ok('连续文字段合并成一次 send（不逐段进会话）');
 }

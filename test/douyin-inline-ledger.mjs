@@ -45,7 +45,7 @@ const link = `https://www.douyin.com/video/${VIDEO}`;
 // ── 1. 成功一次 ⇒ 账本记 verified ──
 {
 	const { adapter, cards } = makeAdapter([{ ok: true, verified: true }]);
-	await adapter.send({ channel_id: 'douyin:未云' }, link, [], CONV);
+	await adapter.send({ channel_id: 'douyin:某人' }, link, [], CONV);
 	assert.equal(cards.length, 1, '发了一张卡');
 	const hash = adapter.inlineDeliveryId(CONV, VIDEO);
 	const key = `douyin.cardDelivery.${(await import('node:crypto')).createHash('sha256').update(hash).digest('hex').slice(0, 32)}.${VIDEO}`;
@@ -58,7 +58,7 @@ const link = `https://www.douyin.com/video/${VIDEO}`;
 // ── 2. 🔴 同一张卡再发一次 ⇒ 账本说 verified，不该再发 ──
 {
 	const { adapter, cards } = makeAdapter([{ ok: true, verified: true }]);
-	await adapter.send({ channel_id: 'douyin:未云' }, link, [], CONV);
+	await adapter.send({ channel_id: 'douyin:某人' }, link, [], CONV);
 	assert.equal(cards.length, 0, `🔴 已经发过的卡不该再发，实际发了 ${cards.length} 次`);
 	ok('已发过的卡：不重复发（账本挡住）');
 }
@@ -108,7 +108,7 @@ const link = `https://www.douyin.com/video/${VIDEO}`;
 		sendText: async () => ({ ok: false }),
 		note: () => {}, log: () => {}, diag: () => {},
 	});
-	const r = await adapter.send({ channel_id: 'douyin:未云' }, link, [], '0:1:777:888');
+	const r = await adapter.send({ channel_id: 'douyin:某人' }, link, [], '0:1:777:888');
 	assert.equal(cards.length, 1, '账本坏了也要照常发卡片（不能因为记账失败就不干活）');
 	assert.equal(r.cardOk, true);
 	ok('账本不可用：降级成不记账照常发');
@@ -121,13 +121,13 @@ const link = `https://www.douyin.com/video/${VIDEO}`;
 {
 	const conv4 = '0:1:123:555';
 	const { adapter, cards } = makeAdapter([{ ok: true, verified: true }]);
-	await adapter.send({ channel_id: 'douyin:未云' }, link, [], conv4, 'session-aaa');
+	await adapter.send({ channel_id: 'douyin:某人' }, link, [], conv4, 'session-aaa');
 	assert.equal(cards.length, 1, '第一轮发一张');
 	// 同一轮重试：不该再发
-	await adapter.send({ channel_id: 'douyin:未云' }, link, [], conv4, 'session-aaa');
+	await adapter.send({ channel_id: 'douyin:某人' }, link, [], conv4, 'session-aaa');
 	assert.equal(cards.length, 1, '同一轮重试不重发');
 	// 下一轮：应该能发
-	await adapter.send({ channel_id: 'douyin:未云' }, link, [], conv4, 'session-bbb');
+	await adapter.send({ channel_id: 'douyin:某人' }, link, [], conv4, 'session-bbb');
 	assert.equal(cards.length, 2, '🔴 不同轮要能发第二次（不能永久封死同一个视频）');
 	ok('不同轮：同一个视频还能再发（账本只挡同一轮的重试）');
 }

@@ -48,14 +48,14 @@ test('熔断语义：失败后窗口内不重读，窗口过重试，unread 绕�
 });
 
 test('读失败 → 独立 kv 记失败时间，游标不动', async () => {
-  const key = keyOf('未云');
-  setKv(db, key, { name: '未云', sig: '旧', window: [] });
+  const key = keyOf('某人');
+  setKv(db, key, { name: '某人', sig: '旧', window: [] });
   const ch = new DouyinChannel({
     db, host: { running: true, loggedIn: true, exclusive: async (_l, fn) => await fn() },
     getConfig: () => ({ enabled: true }), log: () => {}, onMessage: async () => ({ done: true }),
     driver: { read: async () => ({ ok: false, error: '拿不到会话 ID' }) },
   });
-  await ch.readConversation({ c: {}, name: '未云', key, st: getKv(db, key, null), sig: '新', unread: false });
+  await ch.readConversation({ c: {}, name: '某人', key, st: getKv(db, key, null), sig: '新', unread: false });
 
   // 失败时间在独立 kv
   const retry = Number(getKv(db, `douyin.retry.${key}`, 0) ?? 0);
@@ -67,8 +67,8 @@ test('读失败 → 独立 kv 记失败时间，游标不动', async () => {
 });
 
 test('读成功后清掉失败标记，游标推进', async () => {
-  const key = keyOf('未云');
-  setKv(db, key, { name: '未云', sig: '旧', window: [] });
+  const key = keyOf('某人');
+  setKv(db, key, { name: '某人', sig: '旧', window: [] });
   setKv(db, `douyin.retry.${key}`, Date.now() - 1000);
   const ch = new DouyinChannel({
     db, host: { running: true, loggedIn: true, exclusive: async (_l, fn) => await fn() },
@@ -81,15 +81,15 @@ test('读成功后清掉失败标记，游标推进', async () => {
     },
   });
   const st = getKv(db, key, null);
-  await ch.readConversation({ c: {}, name: '未云', key, st, sig: '新', unread: true });
+  await ch.readConversation({ c: {}, name: '某人', key, st, sig: '新', unread: true });
 
   assert.equal(Number(getKv(db, `douyin.retry.${key}`, 0) ?? 0), 0, '成功路径要清掉失败标记');
   assert.equal(getKv(db, key, null).sig, '新', '成功路径要推进游标');
 });
 
 test('pollInner 用独立 kv 的失败时间做熔断', async () => {
-  const key = keyOf('未云');
-  setKv(db, key, { name: '未云', sig: '旧', window: [] });
+  const key = keyOf('某人');
+  setKv(db, key, { name: '某人', sig: '旧', window: [] });
   setKv(db, `douyin.retry.${key}`, Date.now()); // 刚失败
   const ch = new DouyinChannel({
     db, host: { running: true, loggedIn: true, exclusive: async (_l, fn) => await fn() },

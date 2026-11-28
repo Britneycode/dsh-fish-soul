@@ -97,14 +97,14 @@ test('life.stop() 之后闹钟链不再自我续命', async () => {
 test('抖音：连续失败够多次后，有未读也不再绕过熔断（gap 不再无界增长）', async () => {
   const { DouyinChannel } = await import('../lib/channels/douyin.js');
   db.exec('DELETE FROM douyin_inbox');
-  const key = keyOf('未云');
+  const key = keyOf('某人');
   let reads = 0;
   const ch = new DouyinChannel({
     db, host: { running: true, loggedIn: true, exclusive: async (_l, fn) => await fn() },
     getConfig: () => ({ enabled: true }), log: () => {}, onMessage: async () => ({ queued: true }),
     driver: {
       checkLogin: async () => true,
-      list: async () => ({ ok: true, conversations: [{ name: '未云', unread: 1, time: '23:59', preview: '有新消息' }] }),
+      list: async () => ({ ok: true, conversations: [{ name: '某人', unread: 1, time: '23:59', preview: '有新消息' }] }),
       read: async () => { reads++; return { ok: false, error: '拿不到会话 ID' }; },
     },
   });
@@ -121,14 +121,14 @@ test('抖音：连续失败够多次后，有未读也不再绕过熔断（gap �
 test('抖音：失败次数没到上限时，有未读仍要绕过熔断（真消息不能被挡）', async () => {
   const { DouyinChannel } = await import('../lib/channels/douyin.js');
   db.exec('DELETE FROM douyin_inbox');
-  const key = keyOf('未云');
+  const key = keyOf('某人');
   let reads = 0;
   const ch = new DouyinChannel({
     db, host: { running: true, loggedIn: true, exclusive: async (_l, fn) => await fn() },
     getConfig: () => ({ enabled: true }), log: () => {}, onMessage: async () => ({ queued: true }),
     driver: {
       checkLogin: async () => true,
-      list: async () => ({ ok: true, conversations: [{ name: '未云', unread: 1, time: '23:59', preview: '有新消息' }] }),
+      list: async () => ({ ok: true, conversations: [{ name: '某人', unread: 1, time: '23:59', preview: '有新消息' }] }),
       read: async () => { reads++; return { ok: false, error: '拿不到会话 ID' }; },
     },
   });

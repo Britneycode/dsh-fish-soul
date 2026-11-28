@@ -14,7 +14,7 @@ test('#78 平台名认得全：QQ 私聊 / QQ 群 / B站私信 / 抖音私信 / 
 	assert.equal(platformLabelOf('private:1234567890'), 'QQ 私聊');
 	assert.equal(platformLabelOf('group:1125962189'), 'QQ 群');
 	assert.equal(platformLabelOf('bili:98765432109876'), 'B站私信');
-	assert.equal(platformLabelOf('douyin:Re.'), '抖音私信');
+	assert.equal(platformLabelOf('douyin:某某'), '抖音私信');
 	assert.equal(platformLabelOf('douyin-group:某某群'), '抖音群');
 	assert.equal(platformLabelOf('dsh'), 'DSH 桌面端', 'DSH 桌面端要能和 QQ 分开（以前一律当 QQ 私聊）');
 });
@@ -25,7 +25,7 @@ test('#78 sourceLabelOf：DSH 轮次优先按 desktop 判，不看通道', () =>
 		'会话共享时 boundChannel 是 QQ，靠它推断会把 DSH 说成 QQ');
 	assert.equal(sourceLabelOf({ desktop: false, channelId: 'private:1234567890' }), 'QQ 私聊');
 	assert.equal(sourceLabelOf({ desktop: false, channelId: 'bili:98765432109876' }), 'B站私信');
-	assert.equal(sourceLabelOf({ desktop: false, channelId: 'douyin:Re.' }), '抖音私信');
+	assert.equal(sourceLabelOf({ desktop: false, channelId: 'douyin:某某' }), '抖音私信');
 	assert.equal(sourceLabelOf({ desktop: false, channelId: 'group:1125962189' }), 'QQ 群');
 	assert.equal(sourceLabelOf({}), 'QQ 私聊', '什么都不给时退回默认，不抛错');
 });

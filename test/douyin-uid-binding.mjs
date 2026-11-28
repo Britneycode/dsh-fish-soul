@@ -47,20 +47,20 @@ const msg = (extra = {}) => ({
 // ── ① 有会话 ID → 用会话身份 ──
 {
 	const n = normalizeDouyinMessage(msg({ senderId: PEER, convId: CONV }), {
-		name: '未云', timeMs: Date.now(), messageId: 'm1', identity: `douyin:${PEER}`, convId: CONV
+		name: '某人', timeMs: Date.now(), messageId: 'm1', identity: `douyin:${PEER}`, convId: CONV
 	});
 	assert.equal(n.userId, `douyin:${PEER}`, '认人用会话身份（对方 uid）');
-	assert.equal(n.peerName, '未云', '会话名单独留着');
+	assert.equal(n.peerName, '某人', '会话名单独留着');
 	assert.equal(n.convId, CONV, '会话 ID 要带出去，发送前靠它校验目标');
-	assert.equal(n.channelId, 'douyin:未云', 'channelId 必须还是会话名（出口靠它找人）');
+	assert.equal(n.channelId, 'douyin:某人', 'channelId 必须还是会话名（出口靠它找人）');
 	ok('有会话 ID → userId=douyin:<对方uid>，channelId 仍是会话名');
 }
 
 // ── ② 没有会话 ID → 不猜（旧方案在这里会退回昵称/单条 senderId）──
 {
-	assert.equal(normalizeDouyinMessage(msg(), { name: '未云', timeMs: Date.now(), messageId: 'm2' }), null,
+	assert.equal(normalizeDouyinMessage(msg(), { name: '某人', timeMs: Date.now(), messageId: 'm2' }), null,
 		'没有会话 ID 就返回 null，不退回昵称');
-	assert.equal(normalizeDouyinMessage(msg({ senderId: PEER }), { name: '未云', timeMs: Date.now(), messageId: 'm3' }), null,
+	assert.equal(normalizeDouyinMessage(msg({ senderId: PEER }), { name: '某人', timeMs: Date.now(), messageId: 'm3' }), null,
 		'只有单条 senderId 也不够 —— 它证明不了属于当前会话');
 	ok('没有会话 ID → 返回 null（不退回昵称，也不信单条 senderId）');
 }
@@ -104,9 +104,9 @@ const msg = (extra = {}) => ({
 	const { resolveOrCreatePlatformPerson } = await import('../lib/db.js');
 	const ID = `douyin:${PEER}`;
 
-	// 第一次：叫「未云」
+	// 第一次：叫「某人」
 	const a = resolveOrCreatePlatformPerson(db, {
-		platform: 'douyin', platformId: ID, nickname: '未云', nowMs: 1000
+		platform: 'douyin', platformId: ID, nickname: '某人', nowMs: 1000
 	});
 	assert.ok(a !== null, '第一次要建出人来');
 
@@ -128,8 +128,8 @@ const msg = (extra = {}) => ({
 	const db = openDatabase();
 	const { resolveOrCreatePlatformPerson } = await import('../lib/db.js');
 	const A = 'douyin:111', B = 'douyin:222';
-	const a = resolveOrCreatePlatformPerson(db, { platform: 'douyin', platformId: A, nickname: '未云', nowMs: 1000 });
-	const b = resolveOrCreatePlatformPerson(db, { platform: 'douyin', platformId: B, nickname: '未云', nowMs: 2000 });
+	const a = resolveOrCreatePlatformPerson(db, { platform: 'douyin', platformId: A, nickname: '某人', nowMs: 1000 });
+	const b = resolveOrCreatePlatformPerson(db, { platform: 'douyin', platformId: B, nickname: '某人', nowMs: 2000 });
 	assert.notEqual(a.canonical_id, b.canonical_id, '同名不同 ID 必须是两个人');
 	ok('同名冒充挡得住：昵称相同、会话身份不同 → 两个人');
 }
@@ -137,15 +137,15 @@ const msg = (extra = {}) => ({
 // 昵称不能安全迁移成身份：上层必须隔离，旧记录原样保留。
 {
 	tmpHome('no-migrate'); const db = openDatabase();
-	db.prepare("INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master','123','未云','未云','close',5,1,1)").run();
+	db.prepare("INSERT INTO person (canonical_id, qq_uin, douyin_uid, display_name, relation_stage, interaction_count, first_seen_at, last_seen_at) VALUES ('master','123','某人','某人','close',5,1,1)").run();
 	const { ChatGateway } = await import('../lib/gateway.js');
-	const gw = new ChatGateway({ ctx: { get: () => undefined }, db, clock: { now: () => Date.now() }, getConfig: () => ({ masterQqUin: '123', douyin: { masterName: '未云', links: ['未云=123'] } }), log: () => {}, channel: {}, soul: {} });
-	// 昵称仍是「未云」、但身份键是 douyin:<uid> → 不能因为名字对上就认主人
-	const r = await gw.onDouyinMessage({ channelId: 'douyin:未云', peerName: '未云', userId: `douyin:${PEER}`, convId: CONV });
+	const gw = new ChatGateway({ ctx: { get: () => undefined }, db, clock: { now: () => Date.now() }, getConfig: () => ({ masterQqUin: '123', douyin: { masterName: '某人', links: ['某人=123'] } }), log: () => {}, channel: {}, soul: {} });
+	// 昵称仍是「某人」、但身份键是 douyin:<uid> → 不能因为名字对上就认主人
+	const r = await gw.onDouyinMessage({ channelId: 'douyin:某人', peerName: '某人', userId: `douyin:${PEER}`, convId: CONV });
 	assert.ok(r === undefined || !/主人/.test(String(r.review ?? '')), '名字对上不等于主人');
-	assert.equal(findPersonByDouyin(db, '未云').canonical_id, 'master', '旧记录原样保留');
+	assert.equal(findPersonByDouyin(db, '某人').canonical_id, 'master', '旧记录原样保留');
 	assert.equal(findPersonByDouyin(db, `douyin:${PEER}`), null, '不自动把新身份并进旧记录');
-	assert.equal(gw.isMasterChannel('douyin:未云'), false);
+	assert.equal(gw.isMasterChannel('douyin:某人'), false);
 	db.close(); ok('旧昵称记录不被自动迁移，也不授予主人权限');
 }
 

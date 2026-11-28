@@ -25,8 +25,8 @@ const db = openDatabase();
 const SELF = '900001';
 const PEER = '7000000000000000001';
 const keyOf = (name) => `douyin.conv.${createHash('sha1').update(String(name)).digest('hex').slice(0, 16)}`;
-const msg = (id, channelId = 'douyin:Re.') => ({ channelId, messageId: id, text: id, timeMs: Date.now() });
-// key 带会话后缀（`douyin-inbox-gap:douyin:Re.`），按前缀找
+const msg = (id, channelId = 'douyin:某某') => ({ channelId, messageId: id, text: id, timeMs: Date.now() });
+// key 带会话后缀（`douyin-inbox-gap:douyin:某某`），按前缀找
 const gaps = (diag) => diag.list().filter((e) => e.key.startsWith('douyin-inbox-gap'));
 const unknowns = (diag) => diag.list().filter((e) => e.key.startsWith('douyin-inbox-unknown'));
 
@@ -34,12 +34,12 @@ const unknowns = (diag) => diag.list().filter((e) => e.key.startsWith('douyin-in
 test('读取失败产生的缺口会记进运行日志', () => {
   const diag = new DiagLog({ db, now: () => Date.now() });
   const box = new DouyinInbox(db, diag);
-  box.beginRead('gap-1', 'douyin:Re.');
+  box.beginRead('gap-1', 'douyin:某某');
   box.failRead('gap-1', '读取失败');
   const list = gaps(diag);
   assert.equal(list.length, 1, `要有一条缺口条目，实际 ${JSON.stringify(diag.list())}`);
   assert.equal(list[0].label, '抖音私信可能有遗漏');
-  assert.equal(list[0].detail.channelId, 'douyin:Re.');
+  assert.equal(list[0].detail.channelId, 'douyin:某某');
   assert.match(list[0].detail.reason, /读取失败/);
 });
 
@@ -71,10 +71,10 @@ test('同一个会话反复缺口合并计数（别刷屏）', () => {
 test('两个会话交替出现时，同一会话仍合并（别被队尾换 key 拆开）', () => {
   const diag = new DiagLog({ db, now: () => Date.now() });
   const box = new DouyinInbox(db, diag);
-  box.record('gap-alt-1', {}, [], { channelId: 'douyin:未云', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
-  box.record('gap-alt-2', {}, [], { channelId: 'douyin:Re.', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
-  box.record('gap-alt-3', {}, [], { channelId: 'douyin:未云', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
-  box.record('gap-alt-4', {}, [], { channelId: 'douyin:Re.', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
+  box.record('gap-alt-1', {}, [], { channelId: 'douyin:某人', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
+  box.record('gap-alt-2', {}, [], { channelId: 'douyin:某某', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
+  box.record('gap-alt-3', {}, [], { channelId: 'douyin:某人', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
+  box.record('gap-alt-4', {}, [], { channelId: 'douyin:某某', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
   const list = gaps(diag);
   assert.equal(list.length, 2, `交替出现仍应各留一条：${JSON.stringify(list.map((e) => [e.detail.channelId, e.count]))}`);
   assert.deepEqual(list.map((e) => e.count).sort(), [2, 2]);
@@ -83,10 +83,10 @@ test('两个会话交替出现时，同一会话仍合并（别被队尾换 key 
 test('窗口对不齐产生的缺口会记进运行日志', () => {
   const diag = new DiagLog({ db, now: () => Date.now() });
   const box = new DouyinInbox(db, diag);
-  box.record('gap-2', {}, [], { channelId: 'douyin:未云', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
+  box.record('gap-2', {}, [], { channelId: 'douyin:某人', reason: '消息窗口无法完整对齐或超过补收条数，可能有遗漏，请手动检查' });
   const list = gaps(diag);
   assert.equal(list.length, 1, `要有一条缺口条目，实际 ${JSON.stringify(diag.list())}`);
-  assert.equal(list[0].detail.channelId, 'douyin:未云');
+  assert.equal(list[0].detail.channelId, 'douyin:某人');
   assert.match(list[0].detail.reason, /窗口无法完整对齐/);
 });
 
@@ -146,24 +146,24 @@ test('不传 diag 也能用（收件箱可以单独用）', () => {
 // ── ⑤ 端到端：通道把 diag 传下去 ──────────────────────────────────────────
 test('通道读失败时，运行日志里查得到缺口', async () => {
   const diag = new DiagLog({ db, now: () => Date.now() });
-  const key = keyOf('未云');
-  setKv(db, key, { name: '未云', sig: '旧', window: [] });
+  const key = keyOf('某人');
+  setKv(db, key, { name: '某人', sig: '旧', window: [] });
   const ch = new DouyinChannel({
     db, diag,
     host: { running: true, loggedIn: true, exclusive: async (_l, fn) => await fn() },
     getConfig: () => ({ enabled: true }), log: () => {}, onMessage: async () => ({}),
     driver: { read: async () => ({ ok: false, error: '拿不到会话 ID' }) },
   });
-  await ch.readConversation({ c: {}, name: '未云', key, st: getKv(db, key, null), sig: '新', unread: false });
+  await ch.readConversation({ c: {}, name: '某人', key, st: getKv(db, key, null), sig: '新', unread: false });
   const list = gaps(diag);
   assert.equal(list.length, 1, `读失败要留下缺口条目，实际 ${JSON.stringify(diag.list())}`);
-  assert.equal(list[0].detail.channelId, 'douyin:未云');
+  assert.equal(list[0].detail.channelId, 'douyin:某人');
 });
 
 test('消息处理没把握时，运行日志里查得到「待核实」', async () => {
   const diag = new DiagLog({ db, now: () => Date.now() });
-  const key = keyOf('Re.');
-  setKv(db, key, { name: 'Re.', sig: '旧', window: [] });
+  const key = keyOf('某某');
+  setKv(db, key, { name: '某某', sig: '旧', window: [] });
   const ch = new DouyinChannel({
     db, diag,
     host: { running: true, loggedIn: true, exclusive: async (_l, fn) => await fn() },
@@ -175,7 +175,7 @@ test('消息处理没把握时，运行日志里查得到「待核实」', async
       },
     },
   });
-  await ch.readConversation({ c: {}, name: 'Re.', key, st: getKv(db, key, null), sig: '新', unread: true });
+  await ch.readConversation({ c: {}, name: '某某', key, st: getKv(db, key, null), sig: '新', unread: true });
   const list = unknowns(diag);
   assert.equal(list.length, 1, `处理没把握要留下待核实条目，实际 ${JSON.stringify(diag.list())}`);
   assert.equal(list[0].label, '抖音私信待核实');
@@ -192,8 +192,8 @@ test('这两个 key 在运行日志里有人话，不是裸机器名', () => {
 });
 
 test('中文说明里能看到「几条」「为什么」', () => {
-  const text = describeEntry({ key: 'douyin-inbox-unknown', detail: { channelId: 'douyin:Re.', count: 2, error: '未取得处理确认' }, count: 1 });
-  assert.match(text, /聊天 douyin:Re\./, `要说清是哪个会话：${text}`);
+  const text = describeEntry({ key: 'douyin-inbox-unknown', detail: { channelId: 'douyin:某某', count: 2, error: '未取得处理确认' }, count: 1 });
+  assert.match(text, /聊天 douyin:某某/, `要说清是哪个会话：${text}`);
   assert.match(text, /2 条/, `要说清几条：${text}`);
   assert.match(text, /未取得处理确认/, `要说清为什么：${text}`);
 });
@@ -226,8 +226,8 @@ function renderDiagPane(entries) {
 
 test('「运行日志」页上能看到抖音那两条提示', () => {
   const tree = renderDiagPane([
-    { at: Date.now(), key: 'douyin-inbox-gap', label: '抖音私信可能有遗漏', level: 'warn', detail: { channelId: 'douyin:Re.', reason: '读取失败' }, count: 1 },
-    { at: Date.now(), key: 'douyin-inbox-unknown', label: '抖音私信待核实', level: 'warn', detail: { channelId: 'douyin:Re.', count: 2, error: '未取得处理确认，请核实' }, count: 1 },
+    { at: Date.now(), key: 'douyin-inbox-gap', label: '抖音私信可能有遗漏', level: 'warn', detail: { channelId: 'douyin:某某', reason: '读取失败' }, count: 1 },
+    { at: Date.now(), key: 'douyin-inbox-unknown', label: '抖音私信待核实', level: 'warn', detail: { channelId: 'douyin:某某', count: 2, error: '未取得处理确认，请核实' }, count: 1 },
   ]);
   const text = JSON.stringify(tree);
   assert.ok(text.includes('抖音私信可能有遗漏'), `要显示标题：${text}`);

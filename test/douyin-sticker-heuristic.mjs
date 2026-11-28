@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeDouyinMessage } from '../lib/channels/douyin.js';
 
-const opts = { name: '未云', timeMs: 1, messageId: 'm1', identity: 'douyin:123', convId: '0:1:9:123' };
+const opts = { name: '某人', timeMs: 1, messageId: 'm1', identity: 'douyin:123', convId: '0:1:9:123' };
 
 test('小图（≤300px）当表情：标 sticker，文本是【表情】', () => {
   const m = normalizeDouyinMessage(

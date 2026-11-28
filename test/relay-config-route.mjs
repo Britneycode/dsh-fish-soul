@@ -98,7 +98,7 @@ async function call(path, method = 'GET', body = null, headers = {}) {
 // 4. 白名单格式非法 → 拒绝保存（不能静默失效）
 {
 	const before = JSON.stringify(cfg.relay);
-	const res = await call('/relay/config', 'POST', { enabled: true, allowList: ['未云', 'qq:abc', 'bili:'], perDay: 5 });
+	const res = await call('/relay/config', 'POST', { enabled: true, allowList: ['某人', 'qq:abc', 'bili:'], perDay: 5 });
 	assert.equal(res.ok, false, '昵称 / 非数字 uid 必须被拒');
 	assert.match(res.error, /不是平台 uid/, '要说清哪里不对');
 	assert.equal(JSON.stringify(cfg.relay), before, '被拒时不能改动已存的配置');

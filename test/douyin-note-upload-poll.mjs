@@ -67,3 +67,34 @@ test('一直查不到：预算耗尽后才报 NO_UPLOAD（不是一次就放弃�
 	assert.ok(br.gots >= 3, `必须轮询多轮再放弃，实际只查了 ${br.gots} 轮`)
 	assert.ok(Date.now() - t < 30_000, '不能超过 waitFor 总预算量级')
 })
+
+// ── 「读不回来」≠「读到空」（2026-11-27）────────────────────────────────────
+// 原来判定写 .catch(() => '')：eval 超时/断连都返回空串 ⇒ !/上传中/.test('') 恒真
+// ⇒ 没读完页面就报上传成功。页面被验证码 iframe 卡死时正好走这条路。
+test('eval 一直读不回来：报 UPLOAD_UNKNOWN，不谎报上传成功', async () => {
+	const br = fakeBrowser({ uploadAfter: 0 })
+	br.eval = (expr) => {
+		if (/location.href/.test(expr)) return Promise.resolve('https://creator.douyin.com/creator-micro/content/upload?default-tab=3')
+		// 探活（ensurePageAlive 用 eval('1')）要通，否则先被 PAGE_DEAD 拦下 —— 这里要测的是上传判定
+		if (String(expr).trim() === '1') return Promise.resolve(1)
+		if (/document.body.innerText/.test(expr)) return Promise.reject(new Error('页面卡住'))
+		return Promise.resolve(true)
+	}
+	const driver = makeDriver(br)
+	const r = await driver.prepareNote({ title: 't', text: 'x', file: 'C:/tmp/a.png' })
+	assert.equal(r.ok, false, '读不回来不能报成功')
+	assert.equal(r.code, 'UPLOAD_UNKNOWN', `应为 UPLOAD_UNKNOWN，实际 ${JSON.stringify(r)}`)
+})
+
+test('页面读到「上传中」消失：正常报 ok（回归，别把好路径也判成 UNKNOWN）', async () => {
+	const br = fakeBrowser({ uploadAfter: 0 })
+	let bodyCalls = 0
+	br.eval = (expr) => {
+		if (/location.href/.test(expr)) return Promise.resolve('https://creator.douyin.com/creator-micro/content/upload?default-tab=3')
+		if (/document.body.innerText/.test(expr)) return Promise.resolve(++bodyCalls >= 2 ? '发布' : '图片上传中…')
+		return Promise.resolve(true)
+	}
+	const driver = makeDriver(br)
+	const r = await driver.prepareNote({ title: 't', text: 'x', file: 'C:/tmp/a.png' })
+	assert.equal(r.ok, true, `读到「上传中」消失就该 ok，实际 ${JSON.stringify(r)}`)
+})
